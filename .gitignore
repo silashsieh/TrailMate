@@ -10,3 +10,10 @@ __pycache__/
 xcuserdata/
 *.xcworkspace/xcuserdata/
 DerivedData/
+
+# Bundled Python (rebuilt by packaging/build.sh)
+PythonResources/
+packaging/.cache/
+
+# Release artifacts produced by packaging/release.sh
+build/

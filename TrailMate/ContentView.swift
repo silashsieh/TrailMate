@@ -75,7 +75,7 @@ private struct SidebarView: View {
                 }
             }
 
-            if !appState.savedWaypoints.isEmpty || appState.simulatedCoordinate != nil {
+            if !appState.savedWaypoints.isEmpty || appState.simState.simulatedCoordinate != nil {
                 SavedLocationsSection()
             }
 
@@ -295,7 +295,7 @@ private struct PlaybackControls: View {
 
     var body: some View {
         HStack {
-            switch appState.navigationEngine.playbackState {
+            switch appState.simState.navigationPlaybackState {
             case .idle:
                 Button {
                     appState.startPlayback()
@@ -325,7 +325,7 @@ private struct PlaybackControls: View {
             } label: {
                 Label("Stop", systemImage: "stop.fill")
             }
-            .disabled(appState.navigationEngine.playbackState == .idle)
+            .disabled(appState.simState.navigationPlaybackState == .idle)
         }
     }
 }
@@ -334,20 +334,20 @@ private struct PlaybackProgress: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let engine = appState.navigationEngine
+        let sim = appState.simState
         VStack(alignment: .leading, spacing: 4) {
-            ProgressView(value: engine.progress)
+            ProgressView(value: sim.navigationProgress)
             HStack {
-                Text(formatDistance(engine.elapsedDistance))
+                Text(formatDistance(sim.navigationElapsedDistance))
                 Spacer()
-                Text(formatDistance(engine.totalDistance))
+                Text(formatDistance(sim.navigationTotalDistance))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if appState.routeDeviationMeters > 5 {
+            if appState.simState.routeDeviationMeters > 5 {
                 HStack {
-                    Label(String(format: "Off-route: %.0f m", appState.routeDeviationMeters),
+                    Label(String(format: "Off-route: %.0f m", appState.simState.routeDeviationMeters),
                           systemImage: "arrow.triangle.branch")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -379,7 +379,7 @@ private struct JoystickSection: View {
 
         Section("Joystick") {
             HStack {
-                if let name = appState.joystickEngine.connectedControllerName {
+                if let name = appState.simState.joystickControllerName {
                     Label(name, systemImage: "gamecontroller.fill")
                         .foregroundStyle(.green)
                 } else {
@@ -391,7 +391,7 @@ private struct JoystickSection: View {
 
             TransportSpeedPicker()
 
-            if appState.joystickEngine.isActive {
+            if appState.simState.joystickIsActive {
                 Button("Recenter") {
                     appState.recenterJoystick()
                 }
@@ -408,7 +408,7 @@ private struct JoystickSection: View {
                 }
                 .disabled(!appState.connectionStatus.isConnected)
 
-                if appState.simulatedCoordinate == nil {
+                if appState.simState.simulatedCoordinate == nil {
                     Text("Tip: Long-press the map to set a starting position first")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -448,7 +448,7 @@ private struct SavedLocationsSection: View {
                 }
             }
 
-            if appState.simulatedCoordinate != nil {
+            if appState.simState.simulatedCoordinate != nil {
                 Button("Save Current Location") {
                     waypointName = ""
                     showSaveAlert = true
@@ -718,7 +718,7 @@ private struct RecordButton: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let recording = appState.recorder.isRecording
+        let recording = appState.simState.isRecording
         Button {
             appState.toggleRecording()
         } label: {
@@ -733,7 +733,7 @@ private struct RecordButton: View {
                         .frame(width: 12, height: 12)
                 }
                 Text(recording
-                     ? "Stop · \(appState.recorder.currentPointCount) pts"
+                     ? "Stop · \(appState.simState.recordingPointCount) pts"
                      : "Record")
                     .font(.callout)
                     .monospacedDigit()
@@ -839,7 +839,7 @@ private struct MapArea: View {
                         .tint(.orange)
                 }
 
-                if let coord = appState.simulatedCoordinate {
+                if let coord = appState.simState.simulatedCoordinate {
                     Annotation("", coordinate: coord) {
                         Circle()
                             .fill(.red)
@@ -870,7 +870,7 @@ private struct MapArea: View {
 
                         // First press: there's no origin yet, so a popover offering "Go directly"
                         // or "Route here" would have nothing to anchor from. Teleport instead.
-                        if appState.simulatedCoordinate == nil {
+                        if appState.simState.simulatedCoordinate == nil {
                             appState.teleport(to: coordinate)
                         } else {
                             pendingDestination = coordinate
@@ -878,7 +878,7 @@ private struct MapArea: View {
                     }
             )
             .overlay(alignment: .bottomTrailing) {
-                if appState.joystickEngine.isActive {
+                if appState.simState.joystickIsActive {
                     VirtualJoystickView { x, y in
                         appState.joystickEngine.updateStickInput(x: x, y: y)
                     }
@@ -887,7 +887,7 @@ private struct MapArea: View {
             }
             .focusable()
             .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, "w", "a", "s", "d"], phases: [.down, .up]) { press in
-                guard appState.joystickEngine.isActive else {
+                guard appState.simState.joystickIsActive else {
                     return .ignored
                 }
 
@@ -959,17 +959,17 @@ private struct MapArea: View {
         case .connecting:
             return "Connecting..."
         case .connected:
-            if appState.navigationEngine.playbackState == .playing {
-                let pct = Int(appState.navigationEngine.progress * 100)
+            if appState.simState.navigationPlaybackState == .playing {
+                let pct = Int(appState.simState.navigationProgress * 100)
                 return "Playing route — \(pct)%"
             }
-            if appState.joystickEngine.isActive {
-                if let coord = appState.simulatedCoordinate {
+            if appState.simState.joystickIsActive {
+                if let coord = appState.simState.simulatedCoordinate {
                     return String(format: "Joystick: %.4f, %.4f", coord.latitude, coord.longitude)
                 }
                 return "Joystick active"
             }
-            if let coord = appState.simulatedCoordinate {
+            if let coord = appState.simState.simulatedCoordinate {
                 return String(format: "Simulating: %.4f, %.4f", coord.latitude, coord.longitude)
             }
             switch appState.controlMode {

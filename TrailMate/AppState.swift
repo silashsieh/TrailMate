@@ -64,8 +64,16 @@ final class AppState {
     // Mode
     var controlMode: ControlMode = .joystick
 
+    // MainActor projection of simulation state for SwiftUI to observe. PR 1
+    // mirrors AppState/engine fields into this via syncBridge() so views can
+    // migrate off direct engine reads without behavior change; PR 2 will have
+    // SimulationActor push snapshots here directly.
+    let simState = SimulationStateBridge()
+
     // Teleport
-    var simulatedCoordinate: CLLocationCoordinate2D?
+    var simulatedCoordinate: CLLocationCoordinate2D? {
+        didSet { simState.simulatedCoordinate = simulatedCoordinate }
+    }
 
     // Route
     var fromSearch = LocationSearch()
@@ -103,7 +111,9 @@ final class AppState {
     private var deviationStartedAt: Date?
     private var lastDeviationCheck: Date = .distantPast
     private var lastDisplayUpdate: ContinuousClock.Instant?
-    var routeDeviationMeters: Double = 0
+    var routeDeviationMeters: Double = 0 {
+        didSet { simState.routeDeviationMeters = routeDeviationMeters }
+    }
     private static let deviationAbortMeters: Double = 200
     private static let deviationAbortSeconds: TimeInterval = 10
 
@@ -122,6 +132,7 @@ final class AppState {
     var showLogSheet = false
 
     private var daemonBridge: DaemonBridge?
+    private var eventsTask: Task<Void, Never>?
     private let tunnelSupervisor = TunnelSupervisor()
     private var didSweepStaleDaemons = false
 
@@ -203,17 +214,26 @@ final class AppState {
         addLog("Connecting to [\(rsdAddress)]:\(rsdPort)...")
 
         let bridge = DaemonBridge()
-        bridge.onUnexpectedExit = { [weak self] status, reason in
-            Task { @MainActor in
-                self?.handleDaemonExit(status: status, reason: reason)
-            }
-        }
-        bridge.onTunnelDown = { [weak self] line in
-            Task { @MainActor in
-                self?.handleTunnelDown(line: line)
-            }
-        }
         self.daemonBridge = bridge
+
+        // Consume out-of-band events (daemon death, tunnel down). The stream is
+        // Sendable so the iterator runs off MainActor; each event hops back
+        // here to mutate UI-bound state. Cancelled in disconnect/teardown.
+        eventsTask?.cancel()
+        let stream = bridge.events
+        eventsTask = Task { [weak self] in
+            for await event in stream {
+                guard let self else { return }
+                await MainActor.run {
+                    switch event {
+                    case .unexpectedExit(let status, let reason):
+                        self.handleDaemonExit(status: status, reason: reason)
+                    case .tunnelDown(let line):
+                        self.handleTunnelDown(line: line)
+                    }
+                }
+            }
+        }
 
         do {
             try await bridge.start(rsdAddress: rsdAddress, rsdPort: rsdPort)
@@ -224,6 +244,8 @@ final class AppState {
         } catch {
             connectionStatus = .error(error.localizedDescription)
             addLog("Connection failed: \(error.localizedDescription)")
+            eventsTask?.cancel()
+            eventsTask = nil
             self.daemonBridge = nil
             // The bridge failed but the tunnel may be up — tear it down so a
             // retry gets a fresh tunnel.
@@ -236,6 +258,8 @@ final class AppState {
         idleJitterTask = nil
         aggregatorTask?.cancel()
         aggregatorTask = nil
+        eventsTask?.cancel()
+        eventsTask = nil
         joystickEngine.stop()
         navigationEngine.stop()
         positionIntegrator.clear()
@@ -249,6 +273,7 @@ final class AppState {
         await tunnelSupervisor.stop()
         connectionStatus = .disconnected
         simulatedCoordinate = nil
+        syncBridge()
         addLog("Disconnected.")
     }
 
@@ -660,15 +685,15 @@ final class AppState {
 
     // MARK: - Private
 
-    // Invoked by DaemonBridge.terminationHandler when the daemon dies on its own
-    // (crash, kill, our SIGKILL escalator). Tear down Swift-side state that
-    // assumed the daemon was alive. Don't auto-restart — the user clicks Connect.
-    private func handleDaemonExit(status: Int32, reason: Process.TerminationReason) {
+    // Invoked from the events stream when the daemon dies on its own (crash,
+    // kill, our SIGKILL escalator). Tear down Swift-side state that assumed
+    // the daemon was alive. Don't auto-restart — the user clicks Connect.
+    private func handleDaemonExit(status: Int32, reason: ExitReason) {
         let detail: String
         switch (status, reason) {
-        case (0, _):                detail = "Daemon exited"
-        case (_, .uncaughtSignal):  detail = "Daemon killed (signal)"
-        default:                    detail = "Daemon crashed (exit \(status))"
+        case (0, _):        detail = "Daemon exited"
+        case (_, .signal):  detail = "Daemon killed (signal)"
+        default:            detail = "Daemon crashed (exit \(status))"
         }
         addLog(detail)
         teardownLiveState(statusMessage: detail)
@@ -688,6 +713,7 @@ final class AppState {
     private func teardownLiveState(statusMessage: String) {
         idleJitterTask?.cancel(); idleJitterTask = nil
         aggregatorTask?.cancel(); aggregatorTask = nil
+        eventsTask?.cancel(); eventsTask = nil
         joystickEngine.stop()
         navigationEngine.stop()
         positionIntegrator.clear()
@@ -698,6 +724,7 @@ final class AppState {
         Task { await tunnelSupervisor.stop() }
         connectionStatus = .error(statusMessage)
         simulatedCoordinate = nil
+        syncBridge()
     }
 
     // First connect per session sweeps any orphan tm_daemon.py left over from
@@ -776,6 +803,7 @@ final class AppState {
                       !self.joystickEngine.isActive,
                       let coord = self.simulatedCoordinate else { continue }
                 self.emitSimulated(coord)
+                self.syncBridge()
             }
         }
     }
@@ -793,6 +821,7 @@ final class AppState {
                 guard let self else { return }
                 guard self.connectionStatus.isConnected else { continue }
                 self.aggregatorTick(dt: dt)
+                self.syncBridge()
             }
         }
     }
@@ -844,6 +873,23 @@ final class AppState {
             routeDeviationMeters = 0
             deviationStartedAt = nil
         }
+    }
+
+    // PR 1 transitional: copy engine state into the MainActor projection so
+    // SwiftUI views can observe `simState` instead of the engines directly.
+    // Called every aggregator tick (50 ms), every idle-jitter tick (1 s), and
+    // explicitly after command methods that flip engine state, so visible
+    // transitions feel instant. PR 2 replaces this with SimulationActor's
+    // snapshot push.
+    private func syncBridge() {
+        simState.navigationPlaybackState = navigationEngine.playbackState
+        simState.navigationProgress = navigationEngine.progress
+        simState.navigationElapsedDistance = navigationEngine.elapsedDistance
+        simState.navigationTotalDistance = navigationEngine.totalDistance
+        simState.joystickIsActive = joystickEngine.isActive
+        simState.joystickControllerName = joystickEngine.connectedControllerName
+        simState.isRecording = recorder.isRecording
+        simState.recordingPointCount = recorder.currentPointCount
     }
 
     private var transportLabel: String {

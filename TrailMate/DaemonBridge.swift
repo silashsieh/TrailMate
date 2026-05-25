@@ -33,11 +33,22 @@ final class DaemonBridge {
     private var expectingExit = false
     private var didNotifyExit = false
 
-    // Fires when the daemon process exits unexpectedly (not via stop()).
-    var onUnexpectedExit: ((Int32, Process.TerminationReason) -> Void)?
+    // Out-of-band events (process death, tunnel down). Consumers iterate
+    // `events` in a child Task. The stream is multicast-safe because there
+    // is one consumer per backend lifetime (AppState's connect path), and
+    // it's Sendable so the iterating Task doesn't need to be on MainActor.
+    nonisolated let events: AsyncStream<SimulationBackendEvent>
+    nonisolated private let eventsContinuation: AsyncStream<SimulationBackendEvent>.Continuation
 
-    // Fires when the daemon emits an unsolicited TUNNEL_DOWN line.
-    var onTunnelDown: ((String) -> Void)?
+    init() {
+        var continuation: AsyncStream<SimulationBackendEvent>.Continuation!
+        self.events = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
+        self.eventsContinuation = continuation
+    }
+
+    deinit {
+        eventsContinuation.finish()
+    }
 
     func start(rsdAddress: String, rsdPort: String) async throws {
         let proc = Process()
@@ -178,8 +189,9 @@ final class DaemonBridge {
     private func handleProcessExit(status: Int32, reason: Process.TerminationReason) {
         guard !didNotifyExit else { return }
         didNotifyExit = true
-        if !expectingExit, let callback = onUnexpectedExit {
-            callback(status, reason)
+        if !expectingExit {
+            let exitReason: ExitReason = (reason == .uncaughtSignal) ? .signal : .normal
+            eventsContinuation.yield(.unexpectedExit(status: status, reason: exitReason))
         }
     }
 
@@ -244,7 +256,7 @@ final class DaemonBridge {
 
     private func receiveLine(_ line: String?) {
         if let line, line.hasPrefix("TUNNEL_DOWN"), !expectingExit {
-            onTunnelDown?(line)
+            eventsContinuation.yield(.tunnelDown(line: line))
             return
         }
         if let continuation = pendingContinuation {

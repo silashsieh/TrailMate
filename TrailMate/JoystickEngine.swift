@@ -4,75 +4,97 @@ import GameController
 @Observable
 @MainActor
 final class JoystickEngine {
+    enum Direction: Hashable {
+        case up, down, left, right
+    }
+
     var isActive = false
     var stickX: Float = 0
     var stickY: Float = 0
     var connectedControllerName: String?
 
-    var onPositionUpdate: ((CLLocationCoordinate2D) -> Void)?
-
-    private var currentPosition: CLLocationCoordinate2D?
-    private var loopTask: Task<Void, Never>?
     private var baseSpeedMPS: Double = 1.4
-
-    private static let metersPerDegLat = 111_320.0
+    private var pressedDirections: Set<Direction> = []
+    private var virtualStickX: Float = 0
+    private var virtualStickY: Float = 0
 
     init() {
         setupControllerObservers()
     }
 
-    func start(at coordinate: CLLocationCoordinate2D, baseSpeed: Double) {
-        currentPosition = coordinate
+    func start(baseSpeed: Double) {
         baseSpeedMPS = baseSpeed
         isActive = true
-
-        loopTask = Task { [weak self] in
-            while !Task.isCancelled {
-                self?.tick()
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-        }
     }
 
     func stop() {
-        loopTask?.cancel()
-        loopTask = nil
         isActive = false
         stickX = 0
         stickY = 0
-        currentPosition = nil
+        virtualStickX = 0
+        virtualStickY = 0
+        pressedDirections.removeAll()
+    }
+
+    func updateBaseSpeed(_ baseSpeed: Double) {
+        baseSpeedMPS = baseSpeed
     }
 
     func updateStickInput(x: Float, y: Float) {
-        stickX = x
-        stickY = y
+        virtualStickX = x
+        virtualStickY = y
     }
 
-    private func tick() {
+    func pressDirection(_ direction: Direction) {
+        pressedDirections.insert(direction)
+    }
+
+    func releaseDirection(_ direction: Direction) {
+        pressedDirections.remove(direction)
+    }
+
+    // Called by AppState's aggregator. Reads whichever input source is most
+    // engaged and returns its (vx, vy) velocity contribution in m/s. Returns
+    // (0,0) inside the dead zone, nil only when the engine is inactive — the
+    // aggregator may still want to sum a zero contribution alongside the
+    // route engine's tangent vector.
+    func tick() -> (vx: Double, vy: Double)? {
+        guard isActive else { return nil }
+
+        // Priority: hardware controller wins outright. Otherwise pick whichever
+        // of virtual stick or keyboard has greater magnitude.
         if let controller = GCController.controllers().first,
            let gamepad = controller.extendedGamepad {
             stickX = gamepad.leftThumbstick.xAxis.value
             stickY = gamepad.leftThumbstick.yAxis.value
+        } else {
+            var kx: Float = 0, ky: Float = 0
+            if pressedDirections.contains(.up) { ky += 1 }
+            if pressedDirections.contains(.down) { ky -= 1 }
+            if pressedDirections.contains(.left) { kx -= 1 }
+            if pressedDirections.contains(.right) { kx += 1 }
+
+            let virtualMag = virtualStickX * virtualStickX + virtualStickY * virtualStickY
+            let keyMag = kx * kx + ky * ky
+
+            if virtualMag >= keyMag {
+                stickX = virtualStickX
+                stickY = virtualStickY
+            } else {
+                stickX = kx
+                stickY = ky
+            }
         }
 
-        let magnitude = Double(sqrt(stickX * stickX + stickY * stickY))
-        guard magnitude > 0.1, var pos = currentPosition else { return }
+        let magnitude = Double((stickX * stickX + stickY * stickY).squareRoot())
+        guard magnitude > 0.1 else { return (0, 0) }
 
         let cappedMag = min(magnitude, 1.0)
         let scale = cappedMag / magnitude
-        let dt = 0.05
 
-        let dx = Double(stickX) * scale * baseSpeedMPS * dt
-        let dy = Double(stickY) * scale * baseSpeedMPS * dt
-
-        let latRad = pos.latitude * .pi / 180
-        let metersPerDegLon = Self.metersPerDegLat * cos(latRad)
-
-        pos.latitude += dy / Self.metersPerDegLat
-        pos.longitude += dx / metersPerDegLon
-
-        currentPosition = pos
-        onPositionUpdate?(pos)
+        let vx = Double(stickX) * scale * baseSpeedMPS
+        let vy = Double(stickY) * scale * baseSpeedMPS
+        return (vx, vy)
     }
 
     private func setupControllerObservers() {

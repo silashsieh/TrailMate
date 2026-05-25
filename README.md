@@ -42,8 +42,6 @@ The Mac acts as a controller; the iPhone reports the simulated coordinates to ev
 
 ## Target Users & Use Cases
 
-Primary user: **myself** (Harry), a software engineer doing iOS-adjacent work and interview prep. Secondary: other iOS developers and QA engineers who find this on GitHub.
-
 Representative use cases:
 
 - *"I need to test that my app's geofencing fires correctly when the user enters Da'an district."*
@@ -97,20 +95,6 @@ TrailMate/
 
 See [docs/README.md](docs/README.md) for the full documentation index — architecture, features, tech stack, decisions, project plan, and development notes.
 
------
-
-## Implementation Status
-
-All phases 0–4 completed on 2026-05-13. See [docs/project-plan/phases.md](docs/project-plan/phases.md) for details.
-
-| Phase | Goal | Status |
-|-------|------|--------|
-| 0 — Foundation | Verify pymobiledevice3 on real device | Done |
-| 1 — Teleport MVP | Click map → iPhone teleports | Done |
-| 2 — Route Mode | Search → calculate → play back route | Done |
-| 3 — Joystick Mode | Controller / virtual stick / WASD → real-time movement | Done |
-| 4 — Productionize | Heartbeat, GPX import/export, saved waypoints, log sheet | Done |
-| 5 — Polish & Release | Screenshots, docs, CI, localization | Optional |
 
 -----
 

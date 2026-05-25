@@ -37,7 +37,7 @@ final class LocationSearch {
         let request = MKLocalSearch.Request(completion: completion)
         let search = MKLocalSearch(request: request)
         guard let response = try? await search.start() else { return nil }
-        return response.mapItems.first?.placemark.coordinate
+        return response.mapItems.first?.location.coordinate
     }
 }
 

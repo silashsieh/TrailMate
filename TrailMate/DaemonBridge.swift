@@ -88,6 +88,17 @@ final class DaemonBridge {
         return response
     }
 
+    var isRunning: Bool {
+        process?.isRunning == true
+    }
+
+    // Fire-and-forget for 10-20Hz playback. The single pendingContinuation can't
+    // safely interleave responses, so awaiting SET per tick would serialize the loop.
+    func setLocationQuiet(latitude: Double, longitude: Double) {
+        guard let pipe = stdinPipe, process?.isRunning == true else { return }
+        pipe.fileHandleForWriting.write(Data("SETQ \(latitude) \(longitude)\n".utf8))
+    }
+
     func stop() {
         if process?.isRunning == true {
             stdinPipe?.fileHandleForWriting.write(Data("QUIT\n".utf8))

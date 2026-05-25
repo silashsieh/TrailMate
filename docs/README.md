@@ -10,6 +10,7 @@
 ## Project Plan
 
 - [Implementation Phases](project-plan/phases.md) — phases 0–5 with steps, exit criteria, and results
+- [V2 Feature Plan](project-plan/v2-features.md) — phases 6–11 for owner-driven feature set (recording, composite control, discovery, etc.)
 - [Risks & Mitigations](project-plan/risks.md) — risk register
 - [Testing Strategy](project-plan/testing.md) — unit, integration, and manual smoke tests
 

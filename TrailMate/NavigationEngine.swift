@@ -10,19 +10,17 @@ final class NavigationEngine {
     }
 
     var playbackState: PlaybackState = .idle
-    var currentCoordinate: CLLocationCoordinate2D?
     var progress: Double = 0
     var elapsedDistance: Double = 0
     var totalDistance: Double = 0
 
-    var onPositionUpdate: ((CLLocationCoordinate2D) -> Void)?
-
-    private var coordinates: [CLLocationCoordinate2D] = []
+    private(set) var coordinates: [CLLocationCoordinate2D] = []
     private var cumulativeDistances: [Double] = []
     private var currentDistanceAlongRoute: Double = 0
     private var baseSpeedMPS: Double = 1.4
     private var speedMultiplier: Double = 1.0
-    private var playbackTask: Task<Void, Never>?
+
+    private static let metersPerDegLat = 111_320.0
 
     func loadRoute(coordinates: [CLLocationCoordinate2D], baseSpeed: Double) {
         stop()
@@ -39,73 +37,111 @@ final class NavigationEngine {
         totalDistance = cumulative.last ?? 0
         currentDistanceAlongRoute = 0
         progress = 0
-        currentCoordinate = coordinates.first
+        elapsedDistance = 0
     }
 
     func play(multiplier: Double) {
         speedMultiplier = multiplier
         playbackState = .playing
-
-        playbackTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self, self.playbackState == .playing else { return }
-                self.tick()
-                if self.playbackState != .playing { return }
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-        }
     }
 
     func pause() {
-        playbackState = .paused
-        playbackTask?.cancel()
-        playbackTask = nil
+        if playbackState == .playing {
+            playbackState = .paused
+        }
     }
 
     func resume(multiplier: Double) {
         guard playbackState == .paused else { return }
-        play(multiplier: multiplier)
+        speedMultiplier = multiplier
+        playbackState = .playing
     }
 
     func stop() {
-        playbackTask?.cancel()
-        playbackTask = nil
         playbackState = .idle
         currentDistanceAlongRoute = 0
         progress = 0
         elapsedDistance = 0
-        currentCoordinate = coordinates.first
     }
 
     func updateSpeed(_ multiplier: Double) {
         speedMultiplier = multiplier
     }
 
-    private func tick() {
-        let dt = 0.1
-        currentDistanceAlongRoute += baseSpeedMPS * speedMultiplier * dt
+    func updateBaseSpeed(_ baseSpeed: Double) {
+        baseSpeedMPS = baseSpeed
+    }
 
-        if currentDistanceAlongRoute >= totalDistance {
-            currentDistanceAlongRoute = totalDistance
-            currentCoordinate = coordinates.last
-            progress = 1.0
-            elapsedDistance = totalDistance
-            playbackTask?.cancel()
-            playbackTask = nil
+    // Called by AppState's aggregator. Advances distance-along-route by
+    // base * mult * dt and returns the local-flat (vx, vy) velocity that
+    // the integrator should apply this tick. Returns nil when not playing.
+    func tick(dt: TimeInterval) -> (vx: Double, vy: Double)? {
+        guard playbackState == .playing else { return nil }
+        guard totalDistance > 0, coordinates.count >= 2 else {
             playbackState = .idle
-            if let coord = currentCoordinate {
-                onPositionUpdate?(coord)
+            return nil
+        }
+
+        let advance = baseSpeedMPS * speedMultiplier * dt
+        let newDistance = min(totalDistance, currentDistanceAlongRoute + advance)
+        let segIdx = segmentIndex(for: newDistance)
+
+        let from = coordinates[segIdx]
+        let to = coordinates[segIdx + 1]
+
+        // Tangent in m/s, scaled by current speed. Direction comes from the
+        // segment the engine is currently traversing, which is independent of
+        // where the integrator's actual position happens to be (joystick may
+        // have pushed it off-route).
+        let latRad = from.latitude * .pi / 180
+        let metersPerDegLon = Self.metersPerDegLat * cos(latRad)
+        let dxMeters = (to.longitude - from.longitude) * metersPerDegLon
+        let dyMeters = (to.latitude - from.latitude) * Self.metersPerDegLat
+        let mag = (dxMeters * dxMeters + dyMeters * dyMeters).squareRoot()
+
+        let speed = baseSpeedMPS * speedMultiplier
+        let vx = mag > 0 ? dxMeters / mag * speed : 0
+        let vy = mag > 0 ? dyMeters / mag * speed : 0
+
+        currentDistanceAlongRoute = newDistance
+        elapsedDistance = newDistance
+        progress = newDistance / totalDistance
+
+        if newDistance >= totalDistance {
+            playbackState = .idle
+        }
+
+        return (vx, vy)
+    }
+
+    // Where the route says the device should be right now. Used for "Rejoin".
+    var expectedPosition: CLLocationCoordinate2D? {
+        guard coordinates.count >= 2 else { return coordinates.first }
+        return interpolate(at: currentDistanceAlongRoute)
+    }
+
+    // Min distance from `coord` to the loaded polyline, in meters. Used for
+    // off-route indicator and the abort-on-sustained-deviation rule.
+    func distanceFromRoute(_ coord: CLLocationCoordinate2D) -> Double {
+        guard coordinates.count >= 2 else { return 0 }
+        let probe = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+
+        var minDist = Double.greatestFiniteMagnitude
+        for i in 0..<(coordinates.count - 1) {
+            let dist = distanceFromSegment(probe: probe, a: coordinates[i], b: coordinates[i + 1])
+            minDist = min(minDist, dist)
+        }
+        return minDist
+    }
+
+    private func segmentIndex(for distance: Double) -> Int {
+        guard cumulativeDistances.count >= 2 else { return 0 }
+        for i in 1..<cumulativeDistances.count {
+            if cumulativeDistances[i] >= distance {
+                return i - 1
             }
-            return
         }
-
-        currentCoordinate = interpolate(at: currentDistanceAlongRoute)
-        progress = totalDistance > 0 ? currentDistanceAlongRoute / totalDistance : 0
-        elapsedDistance = currentDistanceAlongRoute
-
-        if let coord = currentCoordinate {
-            onPositionUpdate?(coord)
-        }
+        return cumulativeDistances.count - 2
     }
 
     private func interpolate(at distance: Double) -> CLLocationCoordinate2D {
@@ -113,14 +149,7 @@ final class NavigationEngine {
             return coordinates.first ?? CLLocationCoordinate2D()
         }
 
-        var idx = 0
-        for i in 1..<cumulativeDistances.count {
-            if cumulativeDistances[i] >= distance {
-                idx = i - 1
-                break
-            }
-        }
-
+        let idx = segmentIndex(for: distance)
         let segStart = cumulativeDistances[idx]
         let segEnd = cumulativeDistances[idx + 1]
         let segLen = segEnd - segStart
@@ -133,5 +162,25 @@ final class NavigationEngine {
             latitude: from.latitude + (to.latitude - from.latitude) * fraction,
             longitude: from.longitude + (to.longitude - from.longitude) * fraction
         )
+    }
+
+    // Perpendicular distance from `probe` to segment a-b. Uses planar law-of-
+    // cosines on geodesic side lengths — accurate to well under 1% for the
+    // short segments MKDirections produces (<100 m typically).
+    private func distanceFromSegment(probe: CLLocation, a: CLLocationCoordinate2D, b: CLLocationCoordinate2D) -> Double {
+        let aLoc = CLLocation(latitude: a.latitude, longitude: a.longitude)
+        let bLoc = CLLocation(latitude: b.latitude, longitude: b.longitude)
+        let ab = aLoc.distance(from: bLoc)
+        let ap = aLoc.distance(from: probe)
+        let bp = bLoc.distance(from: probe)
+
+        if ab == 0 { return ap }
+
+        let t = (ap * ap + ab * ab - bp * bp) / (2 * ab)
+        if t <= 0 { return ap }
+        if t >= ab { return bp }
+
+        let perpSq = ap * ap - t * t
+        return perpSq > 0 ? perpSq.squareRoot() : 0
     }
 }

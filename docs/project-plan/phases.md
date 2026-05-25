@@ -169,3 +169,9 @@ Only if you want this as a portfolio piece:
 - Localization scaffold (en + zh-Hant; you're a native zh-Hant speaker, this is low-effort).
 - GitHub Actions: lint, build, unit tests.
 - Tagged v1.0 release.
+
+-----
+
+## Phases 6–11 — V2 Feature Plan
+
+V2 work driven by the owner's day-to-day workflow requirements (recording, composite control, on-map destination picking, device discovery, etc.) lives in its own document: [v2-features.md](v2-features.md). Same weekend-sized phase structure, sequencing notes, and exit criteria.

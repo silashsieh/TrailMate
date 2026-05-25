@@ -102,6 +102,7 @@ final class AppState {
     private var aggregatorTask: Task<Void, Never>?
     private var deviationStartedAt: Date?
     private var lastDeviationCheck: Date = .distantPast
+    private var lastDisplayUpdate: ContinuousClock.Instant?
     var routeDeviationMeters: Double = 0
     private static let deviationAbortMeters: Double = 200
     private static let deviationAbortSeconds: TimeInterval = 10
@@ -737,7 +738,23 @@ final class AppState {
     // marker shows the intent (`clean`); the device receives a noise-perturbed
     // sample so the reported fix has the same statistical shape as real GPS.
     private func emitSimulated(_ clean: CLLocationCoordinate2D) {
-        simulatedCoordinate = clean
+        // During playback the aggregator drives this 20×/sec. Mutating the
+        // observable `simulatedCoordinate` that often invalidates MapArea.body
+        // and forces MapKit to rebuild the entire route MapPolyline each frame
+        // — the dominant CPU cost on long routes. Throttle the UI-facing write
+        // to 2 Hz; the daemon still receives every tick so device-side motion
+        // stays smooth.
+        let now = ContinuousClock.now
+        let shouldUpdateDisplay: Bool
+        if navigationEngine.playbackState == .playing {
+            shouldUpdateDisplay = lastDisplayUpdate.map { now - $0 >= .milliseconds(500) } ?? true
+        } else {
+            shouldUpdateDisplay = true
+        }
+        if shouldUpdateDisplay {
+            simulatedCoordinate = clean
+            lastDisplayUpdate = now
+        }
         let noisy = noise.apply(to: clean)
         daemonBridge?.setLocationQuiet(latitude: noisy.latitude, longitude: noisy.longitude)
         // Record the clean (intent) coord, not the noisy one — noise is a

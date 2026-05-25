@@ -1,0 +1,14 @@
+# Risks & Mitigations
+
+|Risk                                                  |Likelihood|Impact                               |Mitigation                                                                                                                                |
+|------------------------------------------------------|----------|-------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
+|iOS 26.4 DDI/RSD upload instability                   |High      |Blocks Phase 0-1                     |Don't auto-mount in the app; surface a "please mount via Xcode first" UX with copy-pastable instructions. Toggle Dev Mode off/on if stuck.|
+|pymobiledevice3 API breaking change in a minor version|Medium    |Breaks daemon                        |Pin to exact version (e.g. `9.12.0`). Bump deliberately with integration tests.                                                           |
+|Apple changes RSD protocol in iOS 26.5+               |Medium    |Breaks everything                    |Inevitable. Monitor pymobiledevice3 releases. We're not unique — every spoofer breaks here.                                               |
+|sudo prompt UX is jarring                             |High in v1|Annoying                             |Acceptable in v1 (osascript prompt); fixed in Phase 4 (SMAppService one-time install).                                                    |
+|Tunnel drops mid-session                              |Medium    |Bad UX                               |Supervisor loop with backoff; clear UI indicator; route playback pauses, joystick stops.                                                  |
+|Wi-Fi tunnel drops more often than USB                |Medium    |Session ends → iPhone reverts to real GPS|Heartbeat-driven session-loss detection (F7); UI reflects drop within ~1s; auto-reconnect attempted once before surfacing error.          |
+|`isSimulatedBySoftware == true` visible to apps       |Certain   |Some apps detect spoof               |Documented limitation. Not a goal to defeat.                                                                                              |
+|Game controller incompatibility                       |Low       |Joystick mode unusable for some users|On-screen virtual stick is always available as fallback.                                                                                  |
+|Bundled Python runtime breaks on macOS upgrade        |Low       |App won't launch after OS update     |python-build-standalone is well-maintained; test on each macOS major.                                                                     |
+|Vendor pymobiledevice3 license obligations (GPL?)     |Low       |Legal                                |Verify pymobiledevice3 license before bundling; pick TrailMate license to match (likely GPL-3 if we bundle, MIT if we shell out).         |

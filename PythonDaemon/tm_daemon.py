@@ -10,7 +10,8 @@ Usage:
     python3 tm_daemon.py <rsd_address> <rsd_port>
 
 Stdin commands:
-    SET <lat> <lon>   Set simulated location
+    SET <lat> <lon>   Set simulated location (responds OK)
+    SETQ <lat> <lon>  Set simulated location (no response, for high-frequency playback)
     CLEAR             Clear simulated location (session stays alive)
     HEARTBEAT         Liveness check
     QUIT              Graceful shutdown
@@ -53,6 +54,9 @@ async def command_loop(location: LocationSimulation, reader: asyncio.StreamReade
                 lat, lon = float(parts[1]), float(parts[2])
                 await location.set(lat, lon)
                 emit("OK")
+            elif cmd == "SETQ" and len(parts) == 3:
+                lat, lon = float(parts[1]), float(parts[2])
+                await location.set(lat, lon)
             elif cmd == "CLEAR":
                 await location.clear()
                 emit("OK")

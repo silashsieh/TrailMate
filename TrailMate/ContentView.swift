@@ -880,7 +880,7 @@ private struct MapArea: View {
             .overlay(alignment: .bottomTrailing) {
                 if appState.simState.joystickIsActive {
                     VirtualJoystickView { x, y in
-                        appState.joystickEngine.updateStickInput(x: x, y: y)
+                        appState.updateStickInput(x: x, y: y)
                     }
                     .padding(24)
                 }
@@ -906,9 +906,9 @@ private struct MapArea: View {
                 }
 
                 if press.phase == .down {
-                    appState.joystickEngine.pressDirection(direction)
+                    appState.pressDirection(direction)
                 } else {
-                    appState.joystickEngine.releaseDirection(direction)
+                    appState.releaseDirection(direction)
                 }
                 return .handled
             }

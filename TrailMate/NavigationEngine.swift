@@ -1,8 +1,9 @@
 import CoreLocation
 
-@Observable
-@MainActor
-final class NavigationEngine {
+// Owned exclusively by SimulationActor. Marked nonisolated because the
+// project sets default actor isolation to MainActor; without this, the
+// actor couldn't synchronously call into the engine.
+nonisolated final class NavigationEngine {
     enum PlaybackState: Equatable {
         case idle
         case playing

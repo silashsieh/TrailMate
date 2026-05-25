@@ -1,9 +1,12 @@
 import CoreLocation
 import GameController
 
-@Observable
-@MainActor
-final class JoystickEngine {
+// Owned exclusively by SimulationActor. Marked nonisolated because the
+// project sets default actor isolation to MainActor; without this, the
+// actor couldn't synchronously call into the engine. GCController
+// observation moved to SimulationActor so notification callbacks can
+// mutate engine state under actor isolation.
+nonisolated final class JoystickEngine {
     enum Direction: Hashable {
         case up, down, left, right
     }
@@ -17,10 +20,6 @@ final class JoystickEngine {
     private var pressedDirections: Set<Direction> = []
     private var virtualStickX: Float = 0
     private var virtualStickY: Float = 0
-
-    init() {
-        setupControllerObservers()
-    }
 
     func start(baseSpeed: Double) {
         baseSpeedMPS = baseSpeed
@@ -97,32 +96,4 @@ final class JoystickEngine {
         return (vx, vy)
     }
 
-    private func setupControllerObservers() {
-        NotificationCenter.default.addObserver(
-            forName: .GCControllerDidConnect,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let controller = notification.object as? GCController else { return }
-            // Extract the Sendable String before crossing into MainActor —
-            // GCController itself isn't Sendable, so capturing it into the
-            // isolated closure trips Swift 6's race checker.
-            let name = controller.vendorName ?? "Controller"
-            MainActor.assumeIsolated {
-                self?.connectedControllerName = name
-            }
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: .GCControllerDidDisconnect,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.connectedControllerName = GCController.controllers().first?.vendorName
-            }
-        }
-
-        connectedControllerName = GCController.controllers().first?.vendorName
-    }
 }

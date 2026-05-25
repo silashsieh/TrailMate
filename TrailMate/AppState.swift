@@ -64,16 +64,10 @@ final class AppState {
     // Mode
     var controlMode: ControlMode = .joystick
 
-    // MainActor projection of simulation state for SwiftUI to observe. PR 1
-    // mirrors AppState/engine fields into this via syncBridge() so views can
-    // migrate off direct engine reads without behavior change; PR 2 will have
-    // SimulationActor push snapshots here directly.
+    // MainActor projection of simulation state for SwiftUI to observe.
+    // SimulationActor pushes snapshots into this; views never touch the
+    // engines directly.
     let simState = SimulationStateBridge()
-
-    // Teleport
-    var simulatedCoordinate: CLLocationCoordinate2D? {
-        didSet { simState.simulatedCoordinate = simulatedCoordinate }
-    }
 
     // Route
     var fromSearch = LocationSearch()
@@ -81,19 +75,14 @@ final class AppState {
     var fromCoordinate: CLLocationCoordinate2D?
     var toCoordinate: CLLocationCoordinate2D?
     var transportMode: TransportMode = .walk {
-        didSet { syncEngineSpeeds() }
+        didSet { Task { await syncEngineSpeeds() } }
     }
     var customSpeedKmh: Double = 15.0 {
-        didSet { syncEngineSpeeds() }
+        didSet { Task { await syncEngineSpeeds() } }
     }
     var speedMultiplier: Double = 1.0
     var routeCoordinates: [CLLocationCoordinate2D] = []
     var isCalculatingRoute = false
-    let navigationEngine = NavigationEngine()
-
-    // Joystick
-    let joystickEngine = JoystickEngine()
-    private var joystickAnchor: CLLocationCoordinate2D?
 
     // Discovery
     let discovery = DeviceDiscoveryService()
@@ -105,27 +94,22 @@ final class AppState {
     // Saved Routes
     let savedRoutes = SavedRoutesStore()
 
-    // Composite control
-    let positionIntegrator = PositionIntegrator()
-    private var aggregatorTask: Task<Void, Never>?
-    private var deviationStartedAt: Date?
-    private var lastDeviationCheck: Date = .distantPast
-    private var lastDisplayUpdate: ContinuousClock.Instant?
-    var routeDeviationMeters: Double = 0 {
-        didSet { simState.routeDeviationMeters = routeDeviationMeters }
-    }
-    private static let deviationAbortMeters: Double = 200
-    private static let deviationAbortSeconds: TimeInterval = 10
+    // Off-MainActor simulation core: aggregator loop, engines, integrator,
+    // noise, idle jitter, deviation check. Initialized in init() since it
+    // needs `simState` and `recorder` already constructed.
+    let sim: SimulationActor
+    private var simEventsTask: Task<Void, Never>?
 
     // Saved Locations
     var savedWaypoints: [SavedWaypoint] = []
 
     // Realism
     var noiseSigmaMeters: Double = 5.0 {
-        didSet { noise.sigmaMeters = noiseSigmaMeters }
+        didSet {
+            let sigma = noiseSigmaMeters
+            Task { await sim.updateNoiseSigma(sigma) }
+        }
     }
-    private let noise = LocationNoise()
-    private var idleJitterTask: Task<Void, Never>?
 
     // Log
     var logMessages: [String] = []
@@ -149,13 +133,19 @@ final class AppState {
     }
 
     init() {
+        // Stored property `sim` must be initialized before any reference to
+        // self. `simState` and `recorder` are already initialized by their
+        // default values at this point.
+        self.sim = SimulationActor(bridge: simState, recorder: recorder)
+
         let storedCustom = UserDefaults.standard.double(forKey: "customSpeedKmh")
         self.customSpeedKmh = storedCustom > 0 ? storedCustom : 15.0
 
         if UserDefaults.standard.object(forKey: "noiseSigmaMeters") != nil {
             self.noiseSigmaMeters = UserDefaults.standard.double(forKey: "noiseSigmaMeters")
         }
-        noise.sigmaMeters = noiseSigmaMeters
+        let initialSigma = noiseSigmaMeters
+        Task { await sim.updateNoiseSigma(initialSigma) }
 
         // System sleep tears down the DVT session unconditionally (Apple's
         // design — see v2-features.md). Drop our connection cleanly so the
@@ -173,6 +163,20 @@ final class AppState {
         loadWaypoints()
         recorder.loadIndex()
         savedRoutes.load()
+
+        // Consume simulation events (route abort) for log writes.
+        let stream = sim.events
+        simEventsTask = Task { [weak self] in
+            for await event in stream {
+                guard let self else { return }
+                await MainActor.run {
+                    switch event {
+                    case .routeAborted(let meters, let seconds):
+                        self.addLog("Route aborted — drifted >\(Int(meters)) m for \(Int(seconds)) s")
+                    }
+                }
+            }
+        }
     }
 
     func persistTuning() {
@@ -180,10 +184,8 @@ final class AppState {
         UserDefaults.standard.set(noiseSigmaMeters, forKey: "noiseSigmaMeters")
     }
 
-    private func syncEngineSpeeds() {
-        let base = effectiveBaseSpeedMPS
-        navigationEngine.updateBaseSpeed(base)
-        joystickEngine.updateBaseSpeed(base)
+    private func syncEngineSpeeds() async {
+        await sim.updateBaseSpeed(effectiveBaseSpeedMPS)
     }
 
     // MARK: - Connection
@@ -239,8 +241,8 @@ final class AppState {
             try await bridge.start(rsdAddress: rsdAddress, rsdPort: rsdPort)
             connectionStatus = .connected
             addLog("Connected — ready for commands.")
-            startIdleJitter()
-            startAggregator()
+            await sim.updateBaseSpeed(effectiveBaseSpeedMPS)
+            await sim.attach(backend: bridge)
         } catch {
             connectionStatus = .error(error.localizedDescription)
             addLog("Connection failed: \(error.localizedDescription)")
@@ -254,15 +256,9 @@ final class AppState {
     }
 
     func disconnect() async {
-        idleJitterTask?.cancel()
-        idleJitterTask = nil
-        aggregatorTask?.cancel()
-        aggregatorTask = nil
         eventsTask?.cancel()
         eventsTask = nil
-        joystickEngine.stop()
-        navigationEngine.stop()
-        positionIntegrator.clear()
+        await sim.detach()
         if let bridge = daemonBridge {
             await bridge.stop()
         }
@@ -272,8 +268,6 @@ final class AppState {
         // tunnel to still be alive.
         await tunnelSupervisor.stop()
         connectionStatus = .disconnected
-        simulatedCoordinate = nil
-        syncBridge()
         addLog("Disconnected.")
     }
 
@@ -281,29 +275,17 @@ final class AppState {
 
     func teleport(to coordinate: CLLocationCoordinate2D) {
         guard connectionStatus.isConnected else { return }
-
-        // A teleport is an explicit jump — preempt route playback so the marker
-        // doesn't snap back on the next tick.
-        if navigationEngine.playbackState != .idle {
-            navigationEngine.stop()
-        }
-
-        positionIntegrator.reset(to: coordinate)
-        emitSimulated(coordinate)
-        addLog(String(format: "Teleported to %.6f, %.6f", coordinate.latitude, coordinate.longitude))
-
-        if joystickEngine.isActive {
-            joystickAnchor = coordinate
+        Task {
+            await sim.teleport(to: coordinate)
+            addLog(String(format: "Teleported to %.6f, %.6f", coordinate.latitude, coordinate.longitude))
         }
     }
 
     func clearLocation() async {
         guard connectionStatus.isConnected, let bridge = daemonBridge else { return }
-        navigationEngine.stop()
-
         do {
             try await bridge.sendCommand("CLEAR")
-            simulatedCoordinate = nil
+            await sim.clearForLocationCleared()
             addLog("Location cleared.")
         } catch {
             addLog("Clear failed: \(error.localizedDescription)")
@@ -347,11 +329,7 @@ final class AppState {
 
             let coords = extractCoordinates(from: route.polyline)
             routeCoordinates = coords
-            navigationEngine.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS)
-            if let first = coords.first {
-                positionIntegrator.reset(to: first)
-                simulatedCoordinate = first
-            }
+            await sim.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
 
             let distKm = route.distance / 1000
             let timeMin = route.expectedTravelTime / 60
@@ -367,27 +345,29 @@ final class AppState {
     // NavigationEngine's two-point case (it already handles linear interpolation).
     func travelDirectly(to dest: CLLocationCoordinate2D) {
         guard connectionStatus.isConnected else { return }
-        guard let from = simulatedCoordinate else {
+        guard let from = simState.simulatedCoordinate else {
             addLog("Set an origin first — long-press the map to teleport.")
             return
         }
 
         let coords = [from, dest]
         routeCoordinates = coords
-        navigationEngine.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS)
-        positionIntegrator.reset(to: from)
         controlMode = .route
-
+        let mult = speedMultiplier
+        let speed = effectiveBaseSpeedMPS
         let meters = CLLocation(latitude: from.latitude, longitude: from.longitude)
             .distance(from: CLLocation(latitude: dest.latitude, longitude: dest.longitude))
         addLog(String(format: "Direct travel: %.0f m at %@", meters, transportLabel))
-        navigationEngine.play(multiplier: speedMultiplier)
+        Task {
+            await sim.loadRoute(coordinates: coords, baseSpeed: speed, resetStart: true)
+            await sim.play(multiplier: mult)
+        }
     }
 
     // Apple Maps routing from current simulated position to `dest`. Auto-plays.
     func routeFromCurrent(to dest: CLLocationCoordinate2D) async {
         guard connectionStatus.isConnected else { return }
-        guard let from = simulatedCoordinate else {
+        guard let from = simState.simulatedCoordinate else {
             addLog("Set an origin first — long-press the map to teleport.")
             return
         }
@@ -411,14 +391,13 @@ final class AppState {
 
             let coords = extractCoordinates(from: route.polyline)
             routeCoordinates = coords
-            navigationEngine.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS)
-            positionIntegrator.reset(to: coords.first ?? from)
             controlMode = .route
+            await sim.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
 
             let distKm = route.distance / 1000
             let timeMin = route.expectedTravelTime / 60
             addLog(String(format: "Route: %.1f km, ~%.0f min (%@)", distKm, timeMin, transportLabel))
-            navigationEngine.play(multiplier: speedMultiplier)
+            await sim.play(multiplier: speedMultiplier)
         } catch {
             addLog("Route calculation failed: \(error.localizedDescription)")
         }
@@ -428,62 +407,78 @@ final class AppState {
 
     func startPlayback() {
         guard !routeCoordinates.isEmpty, connectionStatus.isConnected else { return }
-        if positionIntegrator.position == nil, let first = routeCoordinates.first {
-            positionIntegrator.reset(to: first)
-        }
-        addLog(String(format: "Playing route at %.0f×...", speedMultiplier))
-        navigationEngine.play(multiplier: speedMultiplier)
+        let mult = speedMultiplier
+        addLog(String(format: "Playing route at %.0f×...", mult))
+        Task { await sim.play(multiplier: mult) }
     }
 
     func pausePlayback() {
-        navigationEngine.pause()
-        addLog("Playback paused.")
+        Task {
+            await sim.pause()
+            addLog("Playback paused.")
+        }
     }
 
     func resumePlayback() {
-        navigationEngine.resume(multiplier: speedMultiplier)
-        addLog("Playback resumed.")
+        let mult = speedMultiplier
+        Task {
+            await sim.resume(multiplier: mult)
+            addLog("Playback resumed.")
+        }
     }
 
     func stopPlayback() {
-        navigationEngine.stop()
-        simulatedCoordinate = nil
-        addLog("Playback stopped.")
+        Task {
+            await sim.stopPlayback()
+            addLog("Playback stopped.")
+        }
     }
 
     // MARK: - Joystick
 
     func startJoystick() {
-        let startCoord = simulatedCoordinate ?? CLLocationCoordinate2D(latitude: 25.033, longitude: 121.565)
-        joystickAnchor = startCoord
-        if positionIntegrator.position == nil {
-            positionIntegrator.reset(to: startCoord)
+        let fallback = CLLocationCoordinate2D(latitude: 25.033, longitude: 121.565)
+        let speed = effectiveBaseSpeedMPS
+        let label = transportLabel
+        Task {
+            await sim.startJoystick(baseSpeed: speed, fallbackCoord: fallback)
+            addLog("Joystick started (\(label) speed)")
         }
-        joystickEngine.start(baseSpeed: effectiveBaseSpeedMPS)
-        addLog("Joystick started (\(transportLabel) speed)")
     }
 
     func recenterJoystick() {
-        guard let anchor = joystickAnchor else { return }
-        positionIntegrator.reset(to: anchor)
-        emitSimulated(anchor)
-        addLog("Recentered to starting position")
+        Task {
+            await sim.recenterJoystick()
+            addLog("Recentered to starting position")
+        }
     }
 
     func stopJoystick() async {
-        joystickEngine.stop()
-        if navigationEngine.playbackState == .idle {
+        await sim.stopJoystick()
+        if await sim.isPlaybackIdle {
             await clearLocation()
         }
     }
 
     func rejoinRoute() {
-        guard let expected = navigationEngine.expectedPosition else { return }
-        positionIntegrator.reset(to: expected)
-        emitSimulated(expected)
-        deviationStartedAt = nil
-        routeDeviationMeters = 0
-        addLog("Rejoined route")
+        Task {
+            await sim.rejoinRoute()
+            addLog("Rejoined route")
+        }
+    }
+
+    // Forwarded from ContentView's joystick input handling — previously direct
+    // engine calls; now route through the actor that owns the engine.
+    func updateStickInput(x: Float, y: Float) {
+        Task { await sim.updateStickInput(x: x, y: y) }
+    }
+
+    func pressDirection(_ direction: JoystickEngine.Direction) {
+        Task { await sim.pressDirection(direction) }
+    }
+
+    func releaseDirection(_ direction: JoystickEngine.Direction) {
+        Task { await sim.releaseDirection(direction) }
     }
 
     // MARK: - GPX
@@ -504,8 +499,9 @@ final class AppState {
             }
 
             routeCoordinates = coords
-            navigationEngine.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS)
             controlMode = .route
+            let speed = effectiveBaseSpeedMPS
+            Task { await sim.loadRoute(coordinates: coords, baseSpeed: speed, resetStart: false) }
             addLog("Imported \(coords.count) points from \(url.lastPathComponent)")
         } catch {
             addLog("Failed to read GPX: \(error.localizedDescription)")
@@ -536,7 +532,7 @@ final class AppState {
     // MARK: - Saved Locations
 
     func saveCurrentLocation(name: String) {
-        guard let coord = simulatedCoordinate else { return }
+        guard let coord = simState.simulatedCoordinate else { return }
         let waypoint = SavedWaypoint(name: name, latitude: coord.latitude, longitude: coord.longitude)
         savedWaypoints.append(waypoint)
         persistWaypoints()
@@ -555,19 +551,23 @@ final class AppState {
     // MARK: - Recording
 
     func toggleRecording() {
-        if recorder.isRecording {
-            do {
-                if let url = try recorder.stop() {
-                    addLog("Recording saved: \(url.lastPathComponent)")
-                } else {
-                    addLog("Recording stopped (no points captured).")
+        if simState.isRecording {
+            Task {
+                do {
+                    if let url = try await sim.stopRecording() {
+                        addLog("Recording saved: \(url.lastPathComponent)")
+                    } else {
+                        addLog("Recording stopped (no points captured).")
+                    }
+                } catch {
+                    addLog("Failed to save recording: \(error.localizedDescription)")
                 }
-            } catch {
-                addLog("Failed to save recording: \(error.localizedDescription)")
             }
         } else {
-            recorder.start()
-            addLog("Recording started.")
+            Task {
+                await sim.startRecording()
+                addLog("Recording started.")
+            }
         }
     }
 
@@ -576,17 +576,18 @@ final class AppState {
             addLog("Connect to a device before replaying.")
             return
         }
-        navigationEngine.stop()
         let coords = session.points.map { $0.coordinate }
         guard !coords.isEmpty else { return }
         routeCoordinates = coords
-        navigationEngine.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS)
-        if let first = coords.first {
-            positionIntegrator.reset(to: first)
-        }
         controlMode = .route
+        let speed = effectiveBaseSpeedMPS
+        let mult = speedMultiplier
         addLog("Replaying recording (\(session.points.count) points)")
-        navigationEngine.play(multiplier: speedMultiplier)
+        Task {
+            await sim.stopPlayback()
+            await sim.loadRoute(coordinates: coords, baseSpeed: speed, resetStart: true)
+            await sim.play(multiplier: mult)
+        }
     }
 
     func exportRecording(_ session: RecorderService.Session) {
@@ -646,16 +647,16 @@ final class AppState {
         }
 
         routeCoordinates = coords
-        navigationEngine.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS)
-        if let first = coords.first {
-            positionIntegrator.reset(to: first)
-            simulatedCoordinate = first
-        }
         controlMode = .route
+        let speed = effectiveBaseSpeedMPS
+        let mult = speedMultiplier
+        let shouldPlay = autoPlay && connectionStatus.isConnected
         addLog("Loaded route: \(route.name)")
-
-        if autoPlay, connectionStatus.isConnected {
-            navigationEngine.play(multiplier: speedMultiplier)
+        Task {
+            await sim.loadRoute(coordinates: coords, baseSpeed: speed, resetStart: true)
+            if shouldPlay {
+                await sim.play(multiplier: mult)
+            }
         }
     }
 
@@ -711,20 +712,14 @@ final class AppState {
     }
 
     private func teardownLiveState(statusMessage: String) {
-        idleJitterTask?.cancel(); idleJitterTask = nil
-        aggregatorTask?.cancel(); aggregatorTask = nil
         eventsTask?.cancel(); eventsTask = nil
-        joystickEngine.stop()
-        navigationEngine.stop()
-        positionIntegrator.clear()
         daemonBridge = nil
-        // The tunnel is per-session and per-daemon — if the daemon crashed,
-        // a fresh reconnect needs a fresh tunnel. Fire-and-forget the stop
-        // sentinel; the root wrapper sees it and tears itself down.
-        Task { await tunnelSupervisor.stop() }
+        // Fire-and-forget — the sim detach + tunnel stop are independent.
+        Task {
+            await sim.detach()
+            await tunnelSupervisor.stop()
+        }
         connectionStatus = .error(statusMessage)
-        simulatedCoordinate = nil
-        syncBridge()
     }
 
     // First connect per session sweeps any orphan tm_daemon.py left over from
@@ -756,141 +751,6 @@ final class AppState {
     }
 
     // MARK: - Internal
-
-    private func handlePlaybackPosition(_ coordinate: CLLocationCoordinate2D) {
-        emitSimulated(coordinate)
-    }
-
-    // Single chokepoint for every coordinate destined for the device. The map
-    // marker shows the intent (`clean`); the device receives a noise-perturbed
-    // sample so the reported fix has the same statistical shape as real GPS.
-    private func emitSimulated(_ clean: CLLocationCoordinate2D) {
-        // During playback the aggregator drives this 20×/sec. Mutating the
-        // observable `simulatedCoordinate` that often invalidates MapArea.body
-        // and forces MapKit to rebuild the entire route MapPolyline each frame
-        // — the dominant CPU cost on long routes. Throttle the UI-facing write
-        // to 2 Hz; the daemon still receives every tick so device-side motion
-        // stays smooth.
-        let now = ContinuousClock.now
-        let shouldUpdateDisplay: Bool
-        if navigationEngine.playbackState == .playing {
-            shouldUpdateDisplay = lastDisplayUpdate.map { now - $0 >= .milliseconds(500) } ?? true
-        } else {
-            shouldUpdateDisplay = true
-        }
-        if shouldUpdateDisplay {
-            simulatedCoordinate = clean
-            lastDisplayUpdate = now
-        }
-        let noisy = noise.apply(to: clean)
-        daemonBridge?.setLocationQuiet(latitude: noisy.latitude, longitude: noisy.longitude)
-        // Record the clean (intent) coord, not the noisy one — noise is a
-        // transport-layer effect, not a property of the trajectory.
-        recorder.append(clean)
-    }
-
-    // 1Hz re-emit so an idle "stationary" device still wiggles within σ — what a
-    // real iPhone sitting on the desk reports. Suppressed during playback or
-    // joystick where the active loop already drives emissions.
-    private func startIdleJitter() {
-        idleJitterTask?.cancel()
-        idleJitterTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                guard let self else { return }
-                guard self.connectionStatus.isConnected,
-                      self.navigationEngine.playbackState != .playing,
-                      !self.joystickEngine.isActive,
-                      let coord = self.simulatedCoordinate else { continue }
-                self.emitSimulated(coord)
-                self.syncBridge()
-            }
-        }
-    }
-
-    // 20 Hz: pulls a velocity vector from each active engine, sums them, steps
-    // the shared integrator, and emits. This is what lets joystick deviation
-    // ride on top of route playback rather than the two fighting for ownership
-    // of the simulated position.
-    private func startAggregator() {
-        aggregatorTask?.cancel()
-        aggregatorTask = Task { [weak self] in
-            let dt: TimeInterval = 0.05
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(50))
-                guard let self else { return }
-                guard self.connectionStatus.isConnected else { continue }
-                self.aggregatorTick(dt: dt)
-                self.syncBridge()
-            }
-        }
-    }
-
-    private func aggregatorTick(dt: TimeInterval) {
-        var vx = 0.0, vy = 0.0
-        var anyContribution = false
-
-        if let nv = navigationEngine.tick(dt: dt) {
-            vx += nv.vx; vy += nv.vy
-            anyContribution = true
-        }
-        if let jv = joystickEngine.tick() {
-            vx += jv.vx; vy += jv.vy
-            anyContribution = true
-        }
-
-        guard anyContribution else {
-            // Engines are inactive — reset deviation tracking so it doesn't
-            // carry over into the next route.
-            if routeDeviationMeters != 0 { routeDeviationMeters = 0 }
-            deviationStartedAt = nil
-            return
-        }
-
-        positionIntegrator.step(vx: vx, vy: vy, dt: dt)
-
-        guard let pos = positionIntegrator.position else { return }
-        emitSimulated(pos)
-
-        if navigationEngine.playbackState == .playing {
-            let now = Date()
-            guard now.timeIntervalSince(lastDeviationCheck) >= 0.2 else { return }
-            lastDeviationCheck = now
-            let dev = navigationEngine.distanceFromRoute(pos)
-            routeDeviationMeters = dev
-            if dev > Self.deviationAbortMeters {
-                if deviationStartedAt == nil { deviationStartedAt = Date() }
-                if let started = deviationStartedAt,
-                   Date().timeIntervalSince(started) > Self.deviationAbortSeconds {
-                    navigationEngine.stop()
-                    deviationStartedAt = nil
-                    addLog("Route aborted — drifted >\(Int(Self.deviationAbortMeters)) m for \(Int(Self.deviationAbortSeconds)) s")
-                }
-            } else {
-                deviationStartedAt = nil
-            }
-        } else if routeDeviationMeters != 0 {
-            routeDeviationMeters = 0
-            deviationStartedAt = nil
-        }
-    }
-
-    // PR 1 transitional: copy engine state into the MainActor projection so
-    // SwiftUI views can observe `simState` instead of the engines directly.
-    // Called every aggregator tick (50 ms), every idle-jitter tick (1 s), and
-    // explicitly after command methods that flip engine state, so visible
-    // transitions feel instant. PR 2 replaces this with SimulationActor's
-    // snapshot push.
-    private func syncBridge() {
-        simState.navigationPlaybackState = navigationEngine.playbackState
-        simState.navigationProgress = navigationEngine.progress
-        simState.navigationElapsedDistance = navigationEngine.elapsedDistance
-        simState.navigationTotalDistance = navigationEngine.totalDistance
-        simState.joystickIsActive = joystickEngine.isActive
-        simState.joystickControllerName = joystickEngine.connectedControllerName
-        simState.isRecording = recorder.isRecording
-        simState.recordingPointCount = recorder.currentPointCount
-    }
 
     private var transportLabel: String {
         if transportMode == .custom {

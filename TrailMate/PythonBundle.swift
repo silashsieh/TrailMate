@@ -1,33 +1,33 @@
 import Foundation
 
 enum PythonBundle {
-    private static let pyMajorMinor = "3.13"
+    nonisolated private static let pyMajorMinor = "3.13"
 
-    static var rootURL: URL {
+    nonisolated static var rootURL: URL {
         Bundle.main.resourceURL!.appendingPathComponent("PythonResources", isDirectory: true)
     }
 
-    static var pythonHome: URL {
+    nonisolated static var pythonHome: URL {
         rootURL.appendingPathComponent("python", isDirectory: true)
     }
 
-    static var pythonLibs: URL {
+    nonisolated static var pythonLibs: URL {
         rootURL.appendingPathComponent("python-libs", isDirectory: true)
     }
 
-    static var interpreter: URL {
+    nonisolated static var interpreter: URL {
         pythonHome.appendingPathComponent("bin/python\(pyMajorMinor)")
     }
 
-    static func script(_ name: String) -> URL {
+    nonisolated static func script(_ name: String) -> URL {
         rootURL.appendingPathComponent("\(name).py")
     }
 
-    static var tunnelWrapperScript: URL {
+    nonisolated static var tunnelWrapperScript: URL {
         rootURL.appendingPathComponent("tm_tunnel.sh")
     }
 
-    static var environment: [String: String] {
+    nonisolated static var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PYTHONHOME"] = pythonHome.path
         env["PYTHONPATH"] = pythonLibs.path

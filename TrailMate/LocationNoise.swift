@@ -1,8 +1,9 @@
 import CoreLocation
 import Foundation
 
-@MainActor
-final class LocationNoise {
+// Owned exclusively by SimulationActor. Marked nonisolated because the
+// project sets default actor isolation to MainActor.
+nonisolated final class LocationNoise {
     var sigmaMeters: Double = 5.0
 
     private static let metersPerDegLat = 111_320.0

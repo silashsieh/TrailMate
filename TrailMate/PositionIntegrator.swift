@@ -1,8 +1,8 @@
 import CoreLocation
 
-@Observable
-@MainActor
-final class PositionIntegrator {
+// Owned exclusively by SimulationActor. Marked nonisolated because the
+// project sets default actor isolation to MainActor.
+nonisolated final class PositionIntegrator {
     private(set) var position: CLLocationCoordinate2D?
 
     private static let metersPerDegLat = 111_320.0

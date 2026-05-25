@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:0.00000,0.89972,0.65489,1.00000",
-      "display-p3:0.59172,0.85689,0.96783,1.00000"
+      "display-p3:0.09452,0.64238,0.52632,1.00000",
+      "display-p3:0.66929,0.07410,0.74131,1.00000"
     ],
     "orientation" : {
       "start" : {
@@ -17,46 +17,61 @@
   },
   "groups" : [
     {
+      "blend-mode-specializations" : [
+        {
+          "value" : "plus-lighter"
+        },
+        {
+          "appearance" : "tinted",
+          "value" : "normal"
+        }
+      ],
       "blur-material" : 0.5,
       "layers" : [
         {
           "blend-mode" : "normal",
-          "fill" : {
-            "linear-gradient" : [
-              "display-p3:0.46138,0.58341,1.05277,1.00000",
-              "display-p3:0.31072,0.44632,0.96783,1.00000"
-            ],
-            "orientation" : {
-              "start" : {
-                "x" : 0.4999999999999999,
-                "y" : 0.3702687047390341
-              },
-              "stop" : {
-                "x" : 0.5,
-                "y" : 0.7
+          "fill-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
               }
             }
-          },
-          "glass" : true,
-          "image-name" : "Gemini_Generated_Image_7ogqxf7ogqxf7ogq_transparent.png",
-          "name" : "Gemini_Generated_Image_7ogqxf7ogqxf7ogq_transparent",
+          ],
+          "image-name" : "03-pin.png",
+          "name" : "03-pin",
+          "opacity" : 1,
           "position" : {
-            "scale" : 0.84,
+            "scale" : 1.66,
             "translation-in-points" : [
-              0,
-              0
+              -193.8359375,
+              258.3515625
+            ]
+          }
+        },
+        {
+          "blend-mode" : "soft-light",
+          "image-name" : "02-trail.png",
+          "name" : "02-trail",
+          "opacity" : 1,
+          "position" : {
+            "scale" : 1.09,
+            "translation-in-points" : [
+              -25.1875,
+              78.7578125
             ]
           }
         }
       ],
+      "lighting" : "individual",
       "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
+        "kind" : "layer-color",
+        "opacity" : 1
       },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.5
+        "value" : 0.59
       }
     }
   ],

@@ -23,3 +23,13 @@ CoreLocation typically delivers updates to apps at ~1Hz by default, and rapid up
 ## D6: Why local-flat coordinate math instead of geodesic (Haversine)?
 
 For per-tick movement at human-scale speeds (1-25 m/s) and one-tick distances (5cm-1.25m), the flat approximation is correct to better than 0.001%. Geodesic math at this scale is engineering overkill. We use it anyway for any total-distance calculation over a route (just `MKPolyline.totalDistance` via MapKit's own geodesic implementation).
+
+## D7: Why a SimulationActor instead of keeping everything on MainActor?
+
+Before the actor split, the 20 Hz aggregator and the engines all ran on MainActor inside AppState. Any SwiftUI hitch — map gesture, layout pass, sheet animation — could stall the loop and delay `SETQ` delivery to the device, manifesting as visible jitter on the iPhone side. A `Thread.sleep(forTimeInterval: 0.3)` on MainActor would pause the device's simulated motion for the full 300 ms.
+
+The fix is to move the simulation core (aggregator, idle jitter, deviation check, the four engines) onto its own actor's executor. Engines are kept as `nonisolated final class` so the tick is still a synchronous sequence of plain method calls — no per-tick `await` hops between isolation domains, which would reintroduce the same stall problem on a different thread. `DaemonBridge.setLocationQuiet` is `nonisolated` on a serial dispatch queue so the actor's hot path can call it without crossing into the bridge's isolation either.
+
+The 2 Hz UI throttle (introduced as a perf hotfix when the MapPolyline rebuild at 20 Hz was the dominant CPU cost) is folded into the actor's snapshot push, so there's exactly one place that decides when SwiftUI sees a new coordinate. The backend still receives every tick at 20 Hz.
+
+A `SimulationBackend` protocol abstracts the device-control side: `DaemonBridge` (pymobiledevice3 over a privileged tunnel) is one implementation; future implementations — ADB for Android, SSH to a jailbroken iPhone, a record-only mock for tests — slot in without touching the engines. This is the smallest forward-looking abstraction that pays off no matter which long-term direction the project takes. The full XPC service split (separate binary, codable proto) was considered and explicitly deferred: it costs ~weeks of plumbing and isn't justified until there's a concrete second client.

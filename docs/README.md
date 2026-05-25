@@ -5,7 +5,7 @@
 - [Architecture](technical/architecture.md) — layer diagram, process topology, daemon protocol, coordinate math
 - [Tech Stack](technical/tech-stack.md) — framework choices and target versions
 - [Core Features](technical/features.md) — V1 feature spec (F1–F7), Wi-Fi tunnel design, deferred items
-- [Technical Decisions](technical/decisions.md) — key decisions D1–D6 and rationale
+- [Technical Decisions](technical/decisions.md) — key decisions D1–D7 and rationale
 
 ## Project Plan
 

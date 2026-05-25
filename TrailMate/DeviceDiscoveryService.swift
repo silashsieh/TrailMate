@@ -31,9 +31,6 @@ final class DeviceDiscoveryService {
     private(set) var lastError: String?
     var hasScanned = false
 
-    nonisolated static let pythonPath = "/Users/harry/Documents/pikmin/TrailMate/PythonDaemon/.venv/bin/python3"
-    nonisolated static let scriptPath = "/Users/harry/Documents/pikmin/TrailMate/PythonDaemon/tm_list_devices.py"
-
     func scan() async {
         guard !isScanning else { return }
         isScanning = true
@@ -70,12 +67,19 @@ final class DeviceDiscoveryService {
     }
 
     private func runLister() async throws -> [String] {
-        try await Task.detached {
+        let interpreter = PythonBundle.interpreter
+        let script = PythonBundle.script("tm_list_devices").path
+        let env = PythonBundle.environment
+        let cwd = interpreter.deletingLastPathComponent()
+
+        return try await Task.detached {
             let proc = Process()
             let outPipe = Pipe()
             let errPipe = Pipe()
-            proc.executableURL = URL(fileURLWithPath: Self.pythonPath)
-            proc.arguments = [Self.scriptPath]
+            proc.executableURL = interpreter
+            proc.arguments = [script]
+            proc.environment = env
+            proc.currentDirectoryURL = cwd
             proc.standardOutput = outPipe
             proc.standardError = errPipe
 

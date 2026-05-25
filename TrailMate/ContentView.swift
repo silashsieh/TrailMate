@@ -36,10 +36,6 @@ private struct SidebarView: View {
                     }
                 } else {
                     DevicePickerArea()
-                    TextField("RSD Address", text: $appState.rsdAddress)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("RSD Port", text: $appState.rsdPort)
-                        .textFieldStyle(.roundedBorder)
                     ConnectionButton()
                 }
 
@@ -667,8 +663,10 @@ private struct DevicePickerArea: View {
             }
 
             if let udid = appState.selectedDeviceUDID,
-               let device = discovery.devices.first(where: { $0.udid == udid }) {
-                TunnelHint(device: device)
+               discovery.devices.first(where: { $0.udid == udid }) != nil {
+                Text("Connect will request admin access to open the RSD tunnel.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
         .onAppear {
@@ -679,54 +677,24 @@ private struct DevicePickerArea: View {
     }
 }
 
-private struct TunnelHint: View {
-    let device: DiscoveredDevice
-
-    private var command: String {
-        "sudo pymobiledevice3 lockdown start-tunnel --udid \(device.udid)"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Run this in a terminal, then paste the RSD address/port below:")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                Text(command)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(command, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .help("Copy command")
-            }
-            .padding(6)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
-        }
-    }
-}
-
 private struct ConnectionButton: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
+        let noDevice = (appState.selectedDeviceUDID ?? "").isEmpty
+        let isConnecting = appState.connectionStatus == .connecting
         Button {
             Task { await appState.connect() }
         } label: {
             HStack {
-                if appState.connectionStatus == .connecting {
+                if isConnecting {
                     ProgressView().controlSize(.small)
                 }
-                Text(appState.connectionStatus == .connecting ? "Connecting…" : "Connect")
+                Text(isConnecting ? "Connecting…" : "Connect")
             }
             .frame(maxWidth: .infinity)
         }
-        .disabled(appState.connectionStatus == .connecting)
+        .disabled(isConnecting || noDevice)
     }
 }
 

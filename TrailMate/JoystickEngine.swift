@@ -104,8 +104,12 @@ final class JoystickEngine {
             queue: .main
         ) { [weak self] notification in
             guard let controller = notification.object as? GCController else { return }
+            // Extract the Sendable String before crossing into MainActor —
+            // GCController itself isn't Sendable, so capturing it into the
+            // isolated closure trips Swift 6's race checker.
+            let name = controller.vendorName ?? "Controller"
             MainActor.assumeIsolated {
-                self?.connectedControllerName = controller.vendorName ?? "Controller"
+                self?.connectedControllerName = name
             }
         }
 

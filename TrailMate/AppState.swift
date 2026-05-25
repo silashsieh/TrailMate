@@ -56,8 +56,10 @@ struct SavedWaypoint: Codable, Identifiable {
 final class AppState {
     // Connection
     var connectionStatus: ConnectionStatus = .disconnected
-    var rsdAddress: String
-    var rsdPort: String
+    // RSD address/port are populated by TunnelSupervisor on connect; not
+    // user-facing inputs.
+    private var rsdAddress: String = ""
+    private var rsdPort: String = ""
 
     // Mode
     var controlMode: ControlMode = .joystick
@@ -88,7 +90,6 @@ final class AppState {
     // Discovery
     let discovery = DeviceDiscoveryService()
     var selectedDeviceUDID: String?
-    var manualConnectionEntry = false
 
     // Recording
     let recorder = RecorderService()
@@ -100,6 +101,7 @@ final class AppState {
     let positionIntegrator = PositionIntegrator()
     private var aggregatorTask: Task<Void, Never>?
     private var deviationStartedAt: Date?
+    private var lastDeviationCheck: Date = .distantPast
     var routeDeviationMeters: Double = 0
     private static let deviationAbortMeters: Double = 200
     private static let deviationAbortSeconds: TimeInterval = 10
@@ -119,7 +121,8 @@ final class AppState {
     var showLogSheet = false
 
     private var daemonBridge: DaemonBridge?
-    private var heartbeatTask: Task<Void, Never>?
+    private let tunnelSupervisor = TunnelSupervisor()
+    private var didSweepStaleDaemons = false
 
     var effectiveBaseSpeedMPS: Double {
         let kmh = transportMode.fixedSpeedKmh ?? max(0.1, customSpeedKmh)
@@ -134,9 +137,6 @@ final class AppState {
     }
 
     init() {
-        self.rsdAddress = UserDefaults.standard.string(forKey: "rsdAddress") ?? ""
-        self.rsdPort = UserDefaults.standard.string(forKey: "rsdPort") ?? ""
-
         let storedCustom = UserDefaults.standard.double(forKey: "customSpeedKmh")
         self.customSpeedKmh = storedCustom > 0 ? storedCustom : 15.0
 
@@ -145,13 +145,16 @@ final class AppState {
         }
         noise.sigmaMeters = noiseSigmaMeters
 
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
+        // System sleep tears down the DVT session unconditionally (Apple's
+        // design — see v2-features.md). Drop our connection cleanly so the
+        // UI doesn't claim we're still connected after wake.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.daemonBridge?.stop()
+            Task { @MainActor in
+                await self?.handleSystemSleep()
             }
         }
 
@@ -175,37 +178,59 @@ final class AppState {
 
     func connect() async {
         guard connectionStatus != .connecting else { return }
-        guard !rsdAddress.isEmpty, !rsdPort.isEmpty else {
-            addLog("RSD address and port are required.")
-            connectionStatus = .error("Missing RSD address or port")
+        guard let udid = selectedDeviceUDID, !udid.isEmpty else {
+            addLog("Pick a device first.")
+            connectionStatus = .error("No device selected")
             return
         }
 
+        sweepStaleDaemonsIfNeeded()
+
         connectionStatus = .connecting
+        addLog("Authenticating to start tunnel for device …\(udid.suffix(8))")
+        do {
+            let info = try await tunnelSupervisor.start(udid: udid)
+            rsdAddress = info.address
+            rsdPort = String(info.port)
+            addLog("Tunnel up: [\(info.address)]:\(info.port)")
+        } catch {
+            connectionStatus = .error(error.localizedDescription)
+            addLog("Tunnel failed: \(error.localizedDescription)")
+            return
+        }
+
         addLog("Connecting to [\(rsdAddress)]:\(rsdPort)...")
 
         let bridge = DaemonBridge()
+        bridge.onUnexpectedExit = { [weak self] status, reason in
+            Task { @MainActor in
+                self?.handleDaemonExit(status: status, reason: reason)
+            }
+        }
+        bridge.onTunnelDown = { [weak self] line in
+            Task { @MainActor in
+                self?.handleTunnelDown(line: line)
+            }
+        }
         self.daemonBridge = bridge
 
         do {
             try await bridge.start(rsdAddress: rsdAddress, rsdPort: rsdPort)
             connectionStatus = .connected
-            UserDefaults.standard.set(rsdAddress, forKey: "rsdAddress")
-            UserDefaults.standard.set(rsdPort, forKey: "rsdPort")
             addLog("Connected — ready for commands.")
-            startHeartbeat()
             startIdleJitter()
             startAggregator()
         } catch {
             connectionStatus = .error(error.localizedDescription)
             addLog("Connection failed: \(error.localizedDescription)")
             self.daemonBridge = nil
+            // The bridge failed but the tunnel may be up — tear it down so a
+            // retry gets a fresh tunnel.
+            await tunnelSupervisor.stop()
         }
     }
 
     func disconnect() async {
-        heartbeatTask?.cancel()
-        heartbeatTask = nil
         idleJitterTask?.cancel()
         idleJitterTask = nil
         aggregatorTask?.cancel()
@@ -213,8 +238,14 @@ final class AppState {
         joystickEngine.stop()
         navigationEngine.stop()
         positionIntegrator.clear()
-        daemonBridge?.stop()
+        if let bridge = daemonBridge {
+            await bridge.stop()
+        }
         daemonBridge = nil
+        // Tear the tunnel down *after* the daemon — the daemon's QUIT path
+        // calls location.clear() over the DVT session, which requires the
+        // tunnel to still be alive.
+        await tunnelSupervisor.stop()
         connectionStatus = .disconnected
         simulatedCoordinate = nil
         addLog("Disconnected.")
@@ -628,24 +659,60 @@ final class AppState {
 
     // MARK: - Private
 
-    // Process-level heartbeat (not the HEARTBEAT command) because sendCommand uses a
-    // single pendingContinuation — issuing one mid-playback would race with SETQ traffic.
-    private func startHeartbeat() {
-        heartbeatTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                guard let self, self.connectionStatus.isConnected else { return }
+    // Invoked by DaemonBridge.terminationHandler when the daemon dies on its own
+    // (crash, kill, our SIGKILL escalator). Tear down Swift-side state that
+    // assumed the daemon was alive. Don't auto-restart — the user clicks Connect.
+    private func handleDaemonExit(status: Int32, reason: Process.TerminationReason) {
+        let detail: String
+        switch (status, reason) {
+        case (0, _):                detail = "Daemon exited"
+        case (_, .uncaughtSignal):  detail = "Daemon killed (signal)"
+        default:                    detail = "Daemon crashed (exit \(status))"
+        }
+        addLog(detail)
+        teardownLiveState(statusMessage: detail)
+    }
 
-                if self.daemonBridge?.isRunning != true {
-                    self.joystickEngine.stop()
-                    self.navigationEngine.stop()
-                    self.connectionStatus = .error("Connection lost")
-                    self.addLog("Connection lost — daemon process exited")
-                    self.daemonBridge = nil
-                    self.heartbeatTask = nil
-                    return
-                }
-            }
+    private func handleTunnelDown(line: String) {
+        addLog("Tunnel down: \(line)")
+        teardownLiveState(statusMessage: "Tunnel down")
+    }
+
+    private func handleSystemSleep() async {
+        guard daemonBridge != nil else { return }
+        addLog("Pausing — system sleeping (DVT session would drop)")
+        await disconnect()
+    }
+
+    private func teardownLiveState(statusMessage: String) {
+        idleJitterTask?.cancel(); idleJitterTask = nil
+        aggregatorTask?.cancel(); aggregatorTask = nil
+        joystickEngine.stop()
+        navigationEngine.stop()
+        positionIntegrator.clear()
+        daemonBridge = nil
+        // The tunnel is per-session and per-daemon — if the daemon crashed,
+        // a fresh reconnect needs a fresh tunnel. Fire-and-forget the stop
+        // sentinel; the root wrapper sees it and tears itself down.
+        Task { await tunnelSupervisor.stop() }
+        connectionStatus = .error(statusMessage)
+        simulatedCoordinate = nil
+    }
+
+    // First connect per session sweeps any orphan tm_daemon.py left over from
+    // a prior host-app crash (parent watcher catches most, but isn't instant).
+    private func sweepStaleDaemonsIfNeeded() {
+        guard !didSweepStaleDaemons else { return }
+        didSweepStaleDaemons = true
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        task.arguments = ["-f", "tm_daemon.py"]
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            // pkill missing is harmless; log and continue.
+            addLog("Stale-daemon sweep skipped: \(error.localizedDescription)")
         }
     }
 
@@ -740,6 +807,9 @@ final class AppState {
         emitSimulated(pos)
 
         if navigationEngine.playbackState == .playing {
+            let now = Date()
+            guard now.timeIntervalSince(lastDeviationCheck) >= 0.2 else { return }
+            lastDeviationCheck = now
             let dev = navigationEngine.distanceFromRoute(pos)
             routeDeviationMeters = dev
             if dev > Self.deviationAbortMeters {

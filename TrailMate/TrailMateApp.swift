@@ -1,32 +1,14 @@
-//
-//  TrailMateApp.swift
-//  TrailMate
-//
-//  Created by Harry Hsieh on 2026/5/13.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct TrailMateApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @State private var appState = AppState()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(appState)
         }
-        .modelContainer(sharedModelContainer)
+        .defaultSize(width: 1100, height: 700)
     }
 }

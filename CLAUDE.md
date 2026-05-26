@@ -96,6 +96,19 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 # Smoke test the CLI path (bypass the app, for debugging)
 sudo pymobiledevice3 lockdown start-tunnel                                                  # terminal 1
 pymobiledevice3 developer dvt simulate-location set --rsd <addr> <port> -- 25.0330 121.5654 # terminal 2
+
+# Rebuild the bundled Python runtime (only after a Python or pmd3 bump)
+./packaging/build.sh
+
+# Build a release DMG locally → build/TrailMate-<MARKETING_VERSION>.dmg
+./packaging/release.sh                       # full build (rebuilds PythonResources first)
+SKIP_PYTHON=1 ./packaging/release.sh         # reuse existing PythonResources/ (faster)
+VERSION=1.2 ./packaging/release.sh           # override the stamped version
+
+# Publish a release via GitHub Actions (manual workflow_dispatch).
+# Reads MARKETING_VERSION from the xcodeproj, builds, and uploads the DMG
+# to a new `v<version>` GitHub release.
+gh workflow run release.yml --ref main
 ```
 
 ## When the docs and code disagree

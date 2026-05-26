@@ -95,6 +95,14 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
 - Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick activation.
 
+### Bundled Python runtime
+
+- TrailMate ships a self-contained CPython interpreter + `pymobiledevice3` inside the `.app` bundle (`Contents/Resources/PythonResources/`). End users do not install Python, pip, or pymobiledevice3.
+- Built via `packaging/build.sh` from [python-build-standalone](https://github.com/indygreg/python-build-standalone); the tarball is cached under `packaging/.cache/` so subsequent builds are fast.
+- `PythonBundle.swift` resolves the interpreter and script paths at runtime so `tm_daemon.py`, `tm_tunnel.sh`, and `tm_list_devices.py` all run from the bundle in release builds (and from the same paths during `xcodebuild` debug builds).
+- Embedded binaries are re-signed by a `Re-sign embedded Python binaries` Run Script phase under the same identity as the host app (ad-hoc when no Developer ID is configured), with `--options runtime` so the Hardened Runtime accepts them.
+- Pin point is the Python interpreter version (default 3.13.x) and the pymobiledevice3 release that `build.sh` installs into the bundle's site-packages; bumping either is a deliberate change with a smoke pass.
+
 ## Deferred / dropped
 
 Items considered during planning that were dropped, deferred, or superseded.

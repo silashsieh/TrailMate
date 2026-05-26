@@ -57,9 +57,3 @@ Other tools that do roughly the same thing — Mac/desktop apps that simulate GP
 - [SimVirtualLocation](https://github.com/nexron171/SimVirtualLocation) — reference architecture we cribbed from
 
 For underlying libraries, frameworks, and Apple platform docs, see [docs/technical/tech-stack.md](docs/technical/tech-stack.md#references).
-
------
-
-## License
-
-MIT.

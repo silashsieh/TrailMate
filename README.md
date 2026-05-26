@@ -16,7 +16,7 @@ TrailMate offers three ways to control the device's location, all available at t
 
 These coexist rather than being mutually exclusive: teleport to a starting point, play a route, then grab the joystick to deviate from it — no mode switch required.
 
-The Mac acts as a controller; the iPhone reports the simulated coordinates to every app on the device through standard CoreLocation. No app is installed on the iPhone, and no jailbreak is required.
+The Mac acts as a controller; the iPhone reports the simulated coordinates to every app on the device through standard CoreLocation. No app is installed on the iPhone, and no jailbreak is required. The Python runtime ships bundled inside the app, so there's nothing to install on the Mac side either.
 
 -----
 

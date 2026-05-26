@@ -1,5 +1,44 @@
 # Technical Architecture
 
+## Project Structure
+
+```
+TrailMate/
+├── README.md
+├── .gitignore
+│
+├── TrailMate/                         # Swift sources (flat layout)
+│   ├── TrailMateApp.swift             # @main entry point
+│   ├── AppState.swift                 # root @Observable — connection, mode, all state
+│   ├── ContentView.swift              # NavigationSplitView with sidebar + map
+│   ├── DaemonBridge.swift             # Process wrapper, stdin/stdout IPC with daemon
+│   ├── NavigationEngine.swift         # 10Hz route playback with polyline interpolation
+│   ├── JoystickEngine.swift           # 20Hz control loop (controller/virtual stick/WASD)
+│   ├── VirtualJoystickView.swift      # On-screen circular pad with DragGesture
+│   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper
+│   ├── GPXService.swift               # GPX import (XMLParser) and export
+│   └── Assets.xcassets
+│
+├── TrailMate.xcodeproj               # Xcode project (hand-managed, no XcodeGen)
+│
+├── PythonDaemon/
+│   └── tm_daemon.py                   # persistent daemon: SET/SETQ/CLEAR/HEARTBEAT/QUIT
+│
+└── docs/                              # all detailed documentation
+    ├── README.md                      # table of contents
+    ├── claude-code-notes.md           # coding conventions, do/don't rules
+    ├── project-plan/
+    │   ├── scope.md                   # goals and non-goals
+    │   ├── phases.md                  # implementation phases with steps and results
+    │   ├── risks.md                   # risk register
+    │   └── testing.md                 # testing strategy
+    └── technical/
+        ├── architecture.md            # this file — structure, layers, processes, protocol
+        ├── tech-stack.md              # framework choices and target versions
+        ├── features.md                # V1 feature spec (F1–F7) and deferred items
+        └── decisions.md               # key technical decisions (D1–D6)
+```
+
 ## Layer Diagram
 
 ```

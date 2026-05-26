@@ -8,35 +8,15 @@
 
 TrailMate is a personal-use SwiftUI macOS application that controls an iPhone's GPS location in real time. It is designed for iOS developers and testers who need to exercise location-dependent code paths without physically moving — testing a ride-share pickup flow, a weather widget in another timezone, an AR walking experience, or a store-locator from across the world.
 
-TrailMate offers three control modes:
+TrailMate offers three ways to control the device's location, all available at the same time:
 
-1. **Teleport** — click anywhere on a map to instantly set the device's location.
-1. **Route** — enter From/To, calculate a walking/cycling/driving route, and play it back at configurable speed.
-1. **Joystick** — drive the device's location in real time with a game controller or on-screen virtual stick.
+- **Teleport** — click anywhere on the map to instantly set the device's location.
+- **Route** — enter From/To, calculate a walking/cycling/driving route, and play it back at configurable speed.
+- **Joystick** — drive the device's location in real time with a game controller or on-screen virtual stick.
+
+These coexist rather than being mutually exclusive: teleport to a starting point, play a route, then grab the joystick to deviate from it — no mode switch required.
 
 The Mac acts as a controller; the iPhone reports the simulated coordinates to every app on the device through standard CoreLocation. No app is installed on the iPhone, and no jailbreak is required.
-
------
-
-## Goals & Non-Goals
-
-### Goals
-
-- Real-time GPS simulation on a paired iOS 17+ device (validated on iOS 26.4).
-- Three control modes: teleport, route, joystick.
-- Native macOS look-and-feel: SwiftUI, MapKit, standard NSWindow chrome.
-- Single Mac, single iPhone, single user — build-from-source from a free Apple ID.
-- Codebase suitable as a portfolio reference (clean architecture, documented decisions).
-
-### Non-Goals
-
-- **No iOS app component.** Everything runs on the Mac. No sideloading, no jailbreak.
-- **No anti-detection.** The device reports `CLLocation.sourceInformation.isSimulatedBySoftware == true`. Apps that check for this (e.g. Pokémon GO) will see through us. Not a goal to defeat.
-- **No App Store distribution.** Personal tool. Build from source, run unsigned.
-- **No cross-platform.** macOS only. Windows users have LocWarp; Linux users have raw pymobiledevice3.
-- **No legacy iOS support.** iOS 17 introduced the personalized DDI + RSD tunnel; that's the minimum target. Users on iOS ≤16 should use Schlaubischlump's LocationSimulator.
-- **No multi-device orchestration.** One iPhone at a time. (Possible v3 extension; not v1.)
-- **No production hardening.** This is a single-user dev tool, not a fleet-simulation platform.
 
 -----
 
@@ -51,46 +31,6 @@ Representative use cases:
 
 -----
 
-## Project Structure
-
-```
-TrailMate/
-├── README.md
-├── .gitignore
-│
-├── TrailMate/                         # Swift sources (flat layout)
-│   ├── TrailMateApp.swift             # @main entry point
-│   ├── AppState.swift                 # root @Observable — connection, mode, all state
-│   ├── ContentView.swift              # NavigationSplitView with sidebar + map
-│   ├── DaemonBridge.swift             # Process wrapper, stdin/stdout IPC with daemon
-│   ├── NavigationEngine.swift         # 10Hz route playback with polyline interpolation
-│   ├── JoystickEngine.swift           # 20Hz control loop (controller/virtual stick/WASD)
-│   ├── VirtualJoystickView.swift      # On-screen circular pad with DragGesture
-│   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper
-│   ├── GPXService.swift               # GPX import (XMLParser) and export
-│   └── Assets.xcassets
-│
-├── TrailMate.xcodeproj               # Xcode project (hand-managed, no XcodeGen)
-│
-├── PythonDaemon/
-│   └── tm_daemon.py                   # persistent daemon: SET/SETQ/CLEAR/HEARTBEAT/QUIT
-│
-└── docs/                              # all detailed documentation
-    ├── README.md                      # table of contents
-    ├── claude-code-notes.md           # coding conventions, do/don't rules
-    ├── project-plan/
-    │   ├── phases.md                  # implementation phases with steps and results
-    │   ├── risks.md                   # risk register
-    │   └── testing.md                 # testing strategy
-    └── technical/
-        ├── architecture.md            # layer diagram, process topology, daemon protocol
-        ├── tech-stack.md              # framework choices and target versions
-        ├── features.md                # V1 feature spec (F1–F7) and deferred items
-        └── decisions.md               # key technical decisions (D1–D6)
-```
-
------
-
 ## Documentation
 
 See [docs/README.md](docs/README.md) for the full documentation index — architecture, features, tech stack, decisions, project plan, and development notes.
@@ -98,17 +38,14 @@ See [docs/README.md](docs/README.md) for the full documentation index — archit
 
 -----
 
-## References
+## Related Projects
 
-- [pymobiledevice3](https://github.com/doronz88/pymobiledevice3)
-- [libimobiledevice](https://libimobiledevice.org/)
-- [Apple MapKit](https://developer.apple.com/documentation/mapkit)
-- [GameController.framework](https://developer.apple.com/documentation/gamecontroller)
-- [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice)
-- [python-build-standalone](https://github.com/indygreg/python-build-standalone)
-- [SimVirtualLocation](https://github.com/nexron171/SimVirtualLocation) — reference architecture
-- [LocWarp](https://github.com/keezxc1223/locwarp) — iOS 26.4 quirks documentation
-- [CLLocationSourceInformation](https://developer.apple.com/documentation/corelocation/cllocationsourceinformation)
+Other tools that do roughly the same thing — Mac/desktop apps that simulate GPS on a real iPhone over the lockdown/DVT channel. Worth a look if TrailMate doesn't fit your setup.
+
+- [LocWarp](https://github.com/keezxc1223/locwarp) — closest sibling; documented the iOS 26.4 quirks we hit
+- [SimVirtualLocation](https://github.com/nexron171/SimVirtualLocation) — reference architecture we cribbed from
+
+For underlying libraries, frameworks, and Apple platform docs, see [docs/technical/tech-stack.md](docs/technical/tech-stack.md#references).
 
 -----
 

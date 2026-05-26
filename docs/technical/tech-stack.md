@@ -19,3 +19,23 @@
 - iOS 26.4 on a paired iPhone with Developer Mode enabled
 - Xcode 26.x
 - Python 3.13 (bundled), pymobiledevice3 >= 9.12
+
+## References
+
+Underlying libraries, frameworks, and platform documentation TrailMate builds on.
+
+**Device transport**
+
+- [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) — Python client for iOS lockdown/DVT services; provides the RSD tunnel and `simulate-location` handle
+- [libimobiledevice](https://libimobiledevice.org/) — older C library; not used directly, but historical reference for the lockdown protocol
+
+**Apple frameworks**
+
+- [MapKit](https://developer.apple.com/documentation/mapkit) — map rendering, search, directions
+- [GameController.framework](https://developer.apple.com/documentation/gamecontroller) — MFi / DualShock / Xbox / Joy-Con input
+- [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice) — modern replacement for SMJobBless; privileged helper installation
+- [CLLocationSourceInformation](https://developer.apple.com/documentation/corelocation/cllocationsourceinformation) — the `isSimulatedBySoftware` flag that exposes spoofed coordinates to apps that check
+
+**Runtime packaging**
+
+- [python-build-standalone](https://github.com/indygreg/python-build-standalone) — self-contained Python distribution we bundle into the app

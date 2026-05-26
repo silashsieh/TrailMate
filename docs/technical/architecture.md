@@ -5,6 +5,7 @@
 ```
 TrailMate/
 ├── README.md
+├── CLAUDE.md                          # entry point for Claude Code sessions
 ├── .gitignore
 │
 ├── TrailMate/                         # Swift sources (flat layout)
@@ -26,7 +27,7 @@ TrailMate/
 │
 └── docs/                              # all detailed documentation
     ├── README.md                      # table of contents
-    ├── claude-code-notes.md           # coding conventions, do/don't rules
+    ├── quick-start.md                 # install / build / first teleport
     ├── project-plan/
     │   ├── scope.md                   # goals and non-goals
     │   ├── phases.md                  # implementation phases with steps and results

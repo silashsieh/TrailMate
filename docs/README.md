@@ -1,5 +1,9 @@
 # Documentation
 
+## For users
+
+- [Quick Start](quick-start.md) — install the DMG or build from source, pair an iPhone, first teleport
+
 ## Technical
 
 - [Architecture](technical/architecture.md) — project structure, layer diagram, process topology, daemon protocol, coordinate math
@@ -14,6 +18,6 @@
 - [Risks & Mitigations](project-plan/risks.md) — risk register
 - [Testing Strategy](project-plan/testing.md) — unit, integration, and manual smoke tests
 
-## Development
+## For contributors and Claude agents
 
-- [Claude Code Notes](claude-code-notes.md) — coding conventions, do/don't rules, quick-reference commands
+Coding conventions, do/don't rules, decision heuristics, and quick-reference commands live in the top-level [CLAUDE.md](../CLAUDE.md) — that file is the entry point for any agent (or human) starting work in this repo.

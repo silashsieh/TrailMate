@@ -1,0 +1,103 @@
+# TrailMate — Notes for Claude
+
+TrailMate is a native macOS app that simulates real-time GPS on a paired iOS 17+ device. SwiftUI on top of a bundled Python daemon that talks DVT over the pymobiledevice3 RSD tunnel. The Mac is the controller; nothing is installed on the iPhone.
+
+## Project context
+
+- **Owner:** Harry, solo developer. Personal Mac (Apple Silicon, macOS 26.4) + personal iPhone (iOS 26.4).
+- **Apple Developer Program:** none. Everything runs locally; signing is ad-hoc or free-Apple-ID.
+- **Reference implementations to consult, in priority order:**
+  1. [`pymobiledevice3`](https://github.com/doronz88/pymobiledevice3) source — authoritative for transport behavior.
+  2. [`nexron171/SimVirtualLocation`](https://github.com/nexron171/SimVirtualLocation) — closest working OSS architecture (Swift + pymobiledevice3).
+  3. [`keezxc1223/locwarp`](https://github.com/keezxc1223/locwarp) README — best documentation of iOS 26.4-specific quirks.
+  4. `Schlaubischlump/LocationSimulator` — UI/UX inspiration only; its transport is obsolete on iOS 17+.
+
+## Always read the docs first
+
+Before changing code or proposing a design, read these. They are short, current, and answer "what is this", "why did we choose X", and "what's in scope".
+
+1. [docs/project-plan/scope.md](docs/project-plan/scope.md) — goals and non-goals. Check this before adding a feature.
+2. [docs/technical/features.md](docs/technical/features.md) — what ships today, plus dropped/deferred items.
+3. [docs/technical/architecture.md](docs/technical/architecture.md) — project layout, layer diagram, daemon protocol, concurrency topology, coordinate math.
+4. [docs/technical/decisions.md](docs/technical/decisions.md) — load-bearing decisions and rationale.
+5. [docs/technical/tech-stack.md](docs/technical/tech-stack.md) — frameworks, target versions, underlying-library references.
+6. [docs/project-plan/phases.md](docs/project-plan/phases.md) — phase-by-phase implementation log with status and deferrals.
+7. [docs/project-plan/testing.md](docs/project-plan/testing.md) — planned test coverage (not yet implemented).
+8. [docs/project-plan/risks.md](docs/project-plan/risks.md) — risk register.
+
+If a task touches the daemon protocol, coordinate math, or the concurrency split, re-read the relevant section of `architecture.md` before editing.
+
+## Standing constraints
+
+- **Single user, single device, no cloud.** Don't propose multi-tenant features, telemetry, or cloud sync.
+- **No iOS app.** Everything runs on the Mac; no sideloaded code on the iPhone.
+- **iOS 17+ minimum.** No fallback paths for older iOS.
+- **One auth dialog per session is acceptable.** Don't propose schemes to eliminate it that require paid signing or a packaged helper unless explicitly asked.
+- **No anti-detection.** `CLLocationSourceInformation.isSimulatedBySoftware` is true and stays true.
+
+## Keep docs and user preferences current
+
+- When a code change alters behavior, update the relevant doc(s) in the same change. `features.md`, `architecture.md`, `decisions.md`, `tech-stack.md`, and `risks.md` must describe the software as it is *now*, not as it was once planned.
+- **No historical artifacts in non-phases docs.** Version labels (V1, V2, v3…), original-spec numbers (F1–F7), and "originally Phase X did Y" references belong only in [docs/project-plan/phases.md](docs/project-plan/phases.md) — that file is the implementation log. Everywhere else, describe current behavior factually.
+- When the user expresses a new coding or doc preference — framing, terminology, what to omit, commit style, anything — append it to the "User-expressed preferences" list below in the same session, so future agents inherit it. Be specific about *what* and *why*.
+
+### User-expressed preferences captured so far
+
+- **Teleport / route / joystick are three *coexisting controls*, not mutually exclusive "modes."** Don't frame them as standalone modes in UI copy, README, or docs. (Stated 2026-05-26.)
+- **MIT LICENSE author is `Silas Hsieh`, year is the current calendar year.** Don't carry over template author lines. (Stated 2026-05-26.)
+- **Single source of truth per topic.** Prefer merging related docs (e.g. features inventory in one file, not split V1/V2) over scattered partial coverage. (Stated 2026-05-26.)
+- **README is for end users.** Detailed project info — goals, structure, references for underlying libs — belongs under `docs/`, not on the front page. (Stated 2026-05-26.)
+
+## Coding conventions
+
+- **Swift:** strict concurrency, async/await over completion handlers, `@Observable` over `ObservableObject`, value types where possible.
+- **Error handling:** throwing functions over `Result`; one app-wide `TrailMateError` enum with descriptive cases. No silent swallowing — surface in the Log sheet at minimum.
+- **Logging:** `os.Logger` with subsystem `com.harry.trailmate`, categories per service.
+- **Files:** one type per file; file name matches type name.
+- **Tests:** prefer Swift Testing (`@Test`, `#expect`) over XCTest for new code.
+- **Comments:** explain *why*, not *what*. The code should explain the what.
+- **Commits:** Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `ci:`, `perf:`). Match recent history (`git log --oneline`).
+
+## Always do
+
+- When adding a new daemon command, update the Swift `DaemonBridge`, `tm_daemon.py`, and the Daemon Protocol section in [docs/technical/architecture.md](docs/technical/architecture.md) in the same change.
+- When changing a privileged-helper protocol (once one exists), bump the protocol version constant and handle backwards compat.
+- When touching coordinate math, add a unit test with a known-good reference value.
+- Before any "this should work on iOS 26.4" claim, point to a verified source (pymobiledevice3 release notes, LocWarp tested-on note, or a personal test against the real device).
+
+## Never do
+
+- **Never** call `pymobiledevice3` as a one-shot subprocess in a hot path. Always go through the persistent daemon.
+- **Never** put location-spoofing logic inside the privileged helper. The helper only manages the tunnel.
+- **Never** bundle `Resources/DeveloperDiskImages/` in git. Those are device-specific and large.
+- **Never** invent a pymobiledevice3 API that hasn't been verified against the pinned version. If unsure, run the CLI first to confirm flags and output.
+- **Never** swallow `TUNNEL_DOWN` silently. The user must see it.
+
+## Decision-making heuristics for ambiguous tasks
+
+- "Should I add this feature?" — If it's not in [features.md](docs/technical/features.md) or [scope.md](docs/project-plan/scope.md), defer. Don't scope-creep.
+- "Should I refactor X while I'm here?" — Only if the refactor is in the immediate path of the task. Otherwise file as a TODO.
+- "Should I add a dependency?" — Default to no. Swift stdlib + Apple frameworks + pymobiledevice3 should cover ~99% of needs.
+- "Should I rewrite this in Swift?" — Probably not. The Python daemon line is small and stable; reimplementation is multi-week.
+- **Latency floor: 100 ms.** CoreLocation coalesces updates at ~1 Hz on the consumer side, so sub-100 ms wire latency is invisible to the apps we're testing. Don't write caveats, benchmarks, or mitigations for latency below that threshold — it's noise. Real concerns start at ~300 ms (perceptible to the human driving the joystick) and at ~1 s (visible stalls in route playback).
+
+## Quick-reference commands
+
+```bash
+# Build & run debug
+xcodebuild -project TrailMate.xcodeproj -scheme TrailMate -configuration Debug build
+
+# Run tests (target is currently empty — see docs/project-plan/testing.md)
+xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'platform=macOS'
+
+# Verify the Python daemon standalone (uses the bundled interpreter)
+./TrailMate/PythonResources/python/bin/python3 PythonDaemon/tm_daemon.py < test_commands.txt
+
+# Smoke test the CLI path (bypass the app, for debugging)
+sudo pymobiledevice3 lockdown start-tunnel                                                  # terminal 1
+pymobiledevice3 developer dvt simulate-location set --rsd <addr> <port> -- 25.0330 121.5654 # terminal 2
+```
+
+## When the docs and code disagree
+
+Trust the code. The docs are kept reasonably up to date but lag behind a fresh change. If you spot drift, update the doc in the same change.

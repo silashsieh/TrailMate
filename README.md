@@ -20,6 +20,12 @@ The Mac acts as a controller; the iPhone reports the simulated coordinates to ev
 
 -----
 
+## Quick Start
+
+See [docs/quick-start.md](docs/quick-start.md) for the install-the-DMG path and the build-from-source path, plus iPhone pairing and common first-run issues.
+
+-----
+
 ## Target Users & Use Cases
 
 Representative use cases:
@@ -35,6 +41,11 @@ Representative use cases:
 
 See [docs/README.md](docs/README.md) for the full documentation index — architecture, features, tech stack, decisions, project plan, and development notes.
 
+-----
+
+## Built with Claude
+
+TrailMate was developed in collaboration with [Claude Code](https://claude.com/claude-code) (Anthropic). Architecture decisions, design discussions, and a substantial share of the code and documentation were produced through iterative pair-programming sessions. See [`CLAUDE.md`](CLAUDE.md) for the standing instructions given to Claude agents working in this repo, and the git log for per-commit co-authorship trailers.
 
 -----
 

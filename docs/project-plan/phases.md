@@ -6,6 +6,8 @@ Each phase is sized to roughly one focused weekend (or 2-3 evenings). Don't move
 
 ## Phase 0 — Foundation (1 evening)
 
+**Status:** Done (2026-05-13).
+
 **Goal:** prove the platform works on *your* iPhone before writing any Swift.
 
 Steps:
@@ -29,6 +31,8 @@ Steps:
 -----
 
 ## Phase 1 — MVP: Teleport (1 weekend)
+
+**Status:** Done (2026-05-13).
 
 **Goal:** click on a map in a SwiftUI app, see your iPhone teleport.
 
@@ -67,6 +71,8 @@ Steps:
 
 ## Phase 2 — Route Mode (1 weekend)
 
+**Status:** Done (2026-05-13).
+
 **Goal:** type "Taipei 101" → "Elephant Mountain" → press play → iPhone walks the route.
 
 Steps:
@@ -100,6 +106,8 @@ Steps:
 
 ## Phase 3 — Joystick Mode (1 weekend)
 
+**Status:** Done (2026-05-13).
+
 **Goal:** plug in a controller, push the stick, iPhone moves in real time.
 
 Steps:
@@ -128,6 +136,8 @@ Steps:
 -----
 
 ## Phase 4 — Productionize (1 weekend)
+
+**Status:** Done (2026-05-13), with two intentional deferrals (SMAppService helper, DDI auto-mounting) and one substitution (step 3's "reconnect with backoff" replaced by auto-disconnect on tunnel-down + user-initiated re-Connect in `d1c5634`). See results.
 
 **Goal:** stop being embarrassed about the rough edges.
 
@@ -162,6 +172,8 @@ Steps:
 
 ## Phase 5 — Polish & Release (optional, ~1 weekend)
 
+**Status:** Partial.
+
 Only if you want this as a portfolio piece:
 
 - README with screenshots, GIF demo, setup instructions.
@@ -170,8 +182,25 @@ Only if you want this as a portfolio piece:
 - GitHub Actions: lint, build, unit tests.
 - Tagged v1.0 release.
 
+### Phase 5 Results (current state, 2026-05-26)
+
+- **Done:**
+  - Documentation written up: `architecture.md`, `features.md`, `tech-stack.md`, `decisions.md`, `scope.md`, plus the merged docs index.
+  - GitHub Actions: `.github/workflows/swift.yml` builds on push/PR to main; `.github/workflows/release.yml` is a `workflow_dispatch` job that builds via `packaging/release.sh` and uploads a DMG as a GitHub release tagged `v$MARKETING_VERSION`.
+  - DMG packaging: `packaging/release.sh` produces a signed DMG.
+  - Version bumped to `1.1` in `TrailMate.xcodeproj`.
+- **Pending:**
+  - README screenshots / GIF demo — the README is text-only today.
+  - Localization scaffold (en + zh-Hant) — no `.lproj` files; no `Localizable.strings`.
+  - Unit-test job in `swift.yml` — the workflow only runs `release.sh` (build), not `xcodebuild test`. The test target is also empty (see [testing.md](testing.md)).
+  - `v1.0` tag — never created; the project moved straight to `1.1` and no release workflow run has been dispatched locally. Run the release workflow on `main` to publish.
+
 -----
 
-## Phases 6–11 — V2 Feature Plan
+## Phases 6–11 — V2 Feature Set
 
-V2 work driven by the owner's day-to-day workflow requirements (recording, composite control, on-map destination picking, device discovery, etc.) lives in its own document: [v2-features.md](v2-features.md). Same weekend-sized phase structure, sequencing notes, and exit criteria.
+**Status:** Done (2026-05-25).
+
+Owner-driven workflow features: always-on GPS noise, calibrated speeds + custom km/h, long-press destination popover, USB+Wi-Fi device discovery, session recording, composite (joystick-over-route) control, saved-routes library. All shipped in commit `8163d73`; the tunnel-supervisor follow-up (`d1c5634`) replaced manual RSD entry with auto-managed connect/disconnect.
+
+Phase-level steps and exit criteria are no longer maintained as a separate plan doc — what shipped is described in [../technical/features.md](../technical/features.md), and the per-phase rationale is preserved in the `8163d73` commit message.

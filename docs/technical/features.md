@@ -1,94 +1,117 @@
-# Core Features (V1 Scope)
+# Features
 
-## F1: Device Discovery & Connection
+Single inventory of what ships in TrailMate today, plus items that were considered during planning but ultimately dropped, deferred, or superseded. For implementation history, see [../project-plan/phases.md](../project-plan/phases.md) or the git log.
 
-- List USB-paired iPhones via pymobiledevice3 `usbmux list`
-- Sidebar device picker
-- Mount status indicator (DDI mounted? tunnel up? DVT ready?)
-- "Reconnect" button when tunnel drops
+## Shipped
 
-## F2: Map View
+### Connection & device discovery
 
-- Centered, zoomable MapKit view occupying main pane
-- Search bar with `MKLocalSearchCompleter` autocomplete
-- Click -> place pin -> "Teleport here" / "Set as start" / "Set as end" context menu
-- Current simulated position rendered as a distinct marker
-- Real device location (if known and recent) rendered as a ghosted secondary marker
+- USB and Wi-Fi devices enumerated by `PythonDaemon/tm_list_devices.py` (uses `usbmux.list_devices` + `bonjour.browse_remoted` from pymobiledevice3).
+- Sidebar device picker; selecting a device kicks off the connection flow — no more pasting RSD address/port by hand.
+- `TunnelSupervisor` opens the privileged `pymobiledevice3 lockdown start-tunnel` via `osascript … with administrator privileges`; one auth dialog per session. RSD address/port returned via a per-call control file.
+- macOS sleep (`NSWorkspace.willSleepNotification`) triggers a clean disconnect, since the DVT session can't survive sleep.
+- Tunnel-down / daemon-exit callbacks tear live state down automatically — no polling heartbeat, no stale "connected" state.
 
-## F3: Teleport Mode
+### Map view
 
-- Click on map -> device immediately reports that coordinate
-- "Clear" button -> device reverts to real GPS
+- Full-pane MapKit view with pan / zoom.
+- Search bar with `MKLocalSearchCompleter` autocomplete (used in route From/To pickers).
+- Simulated position rendered as a distinct marker.
+- Long-press surfaces a destination popover (see "Map-driven travel" below).
 
-## F4: Route Mode
+### Teleport
 
-- From/To pickers (map clicks or search)
-- Transport mode segmented control: Walk / Cycle / Drive
-- Speed slider: 0.5x, 1x, 5x, 10x, 100x
-- "Calculate Route" -> `MKDirections.calculate()` -> polyline rendered on map
-- Playback controls: Play / Pause / Stop / Restart
-- Progress bar showing elapsed / remaining
-- Interpolation: 10 Hz, smooth movement between MKDirections waypoints
+- Long-press → "Teleport here" sets the device location instantly.
+- Works at any time while connected — not tied to a specific control mode.
+- "Clear" reverts the device to its real GPS.
 
-## F5: Joystick Mode
+### Route playback
 
-- Hardware game controller via GameController.framework (auto-detected, hot-pluggable)
-- On-screen virtual stick as fallback (SwiftUI `DragGesture` inside a circular pad)
-- 20 Hz update tick
-- Speed cap selector: Walk (1.4 m/s) / Cycle (5 m/s) / Drive (15 m/s) / Custom
-- Heading derived from stick angle; magnitude controls speed
-- "Recenter" button returns to last teleport location
+- From/To via search or by promoting a long-press destination.
+- Transport mode: Walk (5 km/h), Cycle (15 km/h), Drive (50 km/h), or Custom km/h (`TransportMode.custom`).
+- `MKDirections.calculate()` returns a polyline, rendered on the map.
+- `NavigationEngine` interpolates along the polyline at the configured base speed.
+- Playback time-fast-forward multipliers: 1× / 5× / 10× / 100×.
+- Transport controls: Play / Pause / Stop. Progress bar (elapsed / total distance).
 
-## F6: Status & Diagnostics
+### Map-driven travel
 
-- Tunnel status pill in toolbar (green = up, yellow = mounting, red = down)
-- "View Log" sheet showing daemon stdout/stderr
-- Copy-coords-to-clipboard from any marker
+- Long-press with an existing simulated position opens a popover offering three actions:
+  - **Teleport here** — instant.
+  - **Go directly** — straight-line travel at `transportMode.baseSpeed`, served by `NavigationEngine`'s two-point case.
+  - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
 
-## F7: Wireless Transport (Wi-Fi tunnel) — Post-V1
+### Joystick
 
-V1 assumes a USB-cabled iPhone. Post-V1, support running the RSD tunnel over Wi-Fi so the device can sit untethered on the desk (or across the room).
+- Hardware game controller via `GameController.framework` (MFi / DualShock / Xbox / Joy-Con; hot-pluggable).
+- On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback.
+- WASD + arrow-key input on the focused map view.
+- 20 Hz control tick, 10% dead zone.
+- Speed cap reuses the same `TransportMode` (including Custom km/h).
+- "Recenter" button returns to the last teleport location.
 
-**Feasibility**: confirmed. `pymobiledevice3` supports Wi-Fi tunnels on iOS 17+; the same `LocationSimulation` DVT instrument is reached over both transports. The daemon and `DaemonBridge` need no changes — they just consume an RSD address + port, which works the same regardless of wire. The work is mostly UX, onboarding docs, and hardening for less-reliable links.
+### Composite control
 
-**Two paths depending on iOS version:**
+- Joystick and route playback / direct travel are not mutually exclusive.
+- `PositionIntegrator` owns authoritative position; engines publish velocity vectors that are summed per tick.
+- During route playback, joystick deflection drifts the simulated position off the polyline; off-route distance is surfaced as "Off-route: 42 m" once it exceeds 5 m.
+- **Rejoin** snaps the integrator back to the nearest polyline point.
+- Sustained large deviation (>200 m for >10 s) auto-aborts the route and switches to free joystick.
 
-|iOS version       |Tunnel command                                                                                                                            |
-|------------------|------------------------------------------------------------------------------------------------------------------------------------------|
-|17.0 – 17.3.1     |`sudo python3 -m pymobiledevice3 remote start-tunnel -t wifi`                                                                             |
-|17.4+ (incl. 26.4)|`python3 -m pymobiledevice3 lockdown wifi-connections on` (one-time, persists), then `sudo python3 -m pymobiledevice3 lockdown start-tunnel`|
+### Always-on GPS noise
 
-Both emit an RSD address + port — exactly what the sidebar already accepts.
+- `LocationNoise` adds Box-Muller Gaussian jitter (σ default 5 m, configurable 0–10 m) to every `SETQ` emission, including idle.
+- Single `AppState.emitSimulated()` chokepoint routes every coord through the noise filter.
+- 1 Hz idle re-emission keeps a "stationary" location wiggling like a real GPS fix.
+- The map marker shows the clean intent, not the jittered emission, so the on-screen position stays steady visually.
 
-**Prerequisites:**
+### Saved waypoints
 
-- Device must have been paired to this Mac at least once over USB (Wi-Fi tunnels cannot bootstrap trust from scratch).
-- Mac and iPhone on the same LAN, or otherwise routable to each other.
-- Tunnel process still needs root (TUN interface) — same as USB.
+- Save current location with a name prompt; persists to `UserDefaults` as JSON.
+- Sidebar list with click-to-teleport, right-click delete.
 
-**Implementation tasks (in suggested order):**
+### Saved routes
 
-1. Update README onboarding with the Wi-Fi command for our target (iOS 17.4+).
-2. Add a "Transport: USB / Wi-Fi" picker to the sidebar. Purely cosmetic in v1 of this feature — it drives which `start-tunnel` hint the UI shows. The daemon path doesn't change.
-3. Strengthen daemon liveness handling (Wi-Fi flaps more than USB):
-    - `tm_daemon.py`: detect DVT session drop and emit `ERR 12 session lost`; consider a self-driven heartbeat (or rely on the existing `HEARTBEAT` command if the Swift side polls).
-    - `DaemonBridge`: surface that as a transition to `.disconnected` with a "Wi-Fi dropped" log entry, instead of the current silent stall.
-4. Fold both transports into the eventual `PrivilegedHelper` (Phase 4): helper accepts `--transport wifi|usb|auto` and runs the right `start-tunnel` invocation, so the sudo prompt happens once at install rather than at every `start-tunnel`.
+- `SavedRoute` with name, transport mode, coordinates, and source (`calculated` / `directTravel` / `recorded` / `importedGPX`).
+- Persisted as per-route JSON under `~/Library/Application Support/TrailMate/routes/`.
+- Load / Replay / Export (GPX) / Rename / Delete.
+- "Save as Route…" promotes a recorded session into the route library.
 
-**Caveats:**
+### Session recording
 
-- Session liveness rule still applies: if Wi-Fi flaps or the device sleeps, the DVT session drops and the iPhone reverts to real GPS. Apple's design; not bypassable.
-- `wifi-connections on` is a persistent device-side toggle — flipping it once per device is fine; just remember it exists when debugging "why does this device behave differently?"
+- Record button on the map overlay; captures the clean (pre-noise) coordinate on every `emitSimulated` call.
+- Sessions persist as GPX with per-point timestamps under `~/Library/Application Support/TrailMate/recordings/YYYY-MM-DD/`.
+- Recordings sidebar groups by date; per-row Replay, Export, Delete, and "Save as Route…".
+- Replay uses original timestamps when present, otherwise falls back to constant-speed playback.
 
-**References:**
+### GPX import / export
 
-- [pymobiledevice3 iOS 17 tunnels guide](https://github.com/doronz88/pymobiledevice3/blob/master/docs/guides/ios17-tunnels.md)
+- Import: `NSOpenPanel` → `XMLParser` handles `<wpt>`, `<trkpt>`, `<rtept>`. Coordinates load into `NavigationEngine` for playback.
+- Export: `NSSavePanel` → GPX with `<wpt>` and ISO 8601 timestamps. Round-trips cleanly.
 
-## Out of V1 (deferred)
+### Status & diagnostics
 
-- GPX import/export (Phase 4)
-- Saved waypoints / route library (Phase 4)
-- Altitude / heading / speed overrides (research first; CoreLocation derives most of these)
-- Multi-device fan-out
-- Recording real movement and replaying it
-- Friction simulation (signal dropouts, accuracy variation)
+- Connection status pill in the sidebar (Connecting / Connected / Disconnected / Error).
+- "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
+- Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick activation.
+
+## Deferred / dropped
+
+Items considered during planning that were dropped, deferred, or superseded.
+
+- **SMAppService privileged helper.** Still using `osascript … with administrator privileges`. One auth dialog per session is acceptable for personal use; a packaged helper is the right path but needs a paid Apple ID for signing.
+- **DDI auto-mounting.** User mounts via Xcode or `pymobiledevice3 mounter auto-mount` once per OS update.
+- **Reconnect button.** Replaced by automatic teardown on tunnel/daemon exit; user re-runs Connect manually.
+- **Mount-status indicator showing DDI / tunnel / DVT separately.** Collapsed into a single Connection status pill.
+- **Ghosted secondary marker for the real device location.** The simulated coordinate overrides what CoreLocation reports back to the host, so a separate "real" marker would only ever match the simulated one.
+- **Right-click "Set as From / Set as To" on the map.** Search fields plus the long-press destination popover cover the same use cases.
+- **0.5× playback multiplier.** Multipliers are now 1× / 5× / 10× / 100×; slower-than-real playback was unused.
+
+## Out of scope (per [scope.md](../project-plan/scope.md))
+
+- Anti-detection — `CLLocationSourceInformation.isSimulatedBySoftware` is true; not bypassable, not a goal.
+- Multi-device orchestration — one iPhone at a time.
+- iOS ≤16 support — RSD tunnel is the minimum target.
+- Altitude / heading / speed overrides — CoreLocation derives these from position deltas; no plan to inject them directly.
+- Friction simulation (signal dropouts, accuracy variation) — Gaussian noise covers the realism floor; richer fault models are out of scope.
+- Recording and replaying the device's *real* GPS — recording captures the simulated trace, not what the iPhone would naturally report.

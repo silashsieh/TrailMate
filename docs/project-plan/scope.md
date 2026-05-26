@@ -17,5 +17,5 @@ The bounds of what TrailMate is trying to be — and, more importantly, what it 
 - **No App Store distribution.** Personal tool. Build from source, run unsigned.
 - **No cross-platform.** macOS only. Windows users have LocWarp; Linux users have raw pymobiledevice3.
 - **No legacy iOS support.** iOS 17 introduced the personalized DDI + RSD tunnel; that's the minimum target. Users on iOS ≤16 should use Schlaubischlump's LocationSimulator.
-- **No multi-device orchestration.** One iPhone at a time. (Possible v3 extension; not v1.)
+- **No multi-device orchestration.** One iPhone at a time.
 - **No production hardening.** This is a single-user dev tool, not a fleet-simulation platform.

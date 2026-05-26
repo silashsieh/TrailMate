@@ -4,14 +4,13 @@
 
 - [Architecture](technical/architecture.md) — project structure, layer diagram, process topology, daemon protocol, coordinate math
 - [Tech Stack](technical/tech-stack.md) — framework choices and target versions
-- [Core Features](technical/features.md) — V1 feature spec (F1–F7), Wi-Fi tunnel design, deferred items
+- [Features](technical/features.md) — single inventory of shipped features, plus dropped/deferred items
 - [Technical Decisions](technical/decisions.md) — key decisions D1–D7 and rationale
 
 ## Project Plan
 
 - [Scope](project-plan/scope.md) — goals and non-goals
 - [Implementation Phases](project-plan/phases.md) — phases 0–5 with steps, exit criteria, and results
-- [V2 Feature Plan](project-plan/v2-features.md) — phases 6–11 for owner-driven feature set (recording, composite control, discovery, etc.)
 - [Risks & Mitigations](project-plan/risks.md) — risk register
 - [Testing Strategy](project-plan/testing.md) — unit, integration, and manual smoke tests
 

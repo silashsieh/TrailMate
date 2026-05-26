@@ -35,7 +35,7 @@ TrailMate/
     └── technical/
         ├── architecture.md            # this file — structure, layers, processes, protocol
         ├── tech-stack.md              # framework choices and target versions
-        ├── features.md                # V1 feature spec (F1–F7) and deferred items
+        ├── features.md                # what ships today, plus dropped/deferred items
         └── decisions.md               # key technical decisions (D1–D6)
 ```
 

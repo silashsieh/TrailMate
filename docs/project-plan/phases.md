@@ -189,11 +189,11 @@ Only if you want this as a portfolio piece:
   - GitHub Actions: `.github/workflows/swift.yml` builds on push/PR to main; `.github/workflows/release.yml` is a `workflow_dispatch` job that builds via `packaging/release.sh` and uploads a DMG as a GitHub release tagged `v$MARKETING_VERSION`.
   - DMG packaging: `packaging/release.sh` produces a signed DMG.
   - Version bumped to `1.1` in `TrailMate.xcodeproj`.
+  - Tagged releases on `origin`: `v1.0.0` and `v1.1` (both with DMG attached via the `release.yml` workflow).
 - **Pending:**
   - README screenshots / GIF demo — the README is text-only today.
   - Localization scaffold (en + zh-Hant) — no `.lproj` files; no `Localizable.strings`.
   - Unit-test job in `swift.yml` — the workflow only runs `release.sh` (build), not `xcodebuild test`. The test target is also empty (see [testing.md](testing.md)).
-  - `v1.0` tag — never created; the project moved straight to `1.1` and no release workflow run has been dispatched locally. Run the release workflow on `main` to publish.
 
 -----
 

@@ -795,7 +795,7 @@ private struct RecordButton: View {
 // MARK: - Destination action bar
 
 private struct DestinationActionBar: View {
-    enum Action { case teleport, direct, route, cancel }
+    enum Action { case teleport, direct, route, appendDirect, appendRoute, cancel }
 
     let coord: CLLocationCoordinate2D
     let onAction: (Action) -> Void
@@ -839,6 +839,25 @@ private struct DestinationActionBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
+
+            if !appState.routeCoordinates.isEmpty {
+                Divider().frame(height: 14)
+
+                Button {
+                    onAction(.appendDirect)
+                } label: {
+                    Label("Append direct", systemImage: "arrow.forward.to.line")
+                }
+                .buttonStyle(.borderless)
+
+                Button {
+                    onAction(.appendRoute)
+                } label: {
+                    Label("Append route", systemImage: "arrow.triangle.branch")
+                }
+                .buttonStyle(.borderless)
+                .disabled(appState.isCalculatingRoute)
+            }
 
             Button {
                 onAction(.cancel)
@@ -996,6 +1015,10 @@ private struct MapArea: View {
                                 appState.travelDirectly(to: dest)
                             case .route:
                                 Task { await appState.routeFromCurrent(to: dest) }
+                            case .appendDirect:
+                                Task { await appState.appendDirectly(to: dest) }
+                            case .appendRoute:
+                                Task { await appState.appendRoute(to: dest) }
                             case .cancel:
                                 break
                             }

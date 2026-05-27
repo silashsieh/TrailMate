@@ -383,6 +383,40 @@ final class AppState {
         }
     }
 
+    // Extend the current route with a straight-line segment from its last
+    // point to `dest`. Preserves playback state (no resetStart, no auto-play)
+    // so a user can grow a route mid-playback.
+    func appendDirectly(to dest: CLLocationCoordinate2D) async {
+        guard let tail = routeCoordinates.last else {
+            addLog("No route to append to.")
+            return
+        }
+        let tailLoc = CLLocation(latitude: tail.latitude, longitude: tail.longitude)
+        let destLoc = CLLocation(latitude: dest.latitude, longitude: dest.longitude)
+        let meters = tailLoc.distance(from: destLoc)
+        routeCoordinates.append(dest)
+        await sim.loadRoute(coordinates: routeCoordinates, baseSpeed: effectiveBaseSpeedMPS, resetStart: false)
+        addLog(String(format: "Appended direct segment: +%.0f m", meters))
+    }
+
+    // Extend the current route via MKDirections from its last point to `dest`.
+    // Preserves playback state. Ignores side-panel stops (same reasoning as
+    // routeFromCurrent).
+    func appendRoute(to dest: CLLocationCoordinate2D) async {
+        guard let tail = routeCoordinates.last else {
+            addLog("No route to append to.")
+            return
+        }
+        isCalculatingRoute = true
+        defer { isCalculatingRoute = false }
+        addLog("Appending route segment...")
+
+        guard let result = await buildRoute(from: tail, via: [], to: dest) else { return }
+        routeCoordinates = RouteMath.joinSegments(routeCoordinates, result.coords)
+        await sim.loadRoute(coordinates: routeCoordinates, baseSpeed: effectiveBaseSpeedMPS, resetStart: false)
+        addLog(String(format: "Appended routed segment: +%.1f km, +%.0f min", result.distance / 1000, result.time / 60))
+    }
+
     // Apple Maps routing from current simulated position to `dest`. Auto-plays.
     // Intentionally ignores the side-panel stops: long-press is an ad-hoc flow
     // with a different start point, and silently injecting panel stops would

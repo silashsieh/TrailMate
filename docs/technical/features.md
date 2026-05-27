@@ -28,11 +28,13 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Route playback
 
 - From/To via search or by promoting a long-press destination.
+- Optional intermediate stops between From and To, visited in order. Each stop has its own search field; "Add Stop" appears once both endpoints are set. Soft notice above 10 stops (Apple Maps throttling risk); no hard cap.
 - Transport mode: Walk (5 km/h), Cycle (15 km/h), Drive (50 km/h), or Custom km/h (`TransportMode.custom`).
-- `MKDirections.calculate()` returns a polyline, rendered on the map.
+- `MKDirections.calculate()` is issued per segment ([From, …stops, To] pairs); polylines are merged via `RouteMath.joinSegments` (2 m meters-based join-vertex dedup).
 - `NavigationEngine` interpolates along the polyline at the configured base speed.
 - Playback time-fast-forward multipliers: 1× / 5× / 10× / 100×.
 - Transport controls: Play / Pause / Stop. Progress bar (elapsed / total distance).
+- Saved routes capture the planner inputs (From / To / stops with their labels) so they can be re-loaded as editable fields, not just replayed as a flat polyline. Routes saved before this field existed still play; their planner fields stay empty.
 
 ### Map-driven travel
 

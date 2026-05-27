@@ -157,3 +157,5 @@ meters_per_deg_lon = 111_320 * cos(lat_in_radians)
 ```
 
 This is accurate to <0.1% over distances <10km, which covers every realistic single-tick movement. For long routes (>50km), MKDirections gives us a polyline of fine-grained coordinates, so we never need to integrate over long stretches.
+
+For multi-stop routes, the planner issues one `MKDirections.calculate()` call per `[From, …stops, To]` pair sequentially (Apple Maps throttles parallel requests). Each segment's polyline is appended via `RouteMath.joinSegments`, which drops a duplicate vertex at the join when `CLLocation.distance` between the last point of the prior segment and the first point of the next is under 2 m. The threshold is meters-based, not degree-based, because MKDirections returns endpoints quantized at meter scale and a degree-based comparison would over-dedupe near the equator and under-dedupe near the poles. On any segment failure the whole route is aborted with a labeled log line (e.g. `Route failed: Stop 1 → Stop 2: …`); no partial polyline is rendered.

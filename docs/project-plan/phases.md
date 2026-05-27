@@ -204,3 +204,11 @@ Only if you want this as a portfolio piece:
 Owner-driven workflow features: always-on GPS noise, calibrated speeds + custom km/h, long-press destination popover, USB+Wi-Fi device discovery, session recording, composite (joystick-over-route) control, saved-routes library. All shipped in commit `8163d73`; the tunnel-supervisor follow-up (`d1c5634`) replaced manual RSD entry with auto-managed connect/disconnect.
 
 Phase-level steps and exit criteria are no longer maintained as a separate plan doc — what shipped is described in [../technical/features.md](../technical/features.md), and the per-phase rationale is preserved in the `8163d73` commit message.
+
+-----
+
+## Phase 12 — Wander Nearby (issue #2, 2026-05-28)
+
+**Status:** Done.
+
+Issue #2 (附近晃晃) asked for a way to wander a defined area without picking a specific destination. Added a fourth long-press action — **Wander nearby…** — that opens a sheet (radius 50/100/200 m + custom; duration 15/30/60 min + custom). `WanderRouteBuilder` chains `MKDirections` walking hops between random points sampled around the long-press center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`, with a 45° bearing-bias rule to suppress zig-zag retracing. Result loads via the existing `sim.loadRoute` path and auto-plays. Loose meander (no path-coverage), allowed to leak slightly outside the disc, one-shot, not persisted. No daemon protocol or layer changes.

@@ -38,10 +38,11 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Map-driven travel
 
-- Long-press with an existing simulated position opens a popover offering three actions:
+- Long-press with an existing simulated position opens a popover offering four actions:
   - **Teleport here** — instant.
   - **Go directly** — straight-line travel at `transportMode.baseSpeed`, served by `NavigationEngine`'s two-point case.
   - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
+  - **Wander nearby…** — opens a sheet to pick a radius (50 / 100 / 200 m or custom) and a duration (15 / 30 / 60 min or custom). `WanderRouteBuilder` chains `MKDirections` walking hops between random points around the long-press center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`. The wander may leak slightly beyond the disc; result is loaded into `NavigationEngine` and auto-plays. One-shot, not persisted.
 
 ### Joystick
 

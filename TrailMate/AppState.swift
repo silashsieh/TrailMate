@@ -116,6 +116,10 @@ final class AppState {
     var logMessages: [String] = []
     var showLogSheet = false
 
+    // Wander sheet
+    var showWanderSheet = false
+    var pendingWanderCenter: CLLocationCoordinate2D?
+
     private var daemonBridge: DaemonBridge?
     private var eventsTask: Task<Void, Never>?
     private let tunnelSupervisor = TunnelSupervisor()
@@ -443,6 +447,44 @@ final class AppState {
         await sim.play(multiplier: speedMultiplier)
     }
 
+    // Builds a meandering polyline of length ≈ speed × duration via chained
+    // MKDirections hops, then plays it back. The long-pressed point seeds the
+    // disc center and is the playback start; the wander may leak slightly
+    // outside the disc by design.
+    func wanderNearby(center: CLLocationCoordinate2D, radius: Double, duration: TimeInterval) async {
+        guard connectionStatus.isConnected else { return }
+
+        isCalculatingRoute = true
+        addLog("Generating wander route…")
+
+        let speed = effectiveBaseSpeedMPS
+        let options = WanderRouteBuilder.Options(
+            center: center,
+            radiusMeters: radius,
+            durationSeconds: duration,
+            speedMPS: speed,
+            transportType: effectiveDirectionsTransportType
+        )
+
+        do {
+            let result = try await WanderRouteBuilder.build(options: options)
+            routeCoordinates = result.coordinates
+            controlMode = .route
+            await sim.loadRoute(coordinates: result.coordinates, baseSpeed: speed, resetStart: true)
+
+            let distKm = result.distanceMeters / 1000
+            let estMin = speed > 0 ? result.distanceMeters / speed / 60 : 0
+            addLog(String(format: "Wander route: %.1f km, ~%.0f min (%@)", distKm, estMin, transportLabel))
+            if result.hopFailures > 0 {
+                addLog("Wander hop failures: \(result.hopFailures)")
+            }
+            await sim.play(multiplier: speedMultiplier)
+        } catch {
+            addLog("Wander failed: \(error.localizedDescription)")
+        }
+
+        isCalculatingRoute = false
+    }
 
     func startPlayback() {
         guard !routeCoordinates.isEmpty, connectionStatus.isConnected else { return }

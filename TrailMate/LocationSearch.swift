@@ -28,6 +28,14 @@ final class LocationSearch {
         }
     }
 
+    // Seed the field text without kicking off autocompletion — used when
+    // restoring saved state (e.g., loadSavedRoute) where suggestions would
+    // be visual noise.
+    func setQuery(_ text: String) {
+        query = text
+        suggestions = []
+    }
+
     func select(_ completion: MKLocalSearchCompletion) {
         query = completion.title
         suggestions = []

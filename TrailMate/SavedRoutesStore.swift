@@ -7,6 +7,16 @@ struct SavedRoute: Identifiable, Codable, Hashable {
         let lon: Double
     }
 
+    // Planner-editable input snapshot. Distinct from `coordinates` (the flat
+    // playback polyline) so a saved route can be re-loaded into From/To/stops
+    // fields and re-calculated. Nil on routes saved before this field existed
+    // and on routes whose source has no editable inputs (recorded / imported).
+    struct NamedCoord: Codable, Hashable {
+        let lat: Double
+        let lon: Double
+        let label: String?
+    }
+
     let id: UUID
     var name: String
     let createdAt: Date
@@ -16,6 +26,9 @@ struct SavedRoute: Identifiable, Codable, Hashable {
     // "calculated" | "direct" | "recorded" | "imported"
     let source: String
     let sourceDetail: String?
+    let fromWaypoint: NamedCoord?
+    let toWaypoint: NamedCoord?
+    let stopWaypoints: [NamedCoord]?
 
     var transportMode: TransportMode {
         TransportMode(rawValue: transportModeRaw) ?? .walk

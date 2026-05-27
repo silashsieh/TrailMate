@@ -74,6 +74,7 @@ final class AppState {
     var toSearch = LocationSearch()
     var fromCoordinate: CLLocationCoordinate2D?
     var toCoordinate: CLLocationCoordinate2D?
+    var stops: [RouteStop] = []
     var transportMode: TransportMode = .walk {
         didSet { Task { await syncEngineSpeeds() } }
     }
@@ -304,41 +305,59 @@ final class AppState {
         toCoordinate = await toSearch.resolve(completion)
     }
 
+    func addStop() {
+        guard stops.count < 50 else { return }
+        stops.append(RouteStop())
+    }
+
+    func removeStop(id: UUID) {
+        stops.removeAll { $0.id == id }
+    }
+
+    func selectStop(id: UUID, completion: MKLocalSearchCompletion) async {
+        guard let stop = stops.first(where: { $0.id == id }) else { return }
+        stop.search.select(completion)
+        stop.coordinate = await stop.search.resolve(completion)
+    }
+
+    // Defined now so the model supports reorder; UI wiring (.onMove) is deferred.
+    func moveStop(fromOffsets: IndexSet, toOffset: Int) {
+        stops.move(fromOffsets: fromOffsets, toOffset: toOffset)
+    }
+
+    var canCalculateRoute: Bool {
+        fromCoordinate != nil
+            && toCoordinate != nil
+            && stops.allSatisfy { $0.coordinate != nil }
+            && !isCalculatingRoute
+    }
+
     func calculateRoute() async {
         guard let from = fromCoordinate, let to = toCoordinate else {
             addLog("Select both From and To locations first.")
             return
         }
-
-        isCalculatingRoute = true
-        addLog("Calculating route...")
-
-        let request = MKDirections.Request()
-        request.source = MKMapItem(location: CLLocation(latitude: from.latitude, longitude: from.longitude), address: nil)
-        request.destination = MKMapItem(location: CLLocation(latitude: to.latitude, longitude: to.longitude), address: nil)
-        request.transportType = effectiveDirectionsTransportType
-
-        do {
-            let directions = MKDirections(request: request)
-            let response = try await directions.calculate()
-            guard let route = response.routes.first else {
-                addLog("No route found.")
-                isCalculatingRoute = false
-                return
-            }
-
-            let coords = extractCoordinates(from: route.polyline)
-            routeCoordinates = coords
-            await sim.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
-
-            let distKm = route.distance / 1000
-            let timeMin = route.expectedTravelTime / 60
-            addLog(String(format: "Route: %.1f km, ~%.0f min (%@)", distKm, timeMin, transportLabel))
-        } catch {
-            addLog("Route calculation failed: \(error.localizedDescription)")
+        let via = stops.compactMap { $0.coordinate }
+        guard via.count == stops.count else {
+            addLog("Resolve all stop locations first.")
+            return
+        }
+        if stops.count > 10 {
+            addLog("Note: routing \(stops.count) stops — Apple Maps may throttle.")
         }
 
-        isCalculatingRoute = false
+        isCalculatingRoute = true
+        defer { isCalculatingRoute = false }
+        addLog("Calculating route...")
+
+        guard let result = await buildRoute(from: from, via: via, to: to) else { return }
+        routeCoordinates = result.coords
+        await sim.loadRoute(coordinates: result.coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
+
+        let suffix = stops.isEmpty ? "" : " · via \(stops.count) \(stops.count == 1 ? "stop" : "stops")"
+        let distKm = result.distance / 1000
+        let timeMin = result.time / 60
+        addLog(String(format: "Route: %.1f km, ~%.0f min (%@)%@", distKm, timeMin, transportLabel, suffix))
     }
 
     // Straight-line travel from the current simulated position to `dest`. Uses
@@ -365,6 +384,9 @@ final class AppState {
     }
 
     // Apple Maps routing from current simulated position to `dest`. Auto-plays.
+    // Intentionally ignores the side-panel stops: long-press is an ad-hoc flow
+    // with a different start point, and silently injecting panel stops would
+    // surprise the user.
     func routeFromCurrent(to dest: CLLocationCoordinate2D) async {
         guard connectionStatus.isConnected else { return }
         guard let from = simState.simulatedCoordinate else {
@@ -373,37 +395,20 @@ final class AppState {
         }
 
         isCalculatingRoute = true
+        defer { isCalculatingRoute = false }
         addLog("Routing from current position...")
 
-        let request = MKDirections.Request()
-        request.source = MKMapItem(location: CLLocation(latitude: from.latitude, longitude: from.longitude), address: nil)
-        request.destination = MKMapItem(location: CLLocation(latitude: dest.latitude, longitude: dest.longitude), address: nil)
-        request.transportType = effectiveDirectionsTransportType
+        guard let result = await buildRoute(from: from, via: [], to: dest) else { return }
+        routeCoordinates = result.coords
+        controlMode = .route
+        await sim.loadRoute(coordinates: result.coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
 
-        do {
-            let directions = MKDirections(request: request)
-            let response = try await directions.calculate()
-            guard let route = response.routes.first else {
-                addLog("No route found.")
-                isCalculatingRoute = false
-                return
-            }
-
-            let coords = extractCoordinates(from: route.polyline)
-            routeCoordinates = coords
-            controlMode = .route
-            await sim.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
-
-            let distKm = route.distance / 1000
-            let timeMin = route.expectedTravelTime / 60
-            addLog(String(format: "Route: %.1f km, ~%.0f min (%@)", distKm, timeMin, transportLabel))
-            await sim.play(multiplier: speedMultiplier)
-        } catch {
-            addLog("Route calculation failed: \(error.localizedDescription)")
-        }
-
-        isCalculatingRoute = false
+        let distKm = result.distance / 1000
+        let timeMin = result.time / 60
+        addLog(String(format: "Route: %.1f km, ~%.0f min (%@)", distKm, timeMin, transportLabel))
+        await sim.play(multiplier: speedMultiplier)
     }
+
 
     func startPlayback() {
         guard !routeCoordinates.isEmpty, connectionStatus.isConnected else { return }
@@ -619,6 +624,19 @@ final class AppState {
             addLog("No route to save.")
             return
         }
+        // Capture the planner inputs only when this route came from the planner;
+        // direct/recorded/imported sources have no editable inputs to round-trip.
+        let plannerFrom: SavedRoute.NamedCoord? = source == "calculated"
+            ? fromCoordinate.map { SavedRoute.NamedCoord(lat: $0.latitude, lon: $0.longitude, label: fromSearch.query) }
+            : nil
+        let plannerTo: SavedRoute.NamedCoord? = source == "calculated"
+            ? toCoordinate.map { SavedRoute.NamedCoord(lat: $0.latitude, lon: $0.longitude, label: toSearch.query) }
+            : nil
+        let plannerStops: [SavedRoute.NamedCoord]? = source == "calculated"
+            ? stops.compactMap { stop in
+                stop.coordinate.map { SavedRoute.NamedCoord(lat: $0.latitude, lon: $0.longitude, label: stop.search.query) }
+            }
+            : nil
         let route = SavedRoute(
             id: UUID(),
             name: name,
@@ -627,7 +645,10 @@ final class AppState {
             customSpeedKmh: transportMode == .custom ? customSpeedKmh : nil,
             coordinates: routeCoordinates.map { .init(lat: $0.latitude, lon: $0.longitude) },
             source: source,
-            sourceDetail: sourceDetail
+            sourceDetail: sourceDetail,
+            fromWaypoint: plannerFrom,
+            toWaypoint: plannerTo,
+            stopWaypoints: plannerStops
         )
         do {
             try savedRoutes.save(route)
@@ -644,6 +665,31 @@ final class AppState {
         transportMode = route.transportMode
         if let custom = route.customSpeedKmh {
             customSpeedKmh = custom
+        }
+
+        // Restore planner inputs so the loaded route is re-editable. Older
+        // saved routes (and non-"calculated" sources) have nil here; in that
+        // case clear the planner so stale fields don't linger from whatever
+        // the user was planning before.
+        if let f = route.fromWaypoint {
+            fromCoordinate = CLLocationCoordinate2D(latitude: f.lat, longitude: f.lon)
+            fromSearch.setQuery(f.label ?? "")
+        } else {
+            fromCoordinate = nil
+            fromSearch.setQuery("")
+        }
+        if let t = route.toWaypoint {
+            toCoordinate = CLLocationCoordinate2D(latitude: t.lat, longitude: t.lon)
+            toSearch.setQuery(t.label ?? "")
+        } else {
+            toCoordinate = nil
+            toSearch.setQuery("")
+        }
+        stops = (route.stopWaypoints ?? []).map { saved in
+            let s = RouteStop()
+            s.coordinate = CLLocationCoordinate2D(latitude: saved.lat, longitude: saved.lon)
+            s.search.setQuery(saved.label ?? "")
+            return s
         }
 
         routeCoordinates = coords
@@ -674,7 +720,10 @@ final class AppState {
             customSpeedKmh: transportMode == .custom ? customSpeedKmh : nil,
             coordinates: coords,
             source: "recorded",
-            sourceDetail: session.id.uuidString
+            sourceDetail: session.id.uuidString,
+            fromWaypoint: nil,
+            toWaypoint: nil,
+            stopWaypoints: nil
         )
         do {
             try savedRoutes.save(route)
@@ -766,6 +815,60 @@ final class AppState {
         )
         polyline.getCoordinates(&coords, range: NSRange(location: 0, length: polyline.pointCount))
         return coords
+    }
+
+    private func stopLabel(at index: Int, total: Int) -> String {
+        if index == 0 { return "From" }
+        if index == total - 1 { return "To" }
+        return "Stop \(index)"
+    }
+
+    private func buildRoute(
+        from: CLLocationCoordinate2D,
+        via: [CLLocationCoordinate2D],
+        to: CLLocationCoordinate2D
+    ) async -> (coords: [CLLocationCoordinate2D], distance: Double, time: TimeInterval)? {
+        let stopsList = [from] + via + [to]
+        var combined: [CLLocationCoordinate2D] = []
+        var totalDistance = 0.0
+        var totalTime: TimeInterval = 0.0
+
+        for i in 0..<(stopsList.count - 1) {
+            let a = stopsList[i]
+            let b = stopsList[i + 1]
+            let aLoc = CLLocation(latitude: a.latitude, longitude: a.longitude)
+            let bLoc = CLLocation(latitude: b.latitude, longitude: b.longitude)
+            if aLoc.distance(from: bLoc) < 1.0 { continue }
+
+            let request = MKDirections.Request()
+            request.source = MKMapItem(location: aLoc, address: nil)
+            request.destination = MKMapItem(location: bLoc, address: nil)
+            request.transportType = effectiveDirectionsTransportType
+
+            let fromLabel = stopLabel(at: i, total: stopsList.count)
+            let toLabel = stopLabel(at: i + 1, total: stopsList.count)
+
+            do {
+                let response = try await MKDirections(request: request).calculate()
+                guard let route = response.routes.first else {
+                    addLog("Route failed: \(fromLabel) → \(toLabel): no route found.")
+                    return nil
+                }
+                let segCoords = extractCoordinates(from: route.polyline)
+                combined = RouteMath.joinSegments(combined, segCoords)
+                totalDistance += route.distance
+                totalTime += route.expectedTravelTime
+            } catch {
+                addLog("Route failed: \(fromLabel) → \(toLabel): \(error.localizedDescription)")
+                return nil
+            }
+        }
+
+        guard combined.count >= 2 else {
+            addLog("Start and end are the same location.")
+            return nil
+        }
+        return (combined, totalDistance, totalTime)
     }
 
     func addLog(_ message: String) {

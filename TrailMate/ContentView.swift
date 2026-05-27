@@ -125,6 +125,18 @@ private struct RouteSection: View {
                 }
             )
 
+            ForEach(Array(appState.stops.enumerated()), id: \.element.id) { index, stop in
+                StopRow(index: index, stop: stop)
+            }
+
+            if appState.fromCoordinate != nil && appState.toCoordinate != nil {
+                Button {
+                    appState.addStop()
+                } label: {
+                    Label("Add Stop", systemImage: "plus.circle")
+                }
+            }
+
             SearchField(
                 label: "To",
                 search: appState.toSearch,
@@ -132,6 +144,12 @@ private struct RouteSection: View {
                     Task { await appState.selectTo(completion) }
                 }
             )
+
+            if appState.stops.count > 10 {
+                Text("Apple Maps may throttle routes with this many stops.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
 
             TransportSpeedPicker()
 
@@ -146,7 +164,7 @@ private struct RouteSection: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .disabled(appState.fromCoordinate == nil || appState.toCoordinate == nil || appState.isCalculatingRoute)
+            .disabled(!appState.canCalculateRoute)
 
             Divider()
 
@@ -265,6 +283,33 @@ private struct SearchField: View {
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+}
+
+private struct StopRow: View {
+    let index: Int
+    let stop: RouteStop
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            SearchField(
+                label: "Stop \(index + 1)",
+                search: stop.search,
+                onSelect: { completion in
+                    Task { await appState.selectStop(id: stop.id, completion: completion) }
+                }
+            )
+            .frame(maxWidth: .infinity)
+
+            Button(role: .destructive) {
+                appState.removeStop(id: stop.id)
+            } label: {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+            .padding(.top, 6)
         }
     }
 }
@@ -832,6 +877,17 @@ private struct MapArea: View {
                 if let from = appState.fromCoordinate, appState.controlMode == .route {
                     Marker("Start", systemImage: "flag.fill", coordinate: from)
                         .tint(.green)
+                }
+
+                if appState.controlMode == .route {
+                    ForEach(Array(appState.stops.enumerated()), id: \.element.id) { idx, stop in
+                        if let coord = stop.coordinate {
+                            Marker("Stop \(idx + 1)",
+                                   systemImage: "\(idx + 1).circle.fill",
+                                   coordinate: coord)
+                                .tint(.blue)
+                        }
+                    }
                 }
 
                 if let to = appState.toCoordinate, appState.controlMode == .route {

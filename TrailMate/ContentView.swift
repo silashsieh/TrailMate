@@ -16,6 +16,9 @@ struct ContentView: View {
         .sheet(isPresented: $appState.showLogSheet) {
             LogSheet()
         }
+        .sheet(isPresented: $appState.showWanderSheet) {
+            WanderSheet()
+        }
     }
 }
 
@@ -665,6 +668,179 @@ private struct LogSheet: View {
     }
 }
 
+// MARK: - Wander Sheet
+
+private struct WanderSheet: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
+
+    enum RadiusChoice: Hashable { case fixed(Double), custom }
+    enum DurationChoice: Hashable { case fixed(TimeInterval), custom }
+
+    @State private var radiusChoice: RadiusChoice = .fixed(100)
+    @State private var customRadiusText: String = "150"
+    @State private var durationChoice: DurationChoice = .fixed(15 * 60)
+    @State private var customDurationText: String = "20"
+
+    private static let radiusOptions: [(label: String, meters: Double)] = [
+        ("50 m", 50), ("100 m", 100), ("200 m", 200)
+    ]
+
+    private static let durationOptions: [(label: String, seconds: TimeInterval)] = [
+        ("15 min", 15 * 60), ("30 min", 30 * 60), ("1 hr", 60 * 60)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Wander nearby")
+                    .font(.headline)
+                Spacer()
+                Button("Close") { dismiss() }
+            }
+
+            if let center = appState.pendingWanderCenter {
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .foregroundStyle(.secondary)
+                    Text(String(format: "%.5f, %.5f", center.latitude, center.longitude))
+                        .font(.callout)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Radius").font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    ForEach(Self.radiusOptions, id: \.label) { opt in
+                        ChoiceButton(
+                            label: opt.label,
+                            isSelected: radiusChoice == .fixed(opt.meters)
+                        ) { radiusChoice = .fixed(opt.meters) }
+                    }
+                    ChoiceButton(
+                        label: "Custom",
+                        isSelected: radiusChoice == .custom
+                    ) { radiusChoice = .custom }
+                }
+                if radiusChoice == .custom {
+                    HStack(spacing: 4) {
+                        TextField("meters", text: $customRadiusText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 90)
+                        Text("m").foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Duration").font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    ForEach(Self.durationOptions, id: \.label) { opt in
+                        ChoiceButton(
+                            label: opt.label,
+                            isSelected: durationChoice == .fixed(opt.seconds)
+                        ) { durationChoice = .fixed(opt.seconds) }
+                    }
+                    ChoiceButton(
+                        label: "Custom",
+                        isSelected: durationChoice == .custom
+                    ) { durationChoice = .custom }
+                }
+                if durationChoice == .custom {
+                    HStack(spacing: 4) {
+                        TextField("minutes", text: $customDurationText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 90)
+                        Text("min").foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Text(previewText)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Start") { start() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canStart)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420)
+    }
+
+    private var resolvedRadius: Double? {
+        switch radiusChoice {
+        case .fixed(let m): m
+        case .custom: Double(customRadiusText.trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    private var resolvedDuration: TimeInterval? {
+        switch durationChoice {
+        case .fixed(let s):
+            return s
+        case .custom:
+            guard let mins = Double(customDurationText.trimmingCharacters(in: .whitespaces)) else { return nil }
+            return mins * 60
+        }
+    }
+
+    private var canStart: Bool {
+        guard let r = resolvedRadius, r > 0 else { return false }
+        guard let d = resolvedDuration, d > 0 else { return false }
+        guard appState.pendingWanderCenter != nil else { return false }
+        return true
+    }
+
+    private var previewText: String {
+        guard let d = resolvedDuration else { return " " }
+        let kmh = appState.effectiveBaseSpeedMPS * 3.6
+        let km = appState.effectiveBaseSpeedMPS * d / 1000
+        let mode: String = {
+            if appState.transportMode == .custom {
+                return String(format: "Custom %.0f km/h", appState.customSpeedKmh)
+            }
+            return appState.transportMode.rawValue
+        }()
+        return String(format: "≈ %.1f km at %@ (%.0f km/h)", km, mode, kmh)
+    }
+
+    private func start() {
+        guard let center = appState.pendingWanderCenter,
+              let radius = resolvedRadius,
+              let duration = resolvedDuration else { return }
+        dismiss()
+        Task { await appState.wanderNearby(center: center, radius: radius, duration: duration) }
+    }
+}
+
+private struct ChoiceButton: View {
+    let label: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.callout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(isSelected ? Color.accentColor.opacity(0.25) : Color.gray.opacity(0.12),
+                            in: Capsule())
+                .overlay(
+                    Capsule().stroke(isSelected ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Sidebar Components
 
 private struct DevicePickerArea: View {
@@ -795,7 +971,7 @@ private struct RecordButton: View {
 // MARK: - Destination action bar
 
 private struct DestinationActionBar: View {
-    enum Action { case teleport, direct, route, appendDirect, appendRoute, cancel }
+    enum Action { case teleport, direct, route, wander, appendDirect, appendRoute, cancel }
 
     let coord: CLLocationCoordinate2D
     let onAction: (Action) -> Void
@@ -836,6 +1012,14 @@ private struct DestinationActionBar: View {
                 } else {
                     Label("Route here", systemImage: "map.fill")
                 }
+            }
+            .buttonStyle(.borderless)
+            .disabled(appState.isCalculatingRoute)
+
+            Button {
+                onAction(.wander)
+            } label: {
+                Label("Wander nearby…", systemImage: "shuffle.circle")
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
@@ -1015,6 +1199,9 @@ private struct MapArea: View {
                                 appState.travelDirectly(to: dest)
                             case .route:
                                 Task { await appState.routeFromCurrent(to: dest) }
+                            case .wander:
+                                appState.pendingWanderCenter = dest
+                                appState.showWanderSheet = true
                             case .appendDirect:
                                 Task { await appState.appendDirectly(to: dest) }
                             case .appendRoute:

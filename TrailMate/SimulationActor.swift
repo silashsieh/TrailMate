@@ -176,13 +176,15 @@ actor SimulationActor {
 
     // MARK: - Joystick
 
-    func startJoystick(baseSpeed: Double, fallbackCoord: CLLocationCoordinate2D) async {
-        let startCoord = lastEmittedCoordinate ?? integrator.position ?? fallbackCoord
-        joystickAnchor = startCoord
-        if integrator.position == nil {
-            integrator.reset(to: startCoord)
-        }
+    func startJoystick(baseSpeed: Double) async {
         joy.start(baseSpeed: baseSpeed)
+        // Only set the anchor if a prior position exists (e.g. user already
+        // teleported). With no position yet, the engine is armed but inert —
+        // the aggregator's `guard let pos = integrator.position` short-circuits
+        // until the first teleport seeds it. Nothing is sent to the device.
+        if let pos = lastEmittedCoordinate ?? integrator.position {
+            joystickAnchor = pos
+        }
         await pushSnapshotNow()
     }
 
@@ -321,7 +323,11 @@ actor SimulationActor {
 
         if nav.playbackState == .playing {
             await maybeCheckDeviation(pos: pos)
-        } else if bridge_routeDeviationMeters != 0 {
+        } else {
+            // Joystick-only (no route playing) still needs the bridge updated
+            // so SwiftUI sees the moving coordinate. Without this push, emit()
+            // keeps streaming SETQ to the device but simulatedCoordinate on
+            // the bridge stays frozen on whatever startJoystick last pushed.
             deviationStartedAt = nil
             await pushSnapshot(routeDeviationMeters: 0)
         }

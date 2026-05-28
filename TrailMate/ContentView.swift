@@ -60,22 +60,8 @@ private struct SidebarView: View {
             }
 
             if appState.connectionStatus.isConnected {
-                Section("Mode") {
-                    Picker("Control Mode", selection: $appState.controlMode) {
-                        ForEach(ControlMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-
-                switch appState.controlMode {
-                case .route:
-                    RouteSection()
-                case .joystick:
-                    JoystickSection()
-                }
+                RouteSection()
+                JoystickSection()
             }
 
             if !appState.savedWaypoints.isEmpty || appState.simState.simulatedCoordinate != nil {
@@ -423,8 +409,6 @@ private struct JoystickSection: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        @Bindable var appState = appState
-
         Section("Joystick") {
             HStack {
                 if let name = appState.simState.joystickControllerName {
@@ -437,30 +421,8 @@ private struct JoystickSection: View {
             }
             .font(.callout)
 
-            TransportSpeedPicker()
-
-            if appState.simState.joystickIsActive {
-                Button("Recenter") {
-                    appState.recenterJoystick()
-                }
-
-                Button("Stop", role: .destructive) {
-                    Task { await appState.stopJoystick() }
-                }
-            } else {
-                Button {
-                    appState.startJoystick()
-                } label: {
-                    Text("Start Joystick")
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(!appState.connectionStatus.isConnected)
-
-                if appState.simState.simulatedCoordinate == nil {
-                    Text("Tip: Long-press the map to set a starting position first")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            Button("Recenter") {
+                appState.recenterJoystick()
             }
         }
     }
@@ -1077,23 +1039,21 @@ private struct MapArea: View {
                         .stroke(.blue, lineWidth: 4)
                 }
 
-                if let from = appState.fromCoordinate, appState.controlMode == .route {
+                if let from = appState.fromCoordinate {
                     Marker("Start", systemImage: "flag.fill", coordinate: from)
                         .tint(.green)
                 }
 
-                if appState.controlMode == .route {
-                    ForEach(Array(appState.stops.enumerated()), id: \.element.id) { idx, stop in
-                        if let coord = stop.coordinate {
-                            Marker("Stop \(idx + 1)",
-                                   systemImage: "\(idx + 1).circle.fill",
-                                   coordinate: coord)
-                                .tint(.blue)
-                        }
+                ForEach(Array(appState.stops.enumerated()), id: \.element.id) { idx, stop in
+                    if let coord = stop.coordinate {
+                        Marker("Stop \(idx + 1)",
+                               systemImage: "\(idx + 1).circle.fill",
+                               coordinate: coord)
+                            .tint(.blue)
                     }
                 }
 
-                if let to = appState.toCoordinate, appState.controlMode == .route {
+                if let to = appState.toCoordinate {
                     Marker("End", systemImage: "mappin", coordinate: to)
                         .tint(.orange)
                 }
@@ -1229,19 +1189,10 @@ private struct MapArea: View {
                 let pct = Int(appState.simState.navigationProgress * 100)
                 return "Playing route — \(pct)%"
             }
-            if appState.simState.joystickIsActive {
-                if let coord = appState.simState.simulatedCoordinate {
-                    return String(format: "Joystick: %.4f, %.4f", coord.latitude, coord.longitude)
-                }
-                return "Joystick active"
-            }
             if let coord = appState.simState.simulatedCoordinate {
                 return String(format: "Simulating: %.4f, %.4f", coord.latitude, coord.longitude)
             }
-            switch appState.controlMode {
-            case .route: return "Search locations and calculate a route"
-            case .joystick: return "Long-press map to teleport, or Start joystick for live control"
-            }
+            return "Long-press the map to set a starting location"
         case .error:
             return "Connection error — check sidebar"
         }

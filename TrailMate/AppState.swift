@@ -11,11 +11,6 @@ enum ConnectionStatus: Equatable {
     var isConnected: Bool { self == .connected }
 }
 
-enum ControlMode: String, CaseIterable {
-    case route = "Route"
-    case joystick = "Joystick"
-}
-
 enum TransportMode: String, CaseIterable {
     case walk = "Walk"
     case cycle = "Cycle"
@@ -60,9 +55,6 @@ final class AppState {
     // user-facing inputs.
     private var rsdAddress: String = ""
     private var rsdPort: String = ""
-
-    // Mode
-    var controlMode: ControlMode = .joystick
 
     // MainActor projection of simulation state for SwiftUI to observe.
     // SimulationActor pushes snapshots into this; views never touch the
@@ -248,6 +240,8 @@ final class AppState {
             addLog("Connected — ready for commands.")
             await sim.updateBaseSpeed(effectiveBaseSpeedMPS)
             await sim.attach(backend: bridge)
+            await sim.startJoystick(baseSpeed: effectiveBaseSpeedMPS)
+            addLog("Joystick armed (\(transportLabel) speed) — long-press the map to set a starting location")
         } catch {
             connectionStatus = .error(error.localizedDescription)
             addLog("Connection failed: \(error.localizedDescription)")
@@ -375,7 +369,6 @@ final class AppState {
 
         let coords = [from, dest]
         routeCoordinates = coords
-        controlMode = .route
         let mult = speedMultiplier
         let speed = effectiveBaseSpeedMPS
         let meters = CLLocation(latitude: from.latitude, longitude: from.longitude)
@@ -438,7 +431,6 @@ final class AppState {
 
         guard let result = await buildRoute(from: from, via: [], to: dest) else { return }
         routeCoordinates = result.coords
-        controlMode = .route
         await sim.loadRoute(coordinates: result.coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
 
         let distKm = result.distance / 1000
@@ -469,7 +461,6 @@ final class AppState {
         do {
             let result = try await WanderRouteBuilder.build(options: options)
             routeCoordinates = result.coordinates
-            controlMode = .route
             await sim.loadRoute(coordinates: result.coordinates, baseSpeed: speed, resetStart: true)
 
             let distKm = result.distanceMeters / 1000
@@ -517,27 +508,10 @@ final class AppState {
 
     // MARK: - Joystick
 
-    func startJoystick() {
-        let fallback = CLLocationCoordinate2D(latitude: 25.033, longitude: 121.565)
-        let speed = effectiveBaseSpeedMPS
-        let label = transportLabel
-        Task {
-            await sim.startJoystick(baseSpeed: speed, fallbackCoord: fallback)
-            addLog("Joystick started (\(label) speed)")
-        }
-    }
-
     func recenterJoystick() {
         Task {
             await sim.recenterJoystick()
             addLog("Recentered to starting position")
-        }
-    }
-
-    func stopJoystick() async {
-        await sim.stopJoystick()
-        if await sim.isPlaybackIdle {
-            await clearLocation()
         }
     }
 
@@ -580,7 +554,6 @@ final class AppState {
             }
 
             routeCoordinates = coords
-            controlMode = .route
             let speed = effectiveBaseSpeedMPS
             Task { await sim.loadRoute(coordinates: coords, baseSpeed: speed, resetStart: false) }
             addLog("Imported \(coords.count) points from \(url.lastPathComponent)")
@@ -660,7 +633,6 @@ final class AppState {
         let coords = session.points.map { $0.coordinate }
         guard !coords.isEmpty else { return }
         routeCoordinates = coords
-        controlMode = .route
         let speed = effectiveBaseSpeedMPS
         let mult = speedMultiplier
         addLog("Replaying recording (\(session.points.count) points)")
@@ -769,7 +741,6 @@ final class AppState {
         }
 
         routeCoordinates = coords
-        controlMode = .route
         let speed = effectiveBaseSpeedMPS
         let mult = speedMultiplier
         let shouldPlay = autoPlay && connectionStatus.isConnected

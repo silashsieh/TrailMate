@@ -22,7 +22,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Teleport
 
 - Long-press → "Teleport here" sets the device location instantly.
-- Works at any time while connected — not tied to a specific control mode.
+- Works at any time while connected. Doubles as the way to set the starting location for joystick input on a fresh connect.
 - "Clear" reverts the device to its real GPS.
 
 ### Route playback
@@ -46,11 +46,12 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Joystick
 
+- Arms on connect — no Start button. The engine stays inert (no SETQ, no marker) until the first long-press teleport seeds the integrator; from then on, stick input drives the simulated location at the configured base speed.
 - Hardware game controller via `GameController.framework` (MFi / DualShock / Xbox / Joy-Con; hot-pluggable).
 - On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback.
 - WASD + arrow-key input on the focused map view.
 - 20 Hz control tick, 10% dead zone.
-- Speed cap reuses the same `TransportMode` (including Custom km/h).
+- Speed cap reuses the same `TransportMode` (including Custom km/h); the picker lives in the Route section and drives both engines.
 - "Recenter" button returns to the last teleport location.
 
 ### Composite control
@@ -96,7 +97,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 - Connection status pill in the sidebar (Connecting / Connected / Disconnected / Error).
 - "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
-- Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick activation.
+- Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick arming.
 
 ### Bundled Python runtime
 

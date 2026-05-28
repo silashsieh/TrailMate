@@ -18,6 +18,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Search bar with `MKLocalSearchCompleter` autocomplete (used in route From/To pickers).
 - Simulated position rendered as a distinct marker.
 - Long-press surfaces a destination popover (see "Map-driven travel" below).
+- Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
 
 ### Teleport
 

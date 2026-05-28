@@ -141,6 +141,11 @@ final class AppState {
         if UserDefaults.standard.object(forKey: "noiseSigmaMeters") != nil {
             self.noiseSigmaMeters = UserDefaults.standard.double(forKey: "noiseSigmaMeters")
         }
+
+        if let raw = UserDefaults.standard.string(forKey: "transportMode"),
+           let mode = TransportMode(rawValue: raw) {
+            self.transportMode = mode
+        }
         let initialSigma = noiseSigmaMeters
         Task { await sim.updateNoiseSigma(initialSigma) }
 
@@ -179,6 +184,7 @@ final class AppState {
     func persistTuning() {
         UserDefaults.standard.set(customSpeedKmh, forKey: "customSpeedKmh")
         UserDefaults.standard.set(noiseSigmaMeters, forKey: "noiseSigmaMeters")
+        UserDefaults.standard.set(transportMode.rawValue, forKey: "transportMode")
     }
 
     private func syncEngineSpeeds() async {

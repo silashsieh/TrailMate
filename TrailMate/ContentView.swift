@@ -214,6 +214,9 @@ private struct TransportSpeedPicker: View {
                 }
             }
             .pickerStyle(.segmented)
+            .onChange(of: appState.transportMode) { _, _ in
+                appState.persistTuning()
+            }
 
             if appState.transportMode == .custom {
                 HStack {

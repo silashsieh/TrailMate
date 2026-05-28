@@ -374,6 +374,9 @@ private struct PlaybackProgress: View {
             HStack {
                 Text(formatDistance(sim.navigationElapsedDistance))
                 Spacer()
+                Text(remainingTimeLabel)
+                    .monospacedDigit()
+                Spacer()
                 Text(formatDistance(sim.navigationTotalDistance))
             }
             .font(.caption)
@@ -400,6 +403,18 @@ private struct PlaybackProgress: View {
             return String(format: "%.1f km", meters / 1000)
         }
         return String(format: "%.0f m", meters)
+    }
+
+    private var remainingTimeLabel: String {
+        let sim = appState.simState
+        let remainingMeters = max(0, sim.navigationTotalDistance - sim.navigationElapsedDistance)
+        let effectiveSpeed = appState.effectiveBaseSpeedMPS * appState.speedMultiplier
+        guard effectiveSpeed > 0 else { return "--:--:--" }
+        let total = Int((remainingMeters / effectiveSpeed).rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        return String(format: "%02d:%02d:%02d left", hours, minutes, secs)
     }
 }
 

@@ -34,6 +34,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - `NavigationEngine` interpolates along the polyline at the configured base speed.
 - Playback time-fast-forward multipliers: 1× / 5× / 10× / 100×.
 - Transport controls: Play / Pause / Stop. Progress bar (elapsed / total distance).
+- Wall-clock remaining time shown alongside the progress bar in `HH:mm:ss`; accounts for the active playback multiplier (e.g., a 30-min trip at 10× reads ~3 min).
 - Saved routes capture the planner inputs (From / To / stops with their labels) so they can be re-loaded as editable fields, not just replayed as a flat polyline. Routes saved before this field existed still play; their planner fields stay empty.
 
 ### Map-driven travel

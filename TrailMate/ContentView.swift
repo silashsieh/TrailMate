@@ -993,14 +993,6 @@ private struct DestinationActionBar: View {
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
 
-            Button {
-                onAction(.wander)
-            } label: {
-                Label("Wander nearby…", systemImage: "shuffle.circle")
-            }
-            .buttonStyle(.borderless)
-            .disabled(appState.isCalculatingRoute)
-
             if !appState.routeCoordinates.isEmpty {
                 Divider().frame(height: 14)
 
@@ -1019,6 +1011,16 @@ private struct DestinationActionBar: View {
                 .buttonStyle(.borderless)
                 .disabled(appState.isCalculatingRoute)
             }
+
+            Divider().frame(height: 14)
+
+            Button {
+                onAction(.wander)
+            } label: {
+                Label("Wander nearby…", systemImage: "shuffle.circle")
+            }
+            .buttonStyle(.borderless)
+            .disabled(appState.isCalculatingRoute)
 
             Button {
                 onAction(.cancel)

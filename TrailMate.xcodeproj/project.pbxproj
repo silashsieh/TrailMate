@@ -434,7 +434,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = TrailMate.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = M8M8MCWC7X;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
@@ -462,7 +462,7 @@
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/qh3",
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/cryptography/hazmat/bindings",
 				);
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sh.TrailMate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -483,7 +483,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = TrailMate.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = M8M8MCWC7X;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
@@ -511,7 +511,7 @@
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/qh3",
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/cryptography/hazmat/bindings",
 				);
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sh.TrailMate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

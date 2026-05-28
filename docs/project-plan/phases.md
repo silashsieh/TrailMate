@@ -212,3 +212,11 @@ Phase-level steps and exit criteria are no longer maintained as a separate plan 
 **Status:** Done.
 
 Issue #2 (附近晃晃) asked for a way to wander a defined area without picking a specific destination. Added a fourth long-press action — **Wander nearby…** — that opens a sheet (radius 50/100/200 m + custom; duration 15/30/60 min + custom). `WanderRouteBuilder` chains `MKDirections` walking hops between random points sampled around the long-press center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`, with a 45° bearing-bias rule to suppress zig-zag retracing. Result loads via the existing `sim.loadRoute` path and auto-plays. Loose meander (no path-coverage), allowed to leak slightly outside the disc, one-shot, not persisted. No daemon protocol or layer changes.
+
+-----
+
+## Phase 13 — Friendly device name in picker (issue #3, 2026-05-28)
+
+**Status:** Done.
+
+Issue #3 (顯示手機名稱) asked for the device picker to label rows with the iPhone's `DeviceName` ("Harry's iPhone") instead of the last 6 chars of the UDID. `PythonDaemon/tm_list_devices.py` now opens a lockdown-over-usbmuxd client per UDID (`autopair=False`, so unpaired devices never trigger a Trust prompt) and reads `all_values["DeviceName"]`; falls back to `udid[-6:]` on any lookup failure — same behavior as before for unpaired or pure-remoted-only devices. Sequential lookup; the ~200-400 ms handshake per device is invisible at single-digit device counts and well under the 100 ms hot-path latency floor (which applies to the live-location wire, not picker enumeration). No Swift, daemon-protocol, or layer changes — `DiscoveredDevice.name` and `displayLabel` already plumbed the name end-to-end; only the lister's data source needed fixing.

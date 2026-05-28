@@ -6,7 +6,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Connection & device discovery
 
-- USB and Wi-Fi devices enumerated by `PythonDaemon/tm_list_devices.py` (uses `usbmux.list_devices` + `bonjour.browse_remoted` from pymobiledevice3).
+- USB and Wi-Fi devices enumerated by `PythonDaemon/tm_list_devices.py` (uses `usbmux.list_devices` + `bonjour.browse_remoted` from pymobiledevice3). For each discovered UDID the lister opens a lockdown client (`autopair=False`) to read `DeviceName`, so the picker labels devices with their iOS-set name; falls back to the UDID suffix when lockdown isn't reachable (unpaired or pure-remoted only).
 - Sidebar device picker; selecting a device kicks off the connection flow — no more pasting RSD address/port by hand.
 - `TunnelSupervisor` opens the privileged `pymobiledevice3 lockdown start-tunnel` via `osascript … with administrator privileges`; one auth dialog per session. RSD address/port returned via a per-call control file.
 - macOS sleep (`NSWorkspace.willSleepNotification`) triggers a clean disconnect, since the DVT session can't survive sleep.

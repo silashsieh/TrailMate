@@ -18,11 +18,26 @@ import sys
 
 from pymobiledevice3 import usbmux
 from pymobiledevice3.bonjour import browse_remoted
+from pymobiledevice3.lockdown import create_using_usbmux
 
 
 def emit(record: dict) -> None:
     sys.stdout.write(json.dumps(record) + "\n")
     sys.stdout.flush()
+
+
+async def fetch_device_name(udid: str) -> str:
+    """Read DeviceName via lockdown over usbmuxd. Falls back to udid suffix
+    when the device isn't reachable (e.g. unpaired or pure-remoted only)."""
+    try:
+        client = await create_using_usbmux(serial=udid, autopair=False)
+        try:
+            return client.all_values.get("DeviceName") or udid[-6:]
+        finally:
+            await client.close()
+    except Exception as e:
+        sys.stderr.write(f"name lookup failed for {udid[-6:]}: {e}\n")
+        return udid[-6:]
 
 
 async def main() -> None:
@@ -39,7 +54,7 @@ async def main() -> None:
             ctype = "USB" if "USB" in ctype_raw else "WiFi"
             emit({
                 "udid": udid,
-                "name": udid[-6:],
+                "name": await fetch_device_name(udid),
                 "connectionType": ctype,
                 "host": None,
                 "port": None,
@@ -61,7 +76,7 @@ async def main() -> None:
             host = addresses[0] if addresses else getattr(s, "host", None)
             emit({
                 "udid": udid,
-                "name": udid[-6:],
+                "name": await fetch_device_name(udid),
                 "connectionType": "WiFi",
                 "host": host,
                 "port": getattr(s, "port", None),

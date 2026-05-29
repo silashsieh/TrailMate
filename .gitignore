@@ -6,6 +6,9 @@ __pycache__/
 # macOS
 .DS_Store
 
+# Obsidian vault workspace state (docs/ are an Obsidian vault; see docs/project-plan/process.md)
+.obsidian/
+
 # Xcode
 xcuserdata/
 *.xcworkspace/xcuserdata/

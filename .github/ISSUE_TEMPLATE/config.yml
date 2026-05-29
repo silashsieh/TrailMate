@@ -1,0 +1,7 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project management & planning / 專案管理與規劃
+    url: https://github.com/silashsieh/TrailMate/blob/main/docs/project-plan/process.md
+    about: >
+      Issues are a bug/feature inbox — not the planning system. Roadmap, backlog, and how work
+      is tracked live in the docs. / Issue 是回報入口，不是專案管理系統；規劃文件在 docs。

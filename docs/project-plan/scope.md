@@ -1,6 +1,20 @@
-# Scope: Goals & Non-Goals
+# Scope: Vision, Goals & Non-Goals
 
-The bounds of what TrailMate is trying to be — and, more importantly, what it isn't. Scope creep gets checked against this document.
+The bounds of what TrailMate is trying to be — and, more importantly, what it isn't. Scope creep gets checked against this document. For *how* work is planned and tracked against this scope, see [process.md](process.md).
+
+## Vision
+
+TrailMate exists to give a single developer **live, real-time control of their own iPhone's
+GPS from their Mac** — teleport, route playback, and joystick steering over the iOS 17+ RSD
+tunnel — without a paid Apple Developer account, an iOS app, or any anti-detection trickery.
+It's the tool the owner wanted for testing location-aware apps against a *real* device (not the
+Simulator), built to a quality worth showing as a portfolio piece.
+
+The long-horizon direction stays **deliberately narrow**: deepen *fidelity* — better
+positioning awareness, smoother and more flexible routes, more natural movement — rather than
+*breadth*. TrailMate is a focused single-user desktop tool, not a fleet simulator or a cloud
+service. The Non-Goals below are the load-bearing edges of that vision; new ideas get checked
+against them before they become work.
 
 ## Goals
 

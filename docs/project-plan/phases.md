@@ -1,5 +1,10 @@
 # Implementation Phases
 
+> **Frozen historical log.** This file records the day-one build through Phase 13
+> (2026-05-13 → 2026-05-28). New work is **no longer logged here** — it is tracked as epics
+> under [roadmap.md](roadmap.md) / `epics/`, with the workflow described in
+> [process.md](process.md). Kept verbatim as the implementation history; do not append.
+
 Each phase is sized to roughly one focused weekend (or 2-3 evenings). Don't move to the next phase until the previous one works end-to-end.
 
 -----

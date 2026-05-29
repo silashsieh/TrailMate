@@ -1,0 +1,33 @@
+name: Feature request / 功能建議
+description: Suggest a capability or improvement. / 建議新功能或改進。
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        中英文皆可。A request that's accepted becomes an epic under
+        [`docs/project-plan/epics/`](../blob/main/docs/project-plan/epics) and is scheduled on
+        the [roadmap](../blob/main/docs/project-plan/roadmap.md). Please check
+        [scope.md](../blob/main/docs/project-plan/scope.md) — some things are deliberate
+        non-goals. / 部分項目是刻意排除的 non-goal，請先看 scope。
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / 問題
+      description: What can't you do today, and why does it matter? / 目前做不到什麼、為什麼重要。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior / 期望行為
+      description: What should happen from the user's side. / 從使用者角度，應該怎麼運作。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / 其他做法
+      description: Other approaches you considered, or related issues. / 考慮過的替代方案或相關 issue。
+    validations:
+      required: false

@@ -53,8 +53,9 @@ Full rules in [docs/project-plan/process.md](docs/project-plan/process.md). The 
   a new epic that links back. Reopening breaks the meaning of "done" and the shipped history.
 - **Requests that conflict with a [scope.md](docs/project-plan/scope.md) non-goal** are parked
   `deferred` (no milestone) pending an explicit scope decision — not silently scheduled.
-- **These docs are an Obsidian vault** (root = repo root); the roadmap/backlog views need the
-  Dataview plugin. `.obsidian/` is gitignored.
+- **These docs are an Obsidian vault** (vault root = `docs/`, not the repo root — the Dataview
+  query paths depend on it); the roadmap/backlog views need the Dataview plugin. `.obsidian/`
+  is gitignored.
 
 ## Keep docs and user preferences current
 

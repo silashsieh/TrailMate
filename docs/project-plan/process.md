@@ -105,7 +105,9 @@ roughly weekly):
 
 ## Obsidian usage
 
-These docs form an Obsidian vault (vault root = repo root).
+These docs form an Obsidian vault — **vault root = `docs/`** (open the `docs/` folder as the
+vault, not the repo root; the Dataview queries' folder paths are relative to it, and it keeps
+the Swift/Python tree out of the vault index).
 - **Required:** the **Dataview** community plugin — without it, [[roadmap]] and [[backlog]]
   show their query blocks as raw code instead of live tables.
 - **Optional:** the **Tasks** plugin for a cross-file checkbox view.

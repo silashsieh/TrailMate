@@ -2,7 +2,8 @@
 
 > Triaged but **unscheduled** work — accepted ideas with no milestone yet, plus anything parked
 > (`deferred`). Promote an item by setting its `milestone:` in the epic file; it then moves to
-> [[roadmap]]. Generated from `epics/` — see [[process]] for the routing rule.
+> [roadmap.md](roadmap.md). Generated from `epics/` — see [process.md](process.md) for the
+> routing rule.
 
 ## Unscheduled & deferred
 
@@ -15,7 +16,11 @@ SORT status ASC, id ASC
 
 ## Static snapshot (for the GitHub reader)
 
-- **Deferred — needs a scope decision:** [[012-multi-device]] (issue #9). Conflicts with the
-  [[scope]] non-goal "no multi-device orchestration." Close as `wontfix` or revise scope first.
-- **Ideas (carried over from [[phases]] Phase 5):** [[014-readme-screenshots]],
-  [[015-localization]], [[016-test-ci-unit-tests]].
+- **Deferred — needs a scope decision:**
+  [012 — Simultaneous multi-device](epics/012-multi-device.md) (issue #9). Conflicts with the
+  [scope.md](scope.md) non-goal "no multi-device orchestration." Close as `wontfix` or revise
+  scope first.
+- **Ideas (carried over from [phases.md](phases.md) Phase 5):**
+  [014 — README screenshots & GIF](epics/014-readme-screenshots.md),
+  [015 — Localization (en + zh-Hant)](epics/015-localization.md),
+  [016 — Unit tests + test CI](epics/016-test-ci-unit-tests.md).

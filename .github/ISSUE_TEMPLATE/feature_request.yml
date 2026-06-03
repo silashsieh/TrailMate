@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         中英文皆可。A request that's accepted becomes an epic under
-        [`docs/project-plan/epics/`](../blob/main/docs/project-plan/epics) and is scheduled on
+        [`docs/project-plan/epics/`](../tree/main/docs/project-plan/epics) and is scheduled on
         the [roadmap](../blob/main/docs/project-plan/roadmap.md). Please check
         [scope.md](../blob/main/docs/project-plan/scope.md) — some things are deliberate
         non-goals. / 部分項目是刻意排除的 non-goal，請先看 scope。

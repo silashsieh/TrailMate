@@ -23,8 +23,8 @@
 - [Testing Strategy](project-plan/testing.md) — unit, integration, and manual smoke tests
 
 The roadmap and backlog are **Dataview views** over the epic files — they're generated, not
-hand-maintained. They're best viewed in [Obsidian](https://obsidian.md) (vault root = repo
-root) with the Dataview plugin installed; on GitHub the query blocks render as code and each
+hand-maintained. They're best viewed in [Obsidian](https://obsidian.md) (open the `docs/`
+folder as the vault) with the Dataview plugin installed; on GitHub the query blocks render as code and each
 page carries a static prose snapshot for reference. See
 [Process § Obsidian usage](project-plan/process.md#obsidian-usage).
 

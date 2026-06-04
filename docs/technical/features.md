@@ -124,7 +124,6 @@ Items considered during planning that were dropped, deferred, or superseded.
 ## Out of scope (per [scope.md](../project-plan/scope.md))
 
 - Anti-detection — `CLLocationSourceInformation.isSimulatedBySoftware` is true; not bypassable, not a goal.
-- Multi-device orchestration — one iPhone at a time.
 - iOS ≤16 support — RSD tunnel is the minimum target.
 - Altitude / heading / speed overrides — CoreLocation derives these from position deltas; no plan to inject them directly.
 - Friction simulation (signal dropouts, accuracy variation) — Gaussian noise covers the realism floor; richer fault models are out of scope.

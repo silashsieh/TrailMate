@@ -3,7 +3,7 @@ type: epic
 id: 009
 title: Route loop playback
 status: open
-milestone: v1.5.0
+milestone: v1.4.0
 issue: 10
 opened: 2026-05-29
 shipped:

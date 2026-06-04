@@ -43,11 +43,11 @@ sync at release cuts; the epic files remain authoritative.
   [006 — Follow / center current position](epics/006-follow-current-position.md),
   [008 — Right-click map menu](epics/008-right-click-map-menu.md),
   [013 — Project-management docs](epics/013-project-management-docs.md) (this work).
-- **v1.4.0 — Map interaction:**
-  [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md).
-- **v1.5.0 — Playback & library:**
+- **v1.4.0 — Playback & library:**
   [009 — Route loop playback](epics/009-route-loop-playback.md),
-  [010 — Rename saved items](epics/010-rename-saved-items.md),
+  [010 — Rename saved items](epics/010-rename-saved-items.md).
+- **v1.5.0 — Advanced routing & playback:**
+  [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md),
   [011 — Timeline seek](epics/011-timeline-seek.md).
 - **Shipped (v1.2.0):**
   [001 — Multi-stop routes](epics/001-multi-stop-routes.md),

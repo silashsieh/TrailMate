@@ -38,15 +38,13 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v1.3.0 — Device positioning & follow:**
-  [004 — Read device real GPS (blue dot)](epics/004-read-device-real-gps.md) (foundational,
-  needs feasibility check),
+- **v1.3.0 — Positioning & map ergonomics:**
   [005 — Restore last simulated location](epics/005-restore-sim-location.md),
   [006 — Follow / center current position](epics/006-follow-current-position.md),
+  [008 — Right-click map menu](epics/008-right-click-map-menu.md),
   [013 — Project-management docs](epics/013-project-management-docs.md) (this work).
 - **v1.4.0 — Map interaction:**
-  [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md),
-  [008 — Right-click map menu](epics/008-right-click-map-menu.md).
+  [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md).
 - **v1.5.0 — Playback & library:**
   [009 — Route loop playback](epics/009-route-loop-playback.md),
   [010 — Rename saved items](epics/010-rename-saved-items.md),

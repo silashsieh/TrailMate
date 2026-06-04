@@ -3,7 +3,7 @@ type: epic
 id: 008
 title: Right-click map menu (replace/augment long-press)
 status: open
-milestone: v1.4.0
+milestone: v1.3.0
 issue: 16
 opened: 2026-05-29
 shipped:

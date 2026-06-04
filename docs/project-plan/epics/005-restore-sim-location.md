@@ -29,9 +29,9 @@ A restored position is a display default only; it is broadcast to the iPhone onl
 connect (no self-spoofing while disconnected).
 
 ## Out of scope
-- Defaulting to the device's **real** location — that's the extension below, gated on
-  [[004-read-device-real-gps]]. Until #17 lands, launch default uses only the remembered
-  simulated position.
+- Defaulting to the device's **real** location — that extension died with
+  [[004-read-device-real-gps]] (#17 closed as not planned). Launch default uses only the
+  remembered simulated position.
 
 ## Stories
 - [ ] Persist `simulatedCoordinate` on change/quit (parallel to `MapCameraPersistence`)
@@ -51,5 +51,5 @@ connect (no self-spoofing while disconnected).
 - [ ] Disconnected restore does not broadcast to the device until Connect
 
 ## Related
-- Extension source: [[004-read-device-real-gps]] (real-location default, once feasible)
+- [[004-read-device-real-gps]] — dropped; the real-location default went with it
 - Sibling concept: [[006-follow-current-position]] (both are "current position" UX)

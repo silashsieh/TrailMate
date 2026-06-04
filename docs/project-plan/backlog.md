@@ -10,7 +10,7 @@
 ```dataview
 TABLE WITHOUT ID file.link AS Epic, status AS Status, issue AS Issue, tags AS Tags
 FROM "project-plan/epics"
-WHERE type = "epic" AND file.name != "_template" AND status != "done" AND (status = "idea" OR status = "deferred" OR !milestone)
+WHERE type = "epic" AND file.name != "_template" AND status != "done" AND status != "dropped" AND (status = "idea" OR status = "deferred" OR !milestone)
 SORT status ASC, id ASC
 ```
 

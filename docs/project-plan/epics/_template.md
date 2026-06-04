@@ -2,7 +2,7 @@
 type: epic
 id: 000
 title: Short imperative title
-status: idea          # idea | open | in-progress | done | deferred
+status: idea          # idea | open | in-progress | done | deferred | dropped
 milestone:            # e.g. v1.3.0 — leave empty while unscheduled (shows in backlog, not roadmap)
 issue:                # GitHub issue number, or leave empty
 opened: YYYY-MM-DD

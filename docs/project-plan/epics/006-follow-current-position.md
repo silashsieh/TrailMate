@@ -22,8 +22,8 @@ A toggleable **follow** mode: tap to recenter on and follow the **current simula
 (red dot)**; dragging the map auto-disengages follow — exactly like Google Maps' locate button.
 
 ## Out of scope
-- Following the **real** location (blue dot) — extension gated on [[004-read-device-real-gps]].
-  Ship red-dot follow first; add blue-dot follow when #17 lands.
+- Following the **real** location (blue dot) — that extension died with
+  [[004-read-device-real-gps]] (#17 closed as not planned). This epic is red-dot follow only.
 
 ## Stories
 - [ ] Follow-mode toggle that recenters and tracks `simulatedCoordinate`
@@ -40,4 +40,5 @@ A toggleable **follow** mode: tap to recenter on and follow the **current simula
 - [ ] No regression to the joystick Recenter behavior
 
 ## Related
-- [[005-restore-sim-location]] ("Use current location"), [[004-read-device-real-gps]] (blue dot)
+- [[005-restore-sim-location]] ("Use current location")
+- [[004-read-device-real-gps]] — dropped; blue-dot follow went with it

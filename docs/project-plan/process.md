@@ -51,12 +51,16 @@ Idea/report → Triage → Epic (open) → Stories done via PRs → Release → 
 
 ### Status values
 `idea` (unscheduled thought) · `open` (accepted, not started) · `in-progress` ·
-`done` (shipped) · `deferred` (parked, e.g. a scope conflict).
+`done` (shipped) · `deferred` (parked, e.g. a scope conflict) ·
+`dropped` (declined after acceptance — e.g. the issue was closed as not-planned).
 
 ### Routing rule (what shows where)
 - `milestone` set and not `done`/`idea` → **roadmap** (grouped by milestone).
 - `status: idea`, or no milestone and not done → **backlog**.
 - `status: done` → **roadmap → Recently shipped**.
+- `status: dropped` → **no view**. Clear `milestone:`, add a note explaining the drop, and also
+  clear the milestone on the GitHub issue. The file stays as the record; ids are never reused.
+  (`deferred` = might come back, pending a decision; `dropped` = the decision was no.)
 
 ## Triage policy
 

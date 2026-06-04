@@ -31,7 +31,7 @@ If a task touches the daemon protocol, coordinate math, or the concurrency split
 
 ## Standing constraints
 
-- **Single user, single device, no cloud.** Don't propose multi-tenant features, telemetry, or cloud sync.
+- **Single user, no cloud — multi-iPhone is in scope.** One Mac, one owner; simultaneous multi-device simulation is a goal since the 2026-06-01 [scope.md](docs/project-plan/scope.md) revision (epic 012). Still no multi-tenant features, telemetry, or cloud sync.
 - **No iOS app.** Everything runs on the Mac; no sideloaded code on the iPhone.
 - **iOS 17+ minimum.** No fallback paths for older iOS.
 - **One auth dialog per session is acceptable.** Don't propose schemes to eliminate it that require paid signing or a packaged helper unless explicitly asked.

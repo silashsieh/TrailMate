@@ -21,7 +21,7 @@ against them before they become work.
 - Real-time GPS simulation on a paired iOS 17+ device (validated on iOS 26.4).
 - Three coexisting controls: teleport, route, joystick.
 - Native macOS look-and-feel: SwiftUI, MapKit, standard NSWindow chrome.
-- Single Mac, single iPhone, single user — build-from-source from a free Apple ID.
+- Single Mac, single user, multi iPhone — build-from-source from a free Apple ID.
 - Codebase suitable as a portfolio reference (clean architecture, documented decisions).
 
 ## Non-Goals
@@ -31,5 +31,4 @@ against them before they become work.
 - **No App Store distribution.** Personal tool. Build from source, run unsigned.
 - **No cross-platform.** macOS only. Windows users have LocWarp; Linux users have raw pymobiledevice3.
 - **No legacy iOS support.** iOS 17 introduced the personalized DDI + RSD tunnel; that's the minimum target. Users on iOS ≤16 should use Schlaubischlump's LocationSimulator.
-- **No multi-device orchestration.** One iPhone at a time.
 - **No production hardening.** This is a single-user dev tool, not a fleet-simulation platform.

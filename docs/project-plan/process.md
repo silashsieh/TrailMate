@@ -74,7 +74,7 @@ What to do when something new arrives. The recurring trap is mutating *closed* w
 | **Behavior change / new capability** | It's scope, not "an improvement." New epic; scope it. |
 | **Vague wish** | `status: idea` epic in the backlog. Revisit at triage; don't commit. |
 | **Many post-ship fixes piling up** | A new "stabilization" epic. Don't resurrect the old one. |
-| **Request that conflicts with [[scope]] non-goals** | `status: deferred`, no milestone, with a note. Needs an explicit scope decision before any work (see [[012-multi-device]]). |
+| **Request that conflicts with [[scope]] non-goals** | `status: deferred`, no milestone, with a note. Needs an explicit scope decision before any work. (Worked example: [[012-multi-device]] — parked as a conflict, then scope was revised 2026-06-01 and the epic flipped to `open`.) |
 
 **Why never reopen a shipped epic:** "done" must keep meaning "shipped." Reopening rewrites
 history and breaks the roadmap/shipped views. Closed epics are the audit trail of what shipped

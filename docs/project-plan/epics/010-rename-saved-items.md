@@ -3,7 +3,7 @@ type: epic
 id: 010
 title: Rename saved locations & routes
 status: open
-milestone: v1.5.0
+milestone: v1.4.0
 issue: 11
 opened: 2026-05-29
 shipped:

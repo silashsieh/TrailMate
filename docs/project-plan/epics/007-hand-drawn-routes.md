@@ -3,7 +3,7 @@ type: epic
 id: 007
 title: Hand-drawn routes on the map
 status: open
-milestone: v1.4.0
+milestone: v1.5.0
 issue: 15
 opened: 2026-05-29
 shipped:

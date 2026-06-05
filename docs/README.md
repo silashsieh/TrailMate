@@ -15,6 +15,7 @@
 
 - [Scope](project-plan/scope.md) — vision, goals, and non-goals
 - [Process](project-plan/process.md) — how work is planned, tracked, and triaged (start here)
+- [Playbook](project-plan/playbook.md) — step-by-step recipes for operating the system
 - [Roadmap](project-plan/roadmap.md) — scheduled epics by milestone + recently shipped
 - [Backlog](project-plan/backlog.md) — triaged but unscheduled / deferred ideas
 - [Epics](project-plan/epics/) — one file per feature/idea; the planning source of truth

@@ -47,7 +47,6 @@ actor SimulationActor {
     private var lastDeviationCheck: ContinuousClock.Instant?
     private var deviationStartedAt: ContinuousClock.Instant?
 
-    private var joystickAnchor: CLLocationCoordinate2D?
     private var lastEmittedCoordinate: CLLocationCoordinate2D?
 
     // Pending point count + recording flag — owned here so the snapshot push
@@ -116,7 +115,6 @@ actor SimulationActor {
         joy.stop()
         integrator.clear()
         lastEmittedCoordinate = nil
-        joystickAnchor = nil
         lastDisplayPush = nil
         deviationStartedAt = nil
         backend = nil
@@ -185,26 +183,15 @@ actor SimulationActor {
     // MARK: - Joystick
 
     func startJoystick(baseSpeed: Double) async {
+        // With no position yet, the engine is armed but inert — the aggregator's
+        // `guard let pos = integrator.position` short-circuits until the first
+        // teleport seeds it. Nothing is sent to the device.
         joy.start(baseSpeed: baseSpeed)
-        // Only set the anchor if a prior position exists (e.g. user already
-        // teleported). With no position yet, the engine is armed but inert —
-        // the aggregator's `guard let pos = integrator.position` short-circuits
-        // until the first teleport seeds it. Nothing is sent to the device.
-        if let pos = lastEmittedCoordinate ?? integrator.position {
-            joystickAnchor = pos
-        }
         await pushSnapshotNow()
     }
 
     func stopJoystick() async {
         joy.stop()
-        await pushSnapshotNow()
-    }
-
-    func recenterJoystick() async {
-        guard let anchor = joystickAnchor else { return }
-        integrator.reset(to: anchor)
-        emit(anchor)
         await pushSnapshotNow()
     }
 
@@ -233,9 +220,6 @@ actor SimulationActor {
         }
         integrator.reset(to: coordinate)
         emit(coordinate)
-        if joy.isActive {
-            joystickAnchor = coordinate
-        }
         await pushSnapshotNow()
     }
 

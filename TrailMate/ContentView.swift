@@ -455,10 +455,6 @@ private struct JoystickSection: View {
                 }
             }
             .font(.callout)
-
-            Button("Recenter") {
-                appState.recenterJoystick()
-            }
         }
     }
 }
@@ -1062,6 +1058,10 @@ private struct MapArea: View {
     @Environment(AppState.self) private var appState
     @State private var cameraPosition: MapCameraPosition = .region(MapCameraPersistence.loadRegion())
     @State private var pendingDestination: CLLocationCoordinate2D?
+    // Session-only, like MapKit's user-tracking: not persisted across launches.
+    @State private var isFollowing = false
+    // Last user-chosen zoom, so follow recenters without changing it.
+    @State private var followSpan: MKCoordinateSpan = MapCameraPersistence.loadRegion().span
 
     var body: some View {
         MapReader { proxy in
@@ -1111,6 +1111,25 @@ private struct MapArea: View {
             }
             .onMapCameraChange(frequency: .onEnd) { context in
                 MapCameraPersistence.save(region: context.region)
+                followSpan = context.region.span
+            }
+            // Any user camera gesture hands control back to the user, mirroring
+            // MapKit's user-tracking semantics. Follow's own programmatic updates
+            // report positionedByUser == false, so they don't self-disengage.
+            .onMapCameraChange(frequency: .continuous) { _ in
+                if isFollowing && cameraPosition.positionedByUser {
+                    isFollowing = false
+                }
+            }
+            // CLLocationCoordinate2D isn't Equatable; compare a derived [Double]? instead.
+            .onChange(of: appState.simState.simulatedCoordinate.map { [$0.latitude, $0.longitude] }) { _, _ in
+                guard isFollowing else { return }
+                guard let coord = appState.simState.simulatedCoordinate else {
+                    // Nothing left to follow (location cleared back to real GPS).
+                    isFollowing = false
+                    return
+                }
+                recenter(on: coord)
             }
             // Long-press, not tap: a plain tap would steal the Map's own pan/zoom
             // gestures, and the 0.5s threshold disambiguates intent from incidental clicks.
@@ -1182,6 +1201,7 @@ private struct MapArea: View {
 
                         if appState.connectionStatus.isConnected {
                             RecordButton()
+                            followButton
                         }
                     }
 
@@ -1210,6 +1230,35 @@ private struct MapArea: View {
                 }
                 .padding(.top, 8)
             }
+        }
+    }
+
+    private var followButton: some View {
+        Button {
+            if isFollowing {
+                isFollowing = false
+            } else if let coord = appState.simState.simulatedCoordinate {
+                isFollowing = true
+                // Center now rather than waiting for the next snapshot push.
+                recenter(on: coord)
+            }
+        } label: {
+            Image(systemName: isFollowing ? "location.fill" : "location")
+                .font(.callout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .disabled(appState.simState.simulatedCoordinate == nil)
+        .help(isFollowing ? "Stop following the simulated position"
+                          : "Follow the simulated position")
+    }
+
+    private func recenter(on coord: CLLocationCoordinate2D) {
+        withAnimation {
+            cameraPosition = .region(MKCoordinateRegion(center: coord, span: followSpan))
         }
     }
 

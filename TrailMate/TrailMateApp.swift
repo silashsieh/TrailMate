@@ -25,6 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     nonisolated func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor in
+            // The bridge's 1 s save throttle can lag the red dot at quit;
+            // capture the exact final position before disconnect clears it.
+            if let coord = self.appState?.simState.simulatedCoordinate {
+                SimulatedPositionPersistence.save(coord)
+            }
             await self.appState?.disconnect()
             NSApp.reply(toApplicationShouldTerminate: true)
         }

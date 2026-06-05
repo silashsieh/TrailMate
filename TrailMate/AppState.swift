@@ -104,6 +104,12 @@ final class AppState {
         }
     }
 
+    // Launch behavior (epic 005). The position is always saved; this only
+    // gates whether the next launch restores it or starts empty.
+    var restoreLastSimulatedLocation: Bool = SimulatedPositionPersistence.restoreOnLaunch {
+        didSet { SimulatedPositionPersistence.restoreOnLaunch = restoreLastSimulatedLocation }
+    }
+
     // Log
     var logMessages: [String] = []
     var showLogSheet = false
@@ -165,6 +171,15 @@ final class AppState {
         loadWaypoints()
         recorder.loadIndex()
         savedRoutes.load()
+
+        // Seed the red dot from the last session (display only — emit()
+        // reaches no backend until connect; attach() broadcasts it then).
+        // Bypasses the UI teleport's isConnected guard deliberately.
+        if restoreLastSimulatedLocation {
+            let restored = SimulatedPositionPersistence.load()
+                ?? SimulatedPositionPersistence.defaultCoordinate
+            Task { await sim.teleport(to: restored) }
+        }
 
         // Consume simulation events (route abort) for log writes.
         let stream = sim.events
@@ -247,7 +262,11 @@ final class AppState {
             await sim.updateBaseSpeed(effectiveBaseSpeedMPS)
             await sim.attach(backend: bridge)
             await sim.startJoystick(baseSpeed: effectiveBaseSpeedMPS)
-            addLog("Joystick armed (\(transportLabel) speed) — long-press the map to set a starting location")
+            if simState.simulatedCoordinate == nil {
+                addLog("Joystick armed (\(transportLabel) speed) — long-press the map to set a starting location")
+            } else {
+                addLog("Joystick armed (\(transportLabel) speed)")
+            }
         } catch {
             connectionStatus = .error(error.localizedDescription)
             addLog("Connection failed: \(error.localizedDescription)")
@@ -302,6 +321,15 @@ final class AppState {
     func selectFrom(_ completion: MKLocalSearchCompletion) async {
         fromSearch.select(completion)
         fromCoordinate = await fromSearch.resolve(completion)
+    }
+
+    // One-tap fill: route from the red dot. Formatted coordinates rather than
+    // a "Current Location" label so the field stays truthful if the dot has
+    // moved on by the time the route is calculated.
+    func useCurrentLocationAsFrom() {
+        guard let coord = simState.simulatedCoordinate else { return }
+        fromCoordinate = coord
+        fromSearch.setQuery(String(format: "%.5f, %.5f", coord.latitude, coord.longitude))
     }
 
     func selectTo(_ completion: MKLocalSearchCompletion) async {

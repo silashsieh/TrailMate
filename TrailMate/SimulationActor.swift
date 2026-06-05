@@ -79,6 +79,14 @@ actor SimulationActor {
     func attach(backend: any SimulationBackend) async {
         self.backend = backend
 
+        // A restored (pre-connect) position has been display-only until now —
+        // detach() nils lastEmittedCoordinate, so this only fires for a launch
+        // restore. Broadcasting it here, before startJoystick anchors to it,
+        // is what turns "display default" into the device's actual location.
+        if let restored = lastEmittedCoordinate {
+            emit(restored)
+        }
+
         // App Nap mitigation — keep the simulation loop ticking when TrailMate
         // is backgrounded. Released in detach().
         if activityToken == nil {
@@ -476,6 +484,7 @@ actor SimulationActor {
 @MainActor extension SimulationStateBridge {
     func apply(_ snap: SimSnapshot) {
         simulatedCoordinate = snap.simulatedCoordinate
+        persistPositionThrottled()
         navigationPlaybackState = snap.navigationPlaybackState
         navigationProgress = snap.navigationProgress
         navigationElapsedDistance = snap.navigationElapsedDistance

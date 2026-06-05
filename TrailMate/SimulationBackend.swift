@@ -50,4 +50,17 @@ final class SimulationStateBridge {
     var routeDeviationMeters: Double = 0
     var recordingPointCount: Int = 0
     var isRecording: Bool = false
+
+    // Joystick-only snapshots arrive at 20 Hz; persisting the position needs
+    // none of that resolution, so writes are throttled here. The final
+    // position at quit is saved unconditionally by the AppDelegate.
+    @ObservationIgnored private var lastPositionSave: ContinuousClock.Instant?
+
+    func persistPositionThrottled() {
+        guard let coord = simulatedCoordinate else { return }
+        let now = ContinuousClock.now
+        if let last = lastPositionSave, now - last < .seconds(1) { return }
+        lastPositionSave = now
+        SimulatedPositionPersistence.save(coord)
+    }
 }

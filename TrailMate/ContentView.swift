@@ -57,6 +57,10 @@ private struct SidebarView: View {
                             appState.persistTuning()
                         }
                 }
+
+                Toggle("Restore last location on launch", isOn: $appState.restoreLastSimulatedLocation)
+                    .font(.caption)
+                    .help("Off: start with no simulated position until you teleport. The last position is remembered either way.")
             }
 
             if appState.connectionStatus.isConnected {
@@ -106,13 +110,26 @@ private struct RouteSection: View {
         @Bindable var appState = appState
 
         Section("Route") {
-            SearchField(
-                label: "From",
-                search: appState.fromSearch,
-                onSelect: { completion in
-                    Task { await appState.selectFrom(completion) }
+            HStack(alignment: .top, spacing: 8) {
+                SearchField(
+                    label: "From",
+                    search: appState.fromSearch,
+                    onSelect: { completion in
+                        Task { await appState.selectFrom(completion) }
+                    }
+                )
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    appState.useCurrentLocationAsFrom()
+                } label: {
+                    Image(systemName: "location.fill")
                 }
-            )
+                .buttonStyle(.borderless)
+                .padding(.top, 6)
+                .help("Use current location")
+                .disabled(appState.simState.simulatedCoordinate == nil)
+            }
 
             ForEach(Array(appState.stops.enumerated()), id: \.element.id) { index, stop in
                 StopRow(index: index, stop: stop)

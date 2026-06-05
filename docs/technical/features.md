@@ -19,16 +19,17 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Simulated position rendered as a distinct marker.
 - Long-press surfaces a destination popover (see "Map-driven travel" below).
 - Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
+- The simulated position (red dot) persists too and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (sidebar Connection section) opts out back to a start-empty launch — the position is recorded either way. A restored position is display-only until connect: the device receives it when the session attaches.
 
 ### Teleport
 
 - Long-press → "Teleport here" sets the device location instantly.
-- Works at any time while connected. Doubles as the way to set the starting location for joystick input on a fresh connect.
+- Works at any time while connected. Doubles as the way to set the starting location for joystick input when launch restore is off (or after Clear).
 - "Clear" reverts the device to its real GPS.
 
 ### Route playback
 
-- From/To via search or by promoting a long-press destination.
+- From/To via search or by promoting a long-press destination. A location-arrow button beside From fills it with the current simulated position (disabled until a position exists).
 - Optional intermediate stops between From and To, visited in order. Each stop has its own search field; "Add Stop" appears once both endpoints are set. Soft notice above 10 stops (Apple Maps throttling risk); no hard cap.
 - Transport mode: Walk (5 km/h), Cycle (15 km/h), Drive (50 km/h), or Custom km/h (`TransportMode.custom`).
 - `MKDirections.calculate()` is issued per segment ([From, …stops, To] pairs); polylines are merged via `RouteMath.joinSegments` (2 m meters-based join-vertex dedup).
@@ -48,7 +49,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Joystick
 
-- Arms on connect — no Start button. The engine stays inert (no SETQ, no marker) until the first long-press teleport seeds the integrator; from then on, stick input drives the simulated location at the configured base speed.
+- Arms on connect — no Start button. The engine stays inert (no SETQ, no marker) until a position seeds the integrator — the restored launch position (broadcast at attach) or, with restore off, the first long-press teleport; from then on, stick input drives the simulated location at the configured base speed.
 - Hardware game controller via `GameController.framework` (MFi / DualShock / Xbox / Joy-Con; hot-pluggable).
 - On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback.
 - WASD + arrow-key input on the focused map view.

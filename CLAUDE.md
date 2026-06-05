@@ -39,7 +39,9 @@ If a task touches the daemon protocol, coordinate math, or the concurrency split
 
 ## Project management
 
-Full rules in [docs/project-plan/process.md](docs/project-plan/process.md). The essentials:
+Full rules in [docs/project-plan/process.md](docs/project-plan/process.md); step-by-step
+recipes (triage, ship, drop, scope-change ripple checklist) in
+[docs/project-plan/playbook.md](docs/project-plan/playbook.md). The essentials:
 
 - **GitHub Issues are an inbox, not the plan.** User bug/feature reports (zh-Hant) live there.
   The plan lives in `docs/project-plan/` as plain text.

@@ -26,6 +26,7 @@ how work flows; GitHub stays a clean inbox that links into the markdown plan.
 ## Stories
 - [x] Epic template + one epic file per issue (this collection)
 - [x] [[process]] — the management system (axes, lifecycle, triage policy, DoD)
+- [x] [[playbook]] — step-by-step operating recipes (triage, ship, drop, scope-change ripple)
 - [x] [[roadmap]] / [[backlog]] — Dataview views
 - [x] Vision section in [[scope]]; freeze banner on [[phases]]
 - [x] `.github` issue/PR templates; `.gitignore` for `.obsidian/`

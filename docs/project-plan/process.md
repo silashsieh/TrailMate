@@ -1,7 +1,8 @@
 # How this project is managed
 
 How work flows through TrailMate, and where each kind of thing is written down. If you're an
-agent or a contributor, read this before filing, planning, or closing anything.
+agent or a contributor, read this before filing, planning, or closing anything. This file is
+the rules and rationale; the step-by-step "which file do I touch" recipes live in [[playbook]].
 
 > **Guiding principle (from issue #8):** GitHub Issues is a *ticket inbox* for user bug reports
 > and feature requests. It is **not** the project-management system. The plan lives here, in

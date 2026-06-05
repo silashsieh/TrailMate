@@ -542,13 +542,6 @@ final class AppState {
 
     // MARK: - Joystick
 
-    func recenterJoystick() {
-        Task {
-            await sim.recenterJoystick()
-            addLog("Recentered to starting position")
-        }
-    }
-
     func rejoinRoute() {
         Task {
             await sim.rejoinRoute()

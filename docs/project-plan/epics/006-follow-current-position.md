@@ -2,7 +2,7 @@
 type: epic
 id: 006
 title: Follow / center current position
-status: open
+status: in-progress
 milestone: v1.3.0
 issue: 14
 opened: 2026-05-29
@@ -28,18 +28,23 @@ the design baseline).
   [[004-read-device-real-gps]] (#17 closed as not planned). This epic is red-dot follow only.
 
 ## Stories
-- [ ] Follow-mode toggle that recenters and tracks `simulatedCoordinate`
-- [ ] Auto-disengage on manual map drag
-- [ ] Reconcile with the existing joystick "Recenter" button (share one control if natural)
+- [x] Follow-mode toggle that recenters and tracks `simulatedCoordinate`
+- [x] Auto-disengage on manual map drag
+- [x] Reconcile with the existing joystick "Recenter" button — resolved by removing it
+      (decision below)
 
 ## Open questions
-- Should follow and the joystick Recenter become a single shared locate control, or stay
-  distinct? #13/#14/#17 all touch a common "current position" control — consider one component.
+- ~~Should follow and the joystick Recenter become a single shared locate control, or stay
+  distinct?~~ **Decided 2026-06-06 (owner):** remove the joystick "Recenter" button entirely;
+  the follow control replaces it as the map's single locate-style control. The position-reset
+  path (`recenterJoystick` / `joystickAnchor`) was deleted with it — teleport remains the way
+  to place the dot somewhere explicit.
 
 ## Acceptance criteria
 - [ ] Follow on → red dot stays centered through playback and joystick movement
 - [ ] Dragging the map turns follow off
-- [ ] No regression to the joystick Recenter behavior
+- [x] ~~No regression to the joystick Recenter behavior~~ Superseded 2026-06-06: the button
+      was removed by owner decision (above), not regressed.
 
 ## Related
 - [[005-restore-sim-location]] ("Use current location")

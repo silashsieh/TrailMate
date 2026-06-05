@@ -20,6 +20,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Long-press surfaces a destination popover (see "Map-driven travel" below).
 - Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
 - The simulated position (red dot) persists too and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (sidebar Connection section) opts out back to a start-empty launch — the position is recorded either way. A restored position is display-only until connect: the device receives it when the session attaches.
+- Follow control on the map overlay (next to Record) recenters on and tracks the simulated position, keeping the current zoom. Any manual camera gesture hands control back (MapKit user-tracking semantics); disabled until a simulated position exists; session-only, not persisted.
 
 ### Teleport
 
@@ -55,7 +56,6 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - WASD + arrow-key input on the focused map view.
 - 20 Hz control tick, 10% dead zone.
 - Speed cap reuses the same `TransportMode` (including Custom km/h); the picker lives in the Route section and drives both engines.
-- "Recenter" button returns to the last teleport location.
 
 ### Composite control
 

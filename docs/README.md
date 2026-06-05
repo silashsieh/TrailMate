@@ -9,7 +9,7 @@
 - [Architecture](technical/architecture.md) — project structure, layer diagram, process topology, daemon protocol, coordinate math
 - [Tech Stack](technical/tech-stack.md) — framework choices and target versions
 - [Features](technical/features.md) — single inventory of shipped features, plus dropped/deferred items
-- [Technical Decisions](technical/decisions.md) — key decisions D1–D8 and rationale
+- [Technical Decisions](technical/decisions.md) — key decisions D1–D9 and rationale
 
 ## Project Plan
 

@@ -19,7 +19,9 @@ red dot often drifts off-screen.
 
 ## Goal
 A toggleable **follow** mode: tap to recenter on and follow the **current simulated position
-(red dot)**; dragging the map auto-disengages follow — exactly like Google Maps' locate button.
+(red dot)**; dragging the map auto-disengages follow. Model it on MapKit's native
+user-tracking / Apple Maps' locate-button semantics ([[decisions]] D9 — Apple conventions are
+the design baseline).
 
 ## Out of scope
 - Following the **real** location (blue dot) — that extension died with

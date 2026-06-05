@@ -17,7 +17,8 @@ Issue #13: the app has two kinds of "position", handled separately. The **map ca
 you're looking) already persists across launches (`MapCameraPersistence`, defaults to Taipei).
 The **simulated position** (the red dot `simulatedCoordinate`) does **not** — it starts `nil`
 every launch, so you must long-press teleport before there's a red dot at all. The screen has
-memory; the position doesn't. Google Maps' principle: never start the user at a blank position.
+memory; the position doesn't. The maps-app convention applies: never start the user at a blank
+position (per [[decisions]] D9, design baseline is Apple's conventions).
 
 ## Goal
 On launch, the simulated position is restored in priority order:

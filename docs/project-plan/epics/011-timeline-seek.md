@@ -56,8 +56,8 @@ playback from there, instead of only play-from-start or full replay.
   the scrub. Play without a preceding seek still re-arms from the top.
 
 ## Acceptance criteria
-- [ ] Dragging the bar moves playback to that point (both directions)
-- [ ] Playback resumes from the sought point, not the start
+- [x] Dragging the bar moves playback to that point (both directions)
+- [x] Playback resumes from the sought point, not the start
 
 ## Note
 Engine groundwork largely exists — `NavigationEngine.interpolate(at:)` can already interpolate

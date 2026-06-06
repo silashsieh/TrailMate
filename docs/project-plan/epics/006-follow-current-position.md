@@ -2,11 +2,11 @@
 type: epic
 id: 006
 title: Follow / center current position
-status: in-progress
+status: done
 milestone: v1.3.0
 issue: 14
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-06
 tags: [positioning]
 ---
 

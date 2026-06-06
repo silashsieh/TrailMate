@@ -2,11 +2,11 @@
 type: epic
 id: 013
 title: Project-management documentation & process
-status: in-progress
+status: done
 milestone: v1.3.0
 issue: 8
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-06
 tags: [docs, process]
 ---
 
@@ -31,8 +31,8 @@ how work flows; GitHub stays a clean inbox that links into the markdown plan.
 - [x] Vision section in [[scope]]; freeze banner on [[phases]]
 - [x] `.github` issue/PR templates; `.gitignore` for `.obsidian/`
 - [x] CLAUDE.md: docs-first links + PM standing rules
-- [ ] GitHub: labels, milestones (v1.3.0–v1.5.0), triage of all open issues
-- [ ] PR closing #8
+- [x] GitHub: labels, milestones (v1.3.0–v1.5.0), triage of all open issues
+- [x] PR closing #8
 
 ## Decisions made along the way
 - **Single-collection model:** every feature/idea is one epic file; roadmap/backlog are
@@ -45,5 +45,5 @@ how work flows; GitHub stays a clean inbox that links into the markdown plan.
 
 ## Acceptance criteria
 - [x] Docs exist and cross-link; epic frontmatter is consistent
-- [ ] Open issues are labelled, milestoned, and represented by epic files
-- [ ] #8 closed via the PR
+- [x] Open issues are labelled, milestoned, and represented by epic files
+- [x] #8 closed via the PR (PR #18, merged 2026-06-05)

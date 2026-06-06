@@ -2,11 +2,11 @@
 type: epic
 id: 005
 title: Restore last simulated location on launch
-status: in-progress
+status: done
 milestone: v1.3.0
 issue: 13
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-06
 tags: [positioning]
 ---
 
@@ -75,10 +75,10 @@ connect (no self-spoofing while disconnected).
   field stays truthful if the red dot moves on after the tap.
 
 ## Acceptance criteria
-- [ ] Quit with a red dot at X → relaunch (toggle on) → red dot is at X (not blank)
-- [ ] Fresh install with no saved position (toggle on) → defaults to Taipei
-- [ ] Toggle off → launch has no simulated position until the user teleports
-- [ ] Disconnected restore does not broadcast to the device until Connect
+- [x] Quit with a red dot at X → relaunch (toggle on) → red dot is at X (not blank)
+- [x] Fresh install with no saved position (toggle on) → defaults to Taipei
+- [x] Toggle off → launch has no simulated position until the user teleports
+- [x] Disconnected restore does not broadcast to the device until Connect
 
 ## Related
 - [[004-read-device-real-gps]] — dropped; the real-location default went with it

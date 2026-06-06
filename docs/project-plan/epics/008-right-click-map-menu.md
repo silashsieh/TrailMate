@@ -2,11 +2,11 @@
 type: epic
 id: 008
 title: Right-click map menu (replace/augment long-press)
-status: in-progress
+status: done
 milestone: v1.3.0
 issue: 16
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-06
 tags: [ui, map]
 ---
 

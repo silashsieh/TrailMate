@@ -1,8 +1,8 @@
 # Testing Strategy
 
-**Status:** Not yet implemented.
+**Status:** Mostly not yet implemented; first unit tests exist.
 
-The `TrailMateTests` target exists in the Xcode project but only contains the default Swift-Testing template (`@Test func example()` with an empty body). No production tests, integration tests, or smoke-test checklist exist on disk. The CI workflow (`.github/workflows/swift.yml`) runs `packaging/release.sh` (build) only — there is no `xcodebuild test` step.
+The `TrailMateTests` target contains `RouteMathTests` (segment joining/dedup), `NavigationEngineLoopTests` (loop playback boundary math), and `SimulationActorReplayTests` (integrator reset on re-play). Everything else — broader unit coverage, integration tests, the smoke-test checklist — does not exist on disk. The CI workflow (`.github/workflows/swift.yml`) runs `packaging/release.sh` (build) only — there is no `xcodebuild test` step. Note the test target is hosted in TrailMate.app (`TEST_HOST`), so `xcodebuild test` launches the app bundle — it can't run while a live TrailMate session is open.
 
 Everything below is the plan, not the current state. Treat each item as a TODO.
 

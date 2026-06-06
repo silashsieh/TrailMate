@@ -67,9 +67,12 @@ Optionally a loop count (including infinite).
   distance/direction/loop counters, and `SimulationActor.play()` from idle resets the
   `PositionIntegrator` to the route start (it used to seed only a nil position, so after a
   completed pass the marker stayed parked at the far end and would have traced a
-  route-shaped ghost path offset from the polyline). The actor seam is pinned by
-  `SimulationActorReplayTests` with a recording mock backend — the engine-only tests
-  can't see the integrator.
+  route-shaped ghost path offset from the polyline). The actor seam is covered by
+  `SimulationActorReplayTests` (deterministic, no aggregator ticks) — the engine-only
+  tests can't see the integrator. Note the suite runs hosted in TrailMate.app
+  (`TEST_HOST`), so it was compile-verified but not executed during development while a
+  live session was running; first `xcodebuild test` run is part of the owner's
+  verification pass.
 
 ## Acceptance criteria
 - [ ] Restart mode replays from A indefinitely (or N times) until Stop

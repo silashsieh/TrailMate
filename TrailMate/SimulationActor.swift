@@ -10,6 +10,7 @@ struct SimSnapshot: Sendable {
     var navigationProgress: Double
     var navigationElapsedDistance: Double
     var navigationTotalDistance: Double
+    var navigationCompletedLoops: Int
     var joystickIsActive: Bool
     var joystickControllerName: String?
     var routeDeviationMeters: Double
@@ -134,6 +135,10 @@ actor SimulationActor {
 
     func updateNoiseSigma(_ sigma: Double) {
         noise.sigmaMeters = sigma
+    }
+
+    func updateLoop(mode: NavigationEngine.LoopMode, count: Int) {
+        nav.updateLoop(mode: mode, count: count)
     }
 
     // MARK: - Route
@@ -291,6 +296,11 @@ actor SimulationActor {
         var anyContribution = false
 
         if let nv = nav.tick(dt: dt) {
+            // A restart-loop wrap is a deliberate teleport back to the route
+            // start; the engine returns zero velocity on that tick.
+            if let jump = nv.jump {
+                integrator.reset(to: jump)
+            }
             vx += nv.vx; vy += nv.vy
             anyContribution = true
         }
@@ -377,6 +387,7 @@ actor SimulationActor {
             navigationProgress: nav.progress,
             navigationElapsedDistance: nav.elapsedDistance,
             navigationTotalDistance: nav.totalDistance,
+            navigationCompletedLoops: nav.completedLoops,
             joystickIsActive: joy.isActive,
             joystickControllerName: joy.connectedControllerName,
             routeDeviationMeters: routeDeviationMeters,
@@ -473,6 +484,7 @@ actor SimulationActor {
         navigationProgress = snap.navigationProgress
         navigationElapsedDistance = snap.navigationElapsedDistance
         navigationTotalDistance = snap.navigationTotalDistance
+        navigationCompletedLoops = snap.navigationCompletedLoops
         joystickIsActive = snap.joystickIsActive
         joystickControllerName = snap.joystickControllerName
         routeDeviationMeters = snap.routeDeviationMeters

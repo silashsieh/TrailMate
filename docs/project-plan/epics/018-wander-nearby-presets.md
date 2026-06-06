@@ -2,7 +2,7 @@
 type: epic
 id: 018
 title: Wander Nearby preset options & persistence
-status: open
+status: in-progress
 milestone: v1.4.0
 issue: 24
 opened: 2026-06-07
@@ -29,23 +29,35 @@ across app relaunches.
 - Per-location or per-device preset profiles.
 
 ## Stories
-- [ ] Replace preset values: distance 250/500/750 m + custom; duration 30/60/120 min + custom
-- [ ] Persist last selection (preset or custom, with custom values) in UserDefaults
-- [ ] Restore the persisted selection when the sheet opens; fall back to sensible defaults
+- [x] Replace preset values: distance 250/500/750 m + custom; duration 30/60/120 min + custom
+- [x] Persist last selection (preset or custom, with custom values) in UserDefaults
+- [x] Restore the persisted selection when the sheet opens; fall back to sensible defaults
 
 ## Open questions
-- The issue says 直徑 (diameter) but the sheet field is labelled Radius — are 250/500/750
-  radius or diameter values? Decide before changing labels/values.
-- Which preset is the new default on first run (no saved selection)?
+*(both settled 2026-06-07 — see Decisions)*
 
 ## Decisions made along the way
+- **250/500/750 are radius values.** The 直徑 in issue #24 was the owner's typo for 半徑;
+  the issue body was corrected on 2026-06-07. The "Radius" label stays as-is.
+- **First-run default is 500 m / 60 min** — the middle preset on both axes (owner decision).
+- **Persist on every selection change, not on Start.** The AC's sequence is pick → quit →
+  relaunch with no Start step, and the [[005-restore-sim-location]] pattern records
+  continuously. Custom text is persisted only once it parses to a positive number, so a
+  half-typed value never clobbers the last good one.
+- **Custom-field fallbacks (never used custom before): 1000 m / 180 min** — continue past the
+  largest preset, since custom is most useful beyond the preset range.
+- State lives in a new `WanderPresetPersistence` enum (UserDefaults statics, mirroring
+  `SimulatedPositionPersistence`); `WanderSheet.init` is the restore point since the sheet
+  is created per presentation.
 
 ## Bugs / follow-ups found while building
 
 ## Acceptance criteria
-- [ ] Sheet shows 250 m / 500 m / 750 m / custom and 30 min / 60 min / 120 min / custom
+- [x] Sheet shows 250 m / 500 m / 750 m / custom and 30 min / 60 min / 120 min / custom
 - [ ] Pick a preset or custom value → quit → relaunch → sheet reopens with that selection
+      *(needs on-device verification by the owner)*
 - [ ] Wander route generation behaves identically apart from the new values
+      *(needs on-device verification by the owner)*
 
 ## Related
 - [[002-wander-nearby]] — the shipped feature this improves (never reopened)

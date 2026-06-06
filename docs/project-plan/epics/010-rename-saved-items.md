@@ -54,5 +54,5 @@ Rename an existing saved location or route in place.
   removed in the same PR (route export = load it + Route section's Export GPX).
 
 ## Acceptance criteria
-- [ ] Renaming a saved item updates its label and survives relaunch
-- [ ] No change to Load / Replay / Delete behavior
+- [x] Renaming a saved item updates its label and survives relaunch
+- [x] No change to Load / Replay / Delete behavior

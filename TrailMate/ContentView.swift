@@ -505,24 +505,7 @@ private struct SavedLocationsSection: View {
     var body: some View {
         Section("Saved Locations") {
             ForEach(appState.savedWaypoints) { waypoint in
-                Button {
-                    appState.teleportToWaypoint(waypoint)
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(waypoint.name)
-                            .font(.callout)
-                        Text(String(format: "%.4f, %.4f", waypoint.latitude, waypoint.longitude))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button("Delete", role: .destructive) {
-                        appState.deleteWaypoint(waypoint)
-                    }
-                }
+                SavedLocationRow(waypoint: waypoint)
             }
 
             if appState.simState.simulatedCoordinate != nil {
@@ -543,6 +526,75 @@ private struct SavedLocationsSection: View {
     }
 }
 
+private struct SavedLocationRow: View {
+    let waypoint: SavedWaypoint
+    @Environment(AppState.self) private var appState
+    @State private var isRenaming = false
+    @State private var draftName = ""
+    @FocusState private var nameFieldIsFocused: Bool
+
+    var body: some View {
+        Group {
+            if isRenaming {
+                VStack(alignment: .leading) {
+                    TextField("Name", text: $draftName)
+                        .font(.callout)
+                        .focused($nameFieldIsFocused)
+                        .onSubmit { commitRename() }
+                        .onExitCommand { isRenaming = false }
+                        .onAppear { nameFieldIsFocused = true }
+                    Text(coordinateText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Button {
+                    appState.teleportToWaypoint(waypoint)
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text(waypoint.name)
+                            .font(.callout)
+                        Text(coordinateText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        // Click-away commits, like Finder. onSubmit clears isRenaming before the
+        // field resigns focus, so an Enter-commit doesn't also commit here.
+        .onChange(of: nameFieldIsFocused) { _, focused in
+            if !focused && isRenaming { commitRename() }
+        }
+        .contextMenu {
+            Button("Rename") { beginRename() }
+            Button("Delete", role: .destructive) {
+                appState.deleteWaypoint(waypoint)
+            }
+        }
+    }
+
+    private var coordinateText: String {
+        String(format: "%.4f, %.4f", waypoint.latitude, waypoint.longitude)
+    }
+
+    private func beginRename() {
+        draftName = waypoint.name
+        isRenaming = true
+    }
+
+    private func commitRename() {
+        isRenaming = false
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An empty name cancels the rename, like Finder.
+        guard !trimmed.isEmpty, trimmed != waypoint.name else { return }
+        appState.renameWaypoint(waypoint, to: trimmed)
+    }
+}
+
 // MARK: - Saved Routes
 
 private struct SavedRoutesSection: View {
@@ -560,11 +612,23 @@ private struct SavedRoutesSection: View {
 private struct SavedRouteRow: View {
     let route: SavedRoute
     @Environment(AppState.self) private var appState
+    @State private var isRenaming = false
+    @State private var draftName = ""
+    @FocusState private var nameFieldIsFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(route.name)
-                .font(.callout)
+            if isRenaming {
+                TextField("Name", text: $draftName)
+                    .font(.callout)
+                    .focused($nameFieldIsFocused)
+                    .onSubmit { commitRename() }
+                    .onExitCommand { isRenaming = false }
+                    .onAppear { nameFieldIsFocused = true }
+            } else {
+                Text(route.name)
+                    .font(.callout)
+            }
             Text(detail)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -572,13 +636,33 @@ private struct SavedRouteRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture {
+            guard !isRenaming else { return }
             appState.loadSavedRoute(route, autoPlay: false)
+        }
+        // Click-away commits, like Finder. onSubmit clears isRenaming before the
+        // field resigns focus, so an Enter-commit doesn't also commit here.
+        .onChange(of: nameFieldIsFocused) { _, focused in
+            if !focused && isRenaming { commitRename() }
         }
         .contextMenu {
             Button("Load") { appState.loadSavedRoute(route, autoPlay: false) }
             Button("Replay") { appState.loadSavedRoute(route, autoPlay: true) }
+            Button("Rename") { beginRename() }
             Button("Delete", role: .destructive) { appState.deleteSavedRoute(route) }
         }
+    }
+
+    private func beginRename() {
+        draftName = route.name
+        isRenaming = true
+    }
+
+    private func commitRename() {
+        isRenaming = false
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An empty name cancels the rename, like Finder.
+        guard !trimmed.isEmpty, trimmed != route.name else { return }
+        appState.renameSavedRoute(route, to: trimmed)
     }
 
     private var detail: String {

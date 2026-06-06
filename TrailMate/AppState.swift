@@ -649,6 +649,12 @@ final class AppState {
         persistWaypoints()
     }
 
+    func renameWaypoint(_ waypoint: SavedWaypoint, to newName: String) {
+        guard let index = savedWaypoints.firstIndex(where: { $0.id == waypoint.id }) else { return }
+        savedWaypoints[index].name = newName
+        persistWaypoints()
+    }
+
     func teleportToWaypoint(_ waypoint: SavedWaypoint) {
         teleport(to: waypoint.coordinate)
     }
@@ -806,6 +812,17 @@ final class AppState {
 
     func deleteSavedRoute(_ route: SavedRoute) {
         savedRoutes.delete(route)
+    }
+
+    func renameSavedRoute(_ route: SavedRoute, to newName: String) {
+        var renamed = route
+        renamed.name = newName
+        do {
+            // save() overwrites the same <id>.json, so this is an in-place rename.
+            try savedRoutes.save(renamed)
+        } catch {
+            addLog("Rename failed: \(error.localizedDescription)")
+        }
     }
 
     func saveRecordingAsRoute(_ session: RecorderService.Session, name: String) {

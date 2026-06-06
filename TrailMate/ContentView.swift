@@ -189,6 +189,7 @@ private struct RouteSection: View {
         if !appState.routeCoordinates.isEmpty {
             Section("Playback") {
                 SpeedPicker(speedMultiplier: $appState.speedMultiplier)
+                LoopPicker()
                 PlaybackControls()
                 PlaybackProgress()
                 SaveCurrentRouteButton()
@@ -344,6 +345,35 @@ private struct SpeedPicker: View {
     }
 }
 
+private struct LoopPicker: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        @Bindable var appState = appState
+
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Loop", selection: $appState.loopMode) {
+                Text("Off").tag(NavigationEngine.LoopMode.off)
+                Text("Restart").tag(NavigationEngine.LoopMode.restart)
+                Text("Ping-Pong").tag(NavigationEngine.LoopMode.pingPong)
+            }
+            .pickerStyle(.segmented)
+
+            if appState.loopMode != .off {
+                Stepper(value: $appState.loopCount, in: 0...99) {
+                    HStack {
+                        Text(appState.loopMode == .pingPong ? "Round trips" : "Passes")
+                        Spacer()
+                        Text(appState.loopCount == 0 ? "∞" : "\(appState.loopCount)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct PlaybackControls: View {
     @Environment(AppState.self) private var appState
 
@@ -401,6 +431,12 @@ private struct PlaybackProgress: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            if appState.loopMode != .off && sim.navigationPlaybackState != .idle {
+                Text("Loop \(sim.navigationCompletedLoops + 1) of \(appState.loopCount == 0 ? "∞" : "\(appState.loopCount)")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if appState.simState.routeDeviationMeters > 5 {
                 HStack {

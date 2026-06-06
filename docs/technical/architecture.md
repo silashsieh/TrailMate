@@ -13,7 +13,7 @@ TrailMate/
 │   ├── AppState.swift                 # root @Observable — connection, mode, all state
 │   ├── ContentView.swift              # NavigationSplitView with sidebar + map
 │   ├── DaemonBridge.swift             # Process wrapper, stdin/stdout IPC with daemon
-│   ├── NavigationEngine.swift         # 10Hz route playback with polyline interpolation
+│   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (20 Hz tick)
 │   ├── JoystickEngine.swift           # 20Hz control loop (controller/virtual stick/WASD)
 │   ├── VirtualJoystickView.swift      # On-screen circular pad with DragGesture
 │   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper

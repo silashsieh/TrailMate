@@ -74,6 +74,15 @@ final class AppState {
         didSet { Task { await syncEngineSpeeds() } }
     }
     var speedMultiplier: Double = 1.0
+    // Loop playback. Session-scoped like speedMultiplier; count 0 = infinite.
+    // Engine-wide config, so it applies to every play entry point (planned
+    // routes, direct travel, wander, recording replays).
+    var loopMode: NavigationEngine.LoopMode = .off {
+        didSet { pushLoopConfig() }
+    }
+    var loopCount: Int = 0 {
+        didSet { pushLoopConfig() }
+    }
     var routeCoordinates: [CLLocationCoordinate2D] = []
     var isCalculatingRoute = false
 
@@ -204,6 +213,12 @@ final class AppState {
 
     private func syncEngineSpeeds() async {
         await sim.updateBaseSpeed(effectiveBaseSpeedMPS)
+    }
+
+    private func pushLoopConfig() {
+        let mode = loopMode
+        let count = loopCount
+        Task { await sim.updateLoop(mode: mode, count: count) }
     }
 
     // MARK: - Connection
@@ -514,8 +529,17 @@ final class AppState {
     func startPlayback() {
         guard !routeCoordinates.isEmpty, connectionStatus.isConnected else { return }
         let mult = speedMultiplier
-        addLog(String(format: "Playing route at %.0f×...", mult))
+        addLog(String(format: "Playing route at %.0f×%@...", mult, loopLogSuffix))
         Task { await sim.play(multiplier: mult) }
+    }
+
+    private var loopLogSuffix: String {
+        let count = loopCount == 0 ? "∞" : "\(loopCount)"
+        switch loopMode {
+        case .off: return ""
+        case .restart: return " (restart loop, \(count))"
+        case .pingPong: return " (ping-pong loop, \(count))"
+        }
     }
 
     func pausePlayback() {

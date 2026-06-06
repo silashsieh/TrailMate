@@ -36,7 +36,8 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - `MKDirections.calculate()` is issued per segment ([From, …stops, To] pairs); polylines are merged via `RouteMath.joinSegments` (2 m meters-based join-vertex dedup).
 - `NavigationEngine` interpolates along the polyline at the configured base speed.
 - Playback time-fast-forward multipliers: 1× / 5× / 10× / 100×.
-- Transport controls: Play / Pause / Stop. Progress bar (elapsed / total distance).
+- Loop playback: Off / Restart / Ping-Pong, with an optional loop count (∞ by default, stepper up to 99). Restart jumps the marker back to the start when the route completes and replays; Ping-Pong walks back along the same polyline — no re-routing, so the return leg is the outbound path exactly. One loop = one start-to-end pass (Restart) or one there-and-back round trip (Ping-Pong); the count reached, playback ends cleanly. The setting is engine-wide — it also loops direct travel, "Route here", wander routes, and recording replays — and session-scoped, like the speed multiplier.
+- Transport controls: Play / Pause / Stop. Progress bar (elapsed / total distance) runs 0→1 per leg; while looping, a "Loop k of N" line shows the current iteration. Play on a route that already ran to completion replays it from the start.
 - Wall-clock remaining time shown alongside the progress bar in `HH:mm:ss`; accounts for the active playback multiplier (e.g., a 30-min trip at 10× reads ~3 min).
 - Saved routes capture the planner inputs (From / To / stops with their labels) so they can be re-loaded as editable fields, not just replayed as a flat polyline. Routes saved before this field existed still play; their planner fields stay empty.
 

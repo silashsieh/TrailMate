@@ -45,6 +45,7 @@ final class SimulationStateBridge {
     var navigationProgress: Double = 0
     var navigationElapsedDistance: Double = 0
     var navigationTotalDistance: Double = 0
+    var navigationCompletedLoops: Int = 0
     var joystickIsActive: Bool = false
     var joystickControllerName: String?
     var routeDeviationMeters: Double = 0

@@ -77,13 +77,14 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Saved waypoints
 
 - Save current location with a name prompt; persists to `UserDefaults` as JSON.
-- Sidebar list with click-to-teleport, right-click delete.
+- Sidebar list with click-to-teleport, right-click rename (inline, Finder-style) / delete.
 
 ### Saved routes
 
 - `SavedRoute` with name, transport mode, coordinates, and source (`calculated` / `directTravel` / `recorded` / `importedGPX`).
 - Persisted as per-route JSON under `~/Library/Application Support/TrailMate/routes/`.
-- Load / Replay / Export (GPX) / Rename / Delete.
+- Per-row Load / Replay / Rename (inline, Finder-style) / Delete. To export a route as GPX,
+  load it and use the Route section's Export GPX.
 - "Save as Route…" promotes a recorded session into the route library.
 
 ### Session recording

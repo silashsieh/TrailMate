@@ -24,9 +24,9 @@ Rename an existing saved location or route in place.
   there are enough saved items to warrant it (a future epic, not this one).
 
 ## Stories
-- [ ] Rename action (context menu / inline) on saved locations
-- [ ] Rename action on saved routes
-- [ ] Persist the new name (same store as the existing items)
+- [x] Rename action (context menu / inline) on saved locations
+- [x] Rename action on saved routes
+- [x] Persist the new name (same store as the existing items)
 
 ## Open questions
 - ~~Inline rename (Finder-style) or alert-with-TextField (the app's existing naming pattern)?~~
@@ -49,6 +49,9 @@ Rename an existing saved location or route in place.
   existing `SavedRoutesStore.save()` — same `<id>.json` file, overwritten atomically.
 
 ## Bugs / follow-ups found while building
+- Doc drift: `features.md` claimed saved routes already had per-row "Export (GPX) / Rename".
+  Neither existed (issue #11 and the code agree). Rename now does; the false Export claim is
+  removed in the same PR (route export = load it + Route section's Export GPX).
 
 ## Acceptance criteria
 - [ ] Renaming a saved item updates its label and survives relaunch

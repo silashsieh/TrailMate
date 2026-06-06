@@ -860,22 +860,38 @@ private struct WanderSheet: View {
     private static let customRadiusRange: ClosedRange<Double> = 50...2000
     private static let customDurationRange: ClosedRange<Double> = 5...240
 
+    private static func logRange(_ range: ClosedRange<Double>) -> ClosedRange<Double> {
+        log10(range.lowerBound)...log10(range.upperBound)
+    }
+
+    // Log-scale dragging lands on ugly fractions; snapping to two significant
+    // figures is the log-scale analogue of a fixed step — granularity scales
+    // with the value (1 m steps near 50 m, 100 m steps near 2000 m).
+    private static func snapTwoSignificant(_ value: Double) -> Double {
+        guard value > 0, value.isFinite else { return value }
+        let magnitude = pow(10, floor(log10(value)) - 1)
+        return (value / magnitude).rounded() * magnitude
+    }
+
     // Slider ↔ text bindings: the text field stays the source of truth — it
-    // feeds persistence and resolution — and the slider is a view over it.
-    // Typed values outside the slider range stay valid; the knob just pins
-    // to the nearest end until the slider is dragged.
+    // feeds persistence and resolution — and the slider is a log₁₀ view over
+    // it, so small values get more knob travel. Typed values outside the
+    // slider range stay valid; the knob just pins to the nearest end until
+    // the slider is dragged (sub-range values clamp before the log).
     private var customRadiusSlider: Binding<Double> {
         Binding {
-            Double(customRadiusText.trimmingCharacters(in: .whitespaces))
+            let meters = Double(customRadiusText.trimmingCharacters(in: .whitespaces))
                 ?? WanderPresetPersistence.defaultCustomRadiusMeters
-        } set: { customRadiusText = Self.format($0) }
+            return log10(max(meters, Self.customRadiusRange.lowerBound))
+        } set: { customRadiusText = Self.format(Self.snapTwoSignificant(pow(10, $0))) }
     }
 
     private var customDurationSlider: Binding<Double> {
         Binding {
-            Double(customDurationText.trimmingCharacters(in: .whitespaces))
+            let minutes = Double(customDurationText.trimmingCharacters(in: .whitespaces))
                 ?? WanderPresetPersistence.defaultCustomDurationMinutes
-        } set: { customDurationText = Self.format($0) }
+            return log10(max(minutes, Self.customDurationRange.lowerBound))
+        } set: { customDurationText = Self.format(Self.snapTwoSignificant(pow(10, $0))) }
     }
 
     var body: some View {
@@ -914,7 +930,7 @@ private struct WanderSheet: View {
                 }
                 if radiusChoice == .custom {
                     HStack(spacing: 8) {
-                        Slider(value: customRadiusSlider, in: Self.customRadiusRange, step: 50)
+                        Slider(value: customRadiusSlider, in: Self.logRange(Self.customRadiusRange))
                         TextField("meters", text: $customRadiusText)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 90)
@@ -939,7 +955,7 @@ private struct WanderSheet: View {
                 }
                 if durationChoice == .custom {
                     HStack(spacing: 8) {
-                        Slider(value: customDurationSlider, in: Self.customDurationRange, step: 5)
+                        Slider(value: customDurationSlider, in: Self.logRange(Self.customDurationRange))
                         TextField("minutes", text: $customDurationText)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 90)

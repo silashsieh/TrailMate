@@ -45,6 +45,9 @@ sync at release cuts; the epic files remain authoritative.
 - **v1.5.0 — Advanced routing & settings:**
   [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md),
   [017 — Standalone Settings window](epics/017-settings-window.md).
+- **v1.6.0 — Localization & testing:**
+  [015 — Localization (en + zh-Hant)](epics/015-localization.md),
+  [016 — Unit tests + test CI](epics/016-test-ci-unit-tests.md).
 - **Shipped (v1.3.0 — 2026-06-06) — Positioning & map ergonomics:**
   [005 — Restore last simulated location](epics/005-restore-sim-location.md),
   [006 — Follow / center current position](epics/006-follow-current-position.md),

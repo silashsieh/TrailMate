@@ -2,8 +2,8 @@
 type: epic
 id: 016
 title: Unit tests + test CI job
-status: idea
-milestone:
+status: open
+milestone: v1.6.0
 issue:
 opened: 2026-05-29
 shipped:

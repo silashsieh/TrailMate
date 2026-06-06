@@ -21,6 +21,4 @@ SORT status ASC, id ASC
   2026-06-01 [scope.md](scope.md) revision (multi-iPhone is now a goal); large architectural
   change, needs deliberate planning before joining a release.
 - **Ideas (carried over from [phases.md](phases.md) Phase 5):**
-  [014 — README screenshots & GIF](epics/014-readme-screenshots.md),
-  [015 — Localization (en + zh-Hant)](epics/015-localization.md),
-  [016 — Unit tests + test CI](epics/016-test-ci-unit-tests.md).
+  [014 — README screenshots & GIF](epics/014-readme-screenshots.md).

@@ -41,7 +41,8 @@ sync at release cuts; the epic files remain authoritative.
 - **v1.4.0 — Playback & library:**
   [009 — Route loop playback](epics/009-route-loop-playback.md),
   [010 — Rename saved items](epics/010-rename-saved-items.md),
-  [011 — Timeline seek](epics/011-timeline-seek.md).
+  [011 — Timeline seek](epics/011-timeline-seek.md),
+  [018 — Wander Nearby presets & persistence](epics/018-wander-nearby-presets.md).
 - **v1.5.0 — Advanced routing & settings:**
   [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md),
   [017 — Standalone Settings window](epics/017-settings-window.md).

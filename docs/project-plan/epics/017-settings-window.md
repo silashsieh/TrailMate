@@ -3,7 +3,7 @@ type: epic
 id: 017
 title: Standalone Settings window
 status: open
-milestone: v1.4.0
+milestone: v1.5.0
 issue: 20
 opened: 2026-06-01
 shipped:

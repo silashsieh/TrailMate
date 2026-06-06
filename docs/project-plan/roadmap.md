@@ -38,13 +38,13 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v1.4.0 — Playback, library & settings:**
+- **v1.4.0 — Playback & library:**
   [009 — Route loop playback](epics/009-route-loop-playback.md),
   [010 — Rename saved items](epics/010-rename-saved-items.md),
-  [011 — Timeline seek](epics/011-timeline-seek.md),
+  [011 — Timeline seek](epics/011-timeline-seek.md).
+- **v1.5.0 — Advanced routing & settings:**
+  [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md),
   [017 — Standalone Settings window](epics/017-settings-window.md).
-- **v1.5.0 — Advanced routing & playback:**
-  [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md).
 - **Shipped (v1.3.0 — 2026-06-06) — Positioning & map ergonomics:**
   [005 — Restore last simulated location](epics/005-restore-sim-location.md),
   [006 — Follow / center current position](epics/006-follow-current-position.md),

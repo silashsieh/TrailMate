@@ -1062,6 +1062,10 @@ private struct MapArea: View {
     @State private var isFollowing = false
     // Last user-chosen zoom, so follow recenters without changing it.
     @State private var followSpan: MKCoordinateSpan = MapCameraPersistence.loadRegion().span
+    // .contextMenu doesn't expose its click location, so a hover tracker records the last
+    // pointer position (map-local space); it's converted to a coordinate lazily at menu
+    // time, since a stored coordinate would go stale if the camera moved under the cursor.
+    @State private var lastHoverPoint: CGPoint?
 
     var body: some View {
         MapReader { proxy in
@@ -1131,8 +1135,10 @@ private struct MapArea: View {
                 }
                 recenter(on: coord)
             }
-            // Long-press, not tap: a plain tap would steal the Map's own pan/zoom
-            // gestures, and the 0.5s threshold disambiguates intent from incidental clicks.
+            // Long-press fallback for the right-click context menu below — kept so existing
+            // muscle memory survives. Long-press, not tap: a plain tap would steal the Map's
+            // own pan/zoom gestures, and the 0.5s threshold disambiguates intent from
+            // incidental clicks.
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.5)
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
@@ -1150,6 +1156,16 @@ private struct MapArea: View {
                         }
                     }
             )
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                // Keep the last point on .ended — the menu's content is evaluated after the
+                // right-click, by which time hover tracking has already stopped.
+                if case .active(let point) = phase {
+                    lastHoverPoint = point
+                }
+            }
+            .contextMenu {
+                destinationMenu(proxy: proxy)
+            }
             .overlay(alignment: .bottomTrailing) {
                 if appState.simState.joystickIsActive {
                     VirtualJoystickView { x, y in
@@ -1262,6 +1278,68 @@ private struct MapArea: View {
         }
     }
 
+    // Right-click destination menu: same actions as DestinationActionBar (the long-press
+    // capsule), presented as a native context menu at the pointer — macOS convention, and
+    // consistent with the sidebar rows' .contextMenu. Empty content while disconnected
+    // suppresses the menu entirely, mirroring the long-press guard.
+    @ViewBuilder
+    private func destinationMenu(proxy: MapProxy) -> some View {
+        if appState.connectionStatus.isConnected,
+           let point = lastHoverPoint,
+           let coordinate = proxy.convert(point, from: .local) {
+            Section(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)) {
+                Button {
+                    appState.teleport(to: coordinate)
+                } label: {
+                    Label("Teleport", systemImage: "bolt.fill")
+                }
+
+                // Unlike long-press (which teleports instantly when there's no origin), a
+                // context menu always opens; origin-dependent actions just disable instead.
+                Button {
+                    appState.travelDirectly(to: coordinate)
+                } label: {
+                    Label("Go directly", systemImage: "arrow.up.right.circle")
+                }
+                .disabled(appState.simState.simulatedCoordinate == nil)
+
+                Button {
+                    Task { await appState.routeFromCurrent(to: coordinate) }
+                } label: {
+                    Label("Route here", systemImage: "map.fill")
+                }
+                .disabled(appState.simState.simulatedCoordinate == nil || appState.isCalculatingRoute)
+            }
+
+            if !appState.routeCoordinates.isEmpty {
+                Section {
+                    Button {
+                        Task { await appState.appendDirectly(to: coordinate) }
+                    } label: {
+                        Label("Append direct", systemImage: "arrow.forward.to.line")
+                    }
+
+                    Button {
+                        Task { await appState.appendRoute(to: coordinate) }
+                    } label: {
+                        Label("Append route", systemImage: "arrow.triangle.branch")
+                    }
+                    .disabled(appState.isCalculatingRoute)
+                }
+            }
+
+            Section {
+                Button {
+                    appState.pendingWanderCenter = coordinate
+                    appState.showWanderSheet = true
+                } label: {
+                    Label("Wander nearby…", systemImage: "shuffle.circle")
+                }
+                .disabled(appState.isCalculatingRoute)
+            }
+        }
+    }
+
     private var mapHintText: String {
         switch appState.connectionStatus {
         case .disconnected:
@@ -1276,7 +1354,7 @@ private struct MapArea: View {
             if let coord = appState.simState.simulatedCoordinate {
                 return String(format: "Simulating: %.4f, %.4f", coord.latitude, coord.longitude)
             }
-            return "Long-press the map to set a starting location"
+            return "Right-click the map to set a starting location"
         case .error:
             return "Connection error — check sidebar"
         }

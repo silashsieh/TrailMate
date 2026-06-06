@@ -17,20 +17,20 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Full-pane MapKit view with pan / zoom.
 - Search bar with `MKLocalSearchCompleter` autocomplete (used in route From/To pickers).
 - Simulated position rendered as a distinct marker.
-- Long-press surfaces a destination popover (see "Map-driven travel" below).
+- Right-click opens the destination menu at the pointer; a 0.5 s long-press is kept as a fallback trigger (see "Map-driven travel" below).
 - Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
 - The simulated position (red dot) persists too and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (sidebar Connection section) opts out back to a start-empty launch — the position is recorded either way. A restored position is display-only until connect: the device receives it when the session attaches.
 - Follow control on the map overlay (next to Record) recenters on and tracks the simulated position, keeping the current zoom. Any manual camera gesture hands control back (MapKit user-tracking semantics); disabled until a simulated position exists; session-only, not persisted.
 
 ### Teleport
 
-- Long-press → "Teleport here" sets the device location instantly.
+- Right-click (or long-press) → "Teleport" sets the device location instantly.
 - Works at any time while connected. Doubles as the way to set the starting location for joystick input when launch restore is off (or after Clear).
 - "Clear" reverts the device to its real GPS.
 
 ### Route playback
 
-- From/To via search or by promoting a long-press destination. A location-arrow button beside From fills it with the current simulated position (disabled until a position exists).
+- From/To via search or by promoting a destination picked on the map. A location-arrow button beside From fills it with the current simulated position (disabled until a position exists).
 - Optional intermediate stops between From and To, visited in order. Each stop has its own search field; "Add Stop" appears once both endpoints are set. Soft notice above 10 stops (Apple Maps throttling risk); no hard cap.
 - Transport mode: Walk (5 km/h), Cycle (15 km/h), Drive (50 km/h), or Custom km/h (`TransportMode.custom`).
 - `MKDirections.calculate()` is issued per segment ([From, …stops, To] pairs); polylines are merged via `RouteMath.joinSegments` (2 m meters-based join-vertex dedup).
@@ -42,15 +42,16 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Map-driven travel
 
-- Long-press with an existing simulated position opens a popover offering four actions:
-  - **Teleport here** — instant.
+- Right-click anywhere on the map to open a native context menu at the pointer (its header shows the clicked coordinate); a 0.5 s long-press opens the same actions as a capsule action bar instead — kept as a fallback trigger. Both require a connected device. Actions:
+  - **Teleport** — instant. Trigger nuance when no simulated position exists yet: long-press teleports immediately (nothing to route from), while right-click still opens the menu with the origin-dependent actions disabled.
   - **Go directly** — straight-line travel at `transportMode.baseSpeed`, served by `NavigationEngine`'s two-point case.
   - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
-  - **Wander nearby…** — opens a sheet to pick a radius (50 / 100 / 200 m or custom) and a duration (15 / 30 / 60 min or custom). `WanderRouteBuilder` chains `MKDirections` walking hops between random points around the long-press center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`. The wander may leak slightly beyond the disc; result is loaded into `NavigationEngine` and auto-plays. One-shot, not persisted.
+  - **Append direct / Append route** — extend the loaded route from its end to the chosen point (straight line / `MKDirections`); offered only while a route is loaded.
+  - **Wander nearby…** — opens a sheet to pick a radius (50 / 100 / 200 m or custom) and a duration (15 / 30 / 60 min or custom). `WanderRouteBuilder` chains `MKDirections` walking hops between random points around the chosen center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`. The wander may leak slightly beyond the disc; result is loaded into `NavigationEngine` and auto-plays. One-shot, not persisted.
 
 ### Joystick
 
-- Arms on connect — no Start button. The engine stays inert (no SETQ, no marker) until a position seeds the integrator — the restored launch position (broadcast at attach) or, with restore off, the first long-press teleport; from then on, stick input drives the simulated location at the configured base speed.
+- Arms on connect — no Start button. The engine stays inert (no SETQ, no marker) until a position seeds the integrator — the restored launch position (broadcast at attach) or, with restore off, the first teleport; from then on, stick input drives the simulated location at the configured base speed.
 - Hardware game controller via `GameController.framework` (MFi / DualShock / Xbox / Joy-Con; hot-pluggable).
 - On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback.
 - WASD + arrow-key input on the focused map view.
@@ -119,7 +120,7 @@ Items considered during planning that were dropped, deferred, or superseded.
 - **Reconnect button.** Replaced by automatic teardown on tunnel/daemon exit; user re-runs Connect manually.
 - **Mount-status indicator showing DDI / tunnel / DVT separately.** Collapsed into a single Connection status pill.
 - **Ghosted secondary marker for the real device location.** The simulated coordinate overrides what CoreLocation reports back to the host, so a separate "real" marker would only ever match the simulated one.
-- **Right-click "Set as From / Set as To" on the map.** Search fields plus the long-press destination popover cover the same use cases.
+- **Right-click "Set as From / Set as To" on the map.** Search fields plus the map destination menu cover the same use cases.
 - **0.5× playback multiplier.** Multipliers are now 1× / 5× / 10× / 100×; slower-than-real playback was unused.
 
 ## Out of scope (per [scope.md](../project-plan/scope.md))

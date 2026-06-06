@@ -2,11 +2,11 @@
 type: epic
 id: 011
 title: Draggable timeline seek during playback
-status: in-progress
+status: done
 milestone: v1.4.0
 issue: 12
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-07
 tags: [playback]
 ---
 

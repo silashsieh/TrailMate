@@ -2,11 +2,11 @@
 type: epic
 id: 010
 title: Rename saved locations & routes
-status: in-progress
+status: done
 milestone: v1.4.0
 issue: 11
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-07
 tags: [library]
 ---
 

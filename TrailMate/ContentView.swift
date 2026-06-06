@@ -857,6 +857,27 @@ private struct WanderSheet: View {
         value == value.rounded() && value.magnitude < 1e15 ? String(Int(value)) : String(value)
     }
 
+    private static let customRadiusRange: ClosedRange<Double> = 50...2000
+    private static let customDurationRange: ClosedRange<Double> = 5...240
+
+    // Slider ↔ text bindings: the text field stays the source of truth — it
+    // feeds persistence and resolution — and the slider is a view over it.
+    // Typed values outside the slider range stay valid; the knob just pins
+    // to the nearest end until the slider is dragged.
+    private var customRadiusSlider: Binding<Double> {
+        Binding {
+            Double(customRadiusText.trimmingCharacters(in: .whitespaces))
+                ?? WanderPresetPersistence.defaultCustomRadiusMeters
+        } set: { customRadiusText = Self.format($0) }
+    }
+
+    private var customDurationSlider: Binding<Double> {
+        Binding {
+            Double(customDurationText.trimmingCharacters(in: .whitespaces))
+                ?? WanderPresetPersistence.defaultCustomDurationMinutes
+        } set: { customDurationText = Self.format($0) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -892,7 +913,8 @@ private struct WanderSheet: View {
                     ) { radiusChoice = .custom }
                 }
                 if radiusChoice == .custom {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 8) {
+                        Slider(value: customRadiusSlider, in: Self.customRadiusRange, step: 50)
                         TextField("meters", text: $customRadiusText)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 90)
@@ -916,7 +938,8 @@ private struct WanderSheet: View {
                     ) { durationChoice = .custom }
                 }
                 if durationChoice == .custom {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 8) {
+                        Slider(value: customDurationSlider, in: Self.customDurationRange, step: 5)
                         TextField("minutes", text: $customDurationText)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 90)

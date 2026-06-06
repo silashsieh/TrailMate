@@ -851,8 +851,10 @@ private struct WanderSheet: View {
         _customDurationText = State(initialValue: Self.format(WanderPresetPersistence.customDurationMinutes))
     }
 
+    // The magnitude bound keeps Int(value) from trapping if an absurd custom
+    // value (e.g. "1e300") was ever persisted — show it raw instead.
     private static func format(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(value)
+        value == value.rounded() && value.magnitude < 1e15 ? String(Int(value)) : String(value)
     }
 
     var body: some View {
@@ -951,7 +953,8 @@ private struct WanderSheet: View {
             }
         }
         .onChange(of: customRadiusText) { _, text in
-            if let m = Double(text.trimmingCharacters(in: .whitespaces)), m > 0 {
+            // .isFinite: Double("1e999") parses to +inf, which must not persist.
+            if let m = Double(text.trimmingCharacters(in: .whitespaces)), m > 0, m.isFinite {
                 WanderPresetPersistence.customRadiusMeters = m
             }
         }
@@ -965,7 +968,7 @@ private struct WanderSheet: View {
             }
         }
         .onChange(of: customDurationText) { _, text in
-            if let mins = Double(text.trimmingCharacters(in: .whitespaces)), mins > 0 {
+            if let mins = Double(text.trimmingCharacters(in: .whitespaces)), mins > 0, mins.isFinite {
                 WanderPresetPersistence.customDurationMinutes = mins
             }
         }

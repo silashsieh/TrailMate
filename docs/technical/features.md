@@ -50,7 +50,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
   - **Go directly** — straight-line travel at `transportMode.baseSpeed`, served by `NavigationEngine`'s two-point case.
   - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
   - **Append direct / Append route** — extend the loaded route from its end to the chosen point (straight line / `MKDirections`); offered only while a route is loaded.
-  - **Wander nearby…** — opens a sheet to pick a radius (50 / 100 / 200 m or custom) and a duration (15 / 30 / 60 min or custom). `WanderRouteBuilder` chains `MKDirections` walking hops between random points around the chosen center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`. The wander may leak slightly beyond the disc; result is loaded into `NavigationEngine` and auto-plays. One-shot, not persisted.
+  - **Wander nearby…** — opens a sheet to pick a radius (250 / 500 / 750 m or custom) and a duration (30 / 60 / 120 min or custom). The last selection — including custom values — persists across launches via `UserDefaults` (`WanderPresetPersistence`); first run defaults to 500 m / 60 min. `WanderRouteBuilder` chains `MKDirections` walking hops between random points around the chosen center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`. The wander may leak slightly beyond the disc; result is loaded into `NavigationEngine` and auto-plays. The generated route itself is one-shot, not persisted.
 
 ### Joystick
 

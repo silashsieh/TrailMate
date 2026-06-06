@@ -827,18 +827,33 @@ private struct WanderSheet: View {
     enum RadiusChoice: Hashable { case fixed(Double), custom }
     enum DurationChoice: Hashable { case fixed(TimeInterval), custom }
 
-    @State private var radiusChoice: RadiusChoice = .fixed(100)
-    @State private var customRadiusText: String = "150"
-    @State private var durationChoice: DurationChoice = .fixed(15 * 60)
-    @State private var customDurationText: String = "20"
+    @State private var radiusChoice: RadiusChoice
+    @State private var customRadiusText: String
+    @State private var durationChoice: DurationChoice
+    @State private var customDurationText: String
 
     private static let radiusOptions: [(label: String, meters: Double)] = [
-        ("50 m", 50), ("100 m", 100), ("200 m", 200)
+        ("250 m", 250), ("500 m", 500), ("750 m", 750)
     ]
 
     private static let durationOptions: [(label: String, seconds: TimeInterval)] = [
-        ("15 min", 15 * 60), ("30 min", 30 * 60), ("1 hr", 60 * 60)
+        ("30 min", 30 * 60), ("60 min", 60 * 60), ("120 min", 120 * 60)
     ]
+
+    // Each open restores the last persisted selection (epic 018); the sheet
+    // is created per presentation, so init is the restore point.
+    init() {
+        _radiusChoice = State(initialValue: WanderPresetPersistence.radiusIsCustom
+            ? .custom : .fixed(WanderPresetPersistence.radiusMeters))
+        _customRadiusText = State(initialValue: Self.format(WanderPresetPersistence.customRadiusMeters))
+        _durationChoice = State(initialValue: WanderPresetPersistence.durationIsCustom
+            ? .custom : .fixed(WanderPresetPersistence.durationSeconds))
+        _customDurationText = State(initialValue: Self.format(WanderPresetPersistence.customDurationMinutes))
+    }
+
+    private static func format(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(value)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -922,6 +937,38 @@ private struct WanderSheet: View {
         }
         .padding(20)
         .frame(minWidth: 420)
+        // Persist every change, not just Start — quitting with the sheet open
+        // must still restore the selection on relaunch. Custom text is only
+        // recorded once it parses to a positive number, so a half-typed value
+        // never clobbers the last good one.
+        .onChange(of: radiusChoice) { _, choice in
+            switch choice {
+            case .fixed(let m):
+                WanderPresetPersistence.radiusIsCustom = false
+                WanderPresetPersistence.radiusMeters = m
+            case .custom:
+                WanderPresetPersistence.radiusIsCustom = true
+            }
+        }
+        .onChange(of: customRadiusText) { _, text in
+            if let m = Double(text.trimmingCharacters(in: .whitespaces)), m > 0 {
+                WanderPresetPersistence.customRadiusMeters = m
+            }
+        }
+        .onChange(of: durationChoice) { _, choice in
+            switch choice {
+            case .fixed(let s):
+                WanderPresetPersistence.durationIsCustom = false
+                WanderPresetPersistence.durationSeconds = s
+            case .custom:
+                WanderPresetPersistence.durationIsCustom = true
+            }
+        }
+        .onChange(of: customDurationText) { _, text in
+            if let mins = Double(text.trimmingCharacters(in: .whitespaces)), mins > 0 {
+                WanderPresetPersistence.customDurationMinutes = mins
+            }
+        }
     }
 
     private var resolvedRadius: Double? {

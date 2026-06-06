@@ -41,8 +41,9 @@ the design baseline).
   to place the dot somewhere explicit.
 
 ## Acceptance criteria
-- [ ] Follow on → red dot stays centered through playback and joystick movement
-- [ ] Dragging the map turns follow off
+- [x] Follow on → red dot stays centered through playback and joystick movement
+      (verified on-device 2026-06-06)
+- [x] Dragging the map turns follow off (verified on-device 2026-06-06)
 - [x] ~~No regression to the joystick Recenter behavior~~ Superseded 2026-06-06: the button
       was removed by owner decision (above), not regressed.
 

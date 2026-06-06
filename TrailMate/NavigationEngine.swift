@@ -32,6 +32,11 @@ nonisolated final class NavigationEngine {
     private(set) var completedLoops: Int = 0
     private var isReturning = false
 
+    // Set by a seek on an idle route so the next play() starts from the
+    // sought point instead of re-arming from the top. Consumed by play(),
+    // cleared by stop().
+    private var hasPendingSeek = false
+
     private(set) var coordinates: [CLLocationCoordinate2D] = []
     private var cumulativeDistances: [Double] = []
     private var currentDistanceAlongRoute: Double = 0
@@ -62,14 +67,16 @@ nonisolated final class NavigationEngine {
         speedMultiplier = multiplier
         // Starting fresh (not resuming a pause) re-arms from the top — without
         // this, Play on a route that already ran to completion would re-idle
-        // instantly at the far end.
-        if playbackState == .idle {
+        // instantly at the far end. A seek on the idle route overrides the
+        // re-arm: Play then starts from the sought point.
+        if playbackState == .idle && !hasPendingSeek {
             currentDistanceAlongRoute = 0
             progress = 0
             elapsedDistance = 0
             isReturning = false
             completedLoops = 0
         }
+        hasPendingSeek = false
         playbackState = .playing
     }
 
@@ -92,6 +99,27 @@ nonisolated final class NavigationEngine {
         elapsedDistance = 0
         isReturning = false
         completedLoops = 0
+        hasPendingSeek = false
+    }
+
+    // Jump the playhead to `fraction` (clamped to 0...1) of the current leg
+    // and return the on-route coordinate there. Progress runs 0→1 per leg, so
+    // on a ping-pong return leg the fraction maps back toward the route start
+    // — the scrubber seeks within the leg it is displaying. Leaves
+    // playbackState untouched — whether a scrub holds or continues playback
+    // is the caller's policy, not the engine's. Seeking an idle route lands
+    // on the forward leg and arms play() to start from the sought point.
+    func seek(toProgress fraction: Double) -> CLLocationCoordinate2D? {
+        guard totalDistance > 0, coordinates.count >= 2 else { return nil }
+        let p = min(max(0, fraction), 1)
+        if playbackState == .idle {
+            isReturning = false
+            completedLoops = 0
+            hasPendingSeek = true
+        }
+        currentDistanceAlongRoute = isReturning ? totalDistance * (1 - p) : totalDistance * p
+        updateLegProgress()
+        return interpolate(at: currentDistanceAlongRoute)
     }
 
     func updateSpeed(_ multiplier: Double) {

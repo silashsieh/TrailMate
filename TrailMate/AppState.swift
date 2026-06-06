@@ -564,6 +564,34 @@ final class AppState {
         }
     }
 
+    // MARK: - Timeline scrub
+
+    func beginPlaybackScrub() {
+        Task { await sim.beginScrub() }
+    }
+
+    func scrubPlayback(toProgress progress: Double) {
+        Task { await sim.scrub(toProgress: progress) }
+    }
+
+    // Authoritative seek: scrub release and discrete jumps (track click,
+    // keyboard arrows).
+    func seekPlayback(toProgress progress: Double) {
+        let meters = simState.navigationTotalDistance * progress
+        let distance = meters >= 1000
+            ? String(format: "%.1f km", meters / 1000)
+            : String(format: "%.0f m", meters)
+        Task {
+            await sim.seek(toProgress: progress)
+            addLog(String(format: "Seeked to %d%% (%@).", Int((progress * 100).rounded()), distance))
+        }
+    }
+
+    // Releases a scrub whose value never changed (plain click, no drag).
+    func endPlaybackScrub() {
+        Task { await sim.endScrub() }
+    }
+
     // MARK: - Joystick
 
     func rejoinRoute() {

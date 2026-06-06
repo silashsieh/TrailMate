@@ -118,6 +118,7 @@ actor SimulationActor {
         lastEmittedCoordinate = nil
         lastDisplayPush = nil
         deviationStartedAt = nil
+        isScrubbing = false
         backend = nil
         if let token = activityToken {
             ProcessInfo.processInfo.endActivity(token as! NSObjectProtocol)
@@ -144,6 +145,7 @@ actor SimulationActor {
     // MARK: - Route
 
     func loadRoute(coordinates: [CLLocationCoordinate2D], baseSpeed: Double, resetStart: Bool) async {
+        isScrubbing = false
         nav.loadRoute(coordinates: coordinates, baseSpeed: baseSpeed)
         if resetStart, let first = coordinates.first {
             integrator.reset(to: first)
@@ -153,15 +155,18 @@ actor SimulationActor {
     }
 
     func play(multiplier: Double) async {
-        // Starting fresh (idle, not resuming a pause) replays from the route
-        // start, so the integrator must follow the engine's re-arm — after a
-        // completed pass it's parked at the far end, and ticking segment-0
-        // velocity from there would trace a route-shaped ghost path offset
-        // from the polyline. Covers the unseeded (nil position) case too.
-        if nav.playbackState == .idle, let first = nav.coordinates.first {
-            integrator.reset(to: first)
-        }
+        // Starting fresh (idle, not resuming a pause) snaps the integrator to
+        // the engine's start point — the route start on a re-arm, or the
+        // sought point when a scrub on the idle route armed a pending seek.
+        // After a completed pass the integrator is parked at the far end, and
+        // ticking segment-0 velocity from there would trace a route-shaped
+        // ghost path offset from the polyline. Covers the unseeded (nil
+        // position) case too.
+        let startingFresh = nav.playbackState == .idle
         nav.play(multiplier: multiplier)
+        if startingFresh, let startPoint = nav.expectedPosition {
+            integrator.reset(to: startPoint)
+        }
         await pushSnapshotNow()
     }
 
@@ -179,6 +184,7 @@ actor SimulationActor {
         nav.stop()
         lastEmittedCoordinate = nil
         deviationStartedAt = nil
+        isScrubbing = false
         await pushSnapshotNow()
     }
 
@@ -188,6 +194,60 @@ actor SimulationActor {
         deviationStartedAt = nil
         emit(expected)
         await pushSnapshotNow()
+    }
+
+    // MARK: - Timeline scrub
+
+    // True while the user is dragging the playback scrubber. Gates nav.tick in
+    // the aggregator so the route doesn't slide under the thumb — without
+    // touching playbackState, so release resumes exactly the prior state.
+    // Transport actions (stop/load/teleport/clear) clear it so a lost release
+    // event can't freeze playback.
+    private var isScrubbing = false
+    private var lastScrubEmit: ContinuousClock.Instant?
+
+    func beginScrub() {
+        isScrubbing = true
+        lastScrubEmit = nil
+    }
+
+    // Live-follow scrub (epic 011 decision): the device receives scrub
+    // positions as the user drags, not just the release point. Drag events
+    // arrive at display rate, so emits + UI pushes are throttled to the 20 Hz
+    // hot-path cadence; the playhead itself moves on every call. The
+    // release-time seek(toProgress:) is authoritative, so dropping a stale
+    // in-flight scrub here is harmless.
+    func scrub(toProgress progress: Double) async {
+        guard isScrubbing else { return }   // stale task landing after release
+        guard let coord = applySeek(progress: progress) else { return }
+        let now = ContinuousClock.now
+        if let last = lastScrubEmit, now - last < .milliseconds(50) { return }
+        lastScrubEmit = now
+        emit(coord)
+        await pushSnapshotNow(routeDeviationMeters: 0)
+    }
+
+    // Final, authoritative seek — scrub release and discrete jumps (track
+    // click, keyboard arrows). Leaves playbackState as-is: a playing route
+    // continues from the sought point on the next tick; paused/idle stay put
+    // until Play/Resume, which both pick up from the moved playhead.
+    func seek(toProgress progress: Double) async {
+        isScrubbing = false
+        guard let coord = applySeek(progress: progress) else { return }
+        emit(coord)
+        await pushSnapshotNow(routeDeviationMeters: 0)
+    }
+
+    // Releases a scrub whose value never changed (plain click, no drag).
+    func endScrub() {
+        isScrubbing = false
+    }
+
+    private func applySeek(progress: Double) -> CLLocationCoordinate2D? {
+        guard let coord = nav.seek(toProgress: progress) else { return nil }
+        integrator.reset(to: coord)
+        deviationStartedAt = nil
+        return coord
     }
 
     // MARK: - Joystick
@@ -234,6 +294,7 @@ actor SimulationActor {
             nav.stop()
         }
         integrator.reset(to: coordinate)
+        isScrubbing = false
         emit(coordinate)
         await pushSnapshotNow()
     }
@@ -245,6 +306,7 @@ actor SimulationActor {
         nav.stop()
         lastEmittedCoordinate = nil
         deviationStartedAt = nil
+        isScrubbing = false
         await pushSnapshotNow()
     }
 
@@ -305,7 +367,7 @@ actor SimulationActor {
         var vx = 0.0, vy = 0.0
         var anyContribution = false
 
-        if let nv = nav.tick(dt: dt) {
+        if !isScrubbing, let nv = nav.tick(dt: dt) {
             // A restart-loop wrap is a deliberate teleport back to the route
             // start; the engine returns zero velocity on that tick.
             if let jump = nv.jump {

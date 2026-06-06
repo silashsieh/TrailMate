@@ -416,11 +416,48 @@ private struct PlaybackControls: View {
 
 private struct PlaybackProgress: View {
     @Environment(AppState.self) private var appState
+    // Non-nil while a scrub gesture is in flight: the thumb tracks the pointer
+    // locally instead of fighting the actor's snapshot pushes. The released
+    // value is what gets applied, so it must survive until onEditingChanged
+    // reports the drag ended.
+    @State private var scrubValue: Double?
+    @State private var isDragging = false
 
     var body: some View {
         let sim = appState.simState
         VStack(alignment: .leading, spacing: 4) {
-            ProgressView(value: sim.navigationProgress)
+            Slider(
+                value: Binding(
+                    get: { scrubValue ?? sim.navigationProgress },
+                    set: { newValue in
+                        if isDragging {
+                            scrubValue = newValue
+                            appState.scrubPlayback(toProgress: newValue)
+                        } else {
+                            // Value change outside a drag (keyboard arrows, or
+                            // a track click that outran onEditingChanged) —
+                            // apply as a one-shot seek.
+                            appState.seekPlayback(toProgress: newValue)
+                        }
+                    }
+                ),
+                in: 0...1,
+                onEditingChanged: { editing in
+                    isDragging = editing
+                    if editing {
+                        appState.beginPlaybackScrub()
+                    } else {
+                        if let released = scrubValue {
+                            appState.seekPlayback(toProgress: released)
+                        } else {
+                            // Click with no value change — just release the hold.
+                            appState.endPlaybackScrub()
+                        }
+                        scrubValue = nil
+                    }
+                }
+            )
+            .accessibilityLabel("Playback position")
             HStack {
                 Text(formatDistance(sim.navigationElapsedDistance))
                 Spacer()

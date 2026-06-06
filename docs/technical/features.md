@@ -37,8 +37,10 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - `NavigationEngine` interpolates along the polyline at the configured base speed.
 - Playback time-fast-forward multipliers: 1× / 5× / 10× / 100×.
 - Loop playback: Off / Restart / Ping-Pong, with an optional loop count (∞ by default, stepper up to 99). Restart jumps the marker back to the start when the route completes and replays; Ping-Pong walks back along the same polyline — no re-routing, so the return leg is the outbound path exactly. One loop = one start-to-end pass (Restart) or one there-and-back round trip (Ping-Pong); the count reached, playback ends cleanly. The setting is engine-wide — it also loops direct travel, "Route here", wander routes, and recording replays — and session-scoped, like the speed multiplier.
-- Transport controls: Play / Pause / Stop. Progress bar (elapsed / total distance) runs 0→1 per leg; while looping, a "Loop k of N" line shows the current iteration. Play on a route that already ran to completion replays it from the start.
-- Wall-clock remaining time shown alongside the progress bar in `HH:mm:ss`; accounts for the active playback multiplier (e.g., a 30-min trip at 10× reads ~3 min).
+- Transport controls: Play / Pause / Stop. Draggable timeline scrubber (elapsed / total distance): drag to seek anywhere on the route, forward or back; playback continues from the sought point in its prior play/pause state. Track clicks and keyboard arrows seek too. The bar runs 0→1 per leg — on a Ping-Pong return leg, scrubbing seeks within that return leg; while looping, a "Loop k of N" line shows the current iteration.
+- While dragging, route advance holds and the device follows the scrub live — positions stream at up to 20 Hz (and land in an active GPX recording, like any other emission); the map red dot tracks the thumb.
+- Play on a route that already ran to completion replays it from the start — unless the idle route was scrubbed first, in which case Play starts from the sought point.
+- Wall-clock remaining time shown alongside the scrubber in `HH:mm:ss`; accounts for the active playback multiplier (e.g., a 30-min trip at 10× reads ~3 min).
 - Saved routes capture the planner inputs (From / To / stops with their labels) so they can be re-loaded as editable fields, not just replayed as a flat polyline. Routes saved before this field existed still play; their planner fields stay empty.
 
 ### Map-driven travel

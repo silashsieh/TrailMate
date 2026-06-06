@@ -75,6 +75,6 @@ Optionally a loop count (including infinite).
   verification pass.
 
 ## Acceptance criteria
-- [ ] Restart mode replays from A indefinitely (or N times) until Stop
-- [ ] Ping-pong reverses smoothly at each end with no jump
-- [ ] Loop count honored; Stop always clears
+- [x] Restart mode replays from A indefinitely (or N times) until Stop
+- [x] Ping-pong reverses smoothly at each end with no jump
+- [x] Loop count honored; Stop always clears

@@ -50,11 +50,10 @@ across app relaunches.
   `SimulatedPositionPersistence`); `WanderSheet.init` is the restore point since the sheet
   is created per presentation.
 - **Custom rows get a slider alongside the text field** (owner request during review).
-  Radius 50–2000 m, duration 5–240 min, on a **log₁₀ scale** (second owner request) — more
-  knob travel for small values — snapping dragged values to two significant figures, the
-  log-scale analogue of a fixed step. The text field stays the source of truth (it feeds
-  persistence and resolution) and still accepts values outside the slider range; the slider
-  is a binding view over the text.
+  Radius 50–2000 m in 50 m steps, duration 5–240 min in 5 min steps. The text field stays
+  the source of truth (it feeds persistence and resolution) and still accepts values
+  outside the slider range; the slider is a binding view over the text. A log₁₀ scale was
+  tried and reverted same-day — owner prefers linear here.
 
 ## Bugs / follow-ups found while building
 

@@ -153,7 +153,12 @@ actor SimulationActor {
     }
 
     func play(multiplier: Double) async {
-        if integrator.position == nil, let first = nav.coordinates.first {
+        // Starting fresh (idle, not resuming a pause) replays from the route
+        // start, so the integrator must follow the engine's re-arm — after a
+        // completed pass it's parked at the far end, and ticking segment-0
+        // velocity from there would trace a route-shaped ghost path offset
+        // from the polyline. Covers the unseeded (nil position) case too.
+        if nav.playbackState == .idle, let first = nav.coordinates.first {
             integrator.reset(to: first)
         }
         nav.play(multiplier: multiplier)

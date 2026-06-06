@@ -63,7 +63,13 @@ Optionally a loop count (including infinite).
 - **Play on a finished route was a no-op** (pre-existing): a completed pass left
   `currentDistanceAlongRoute` at `totalDistance` and nothing reset it, so Play re-idled
   instantly — and Stop is disabled while idle, leaving no way out. Fixed here as part of
-  "re-arms on completion": `play()` from idle now resets distance/direction/loop counters.
+  "re-arms on completion", in two halves: the engine's `play()` from idle resets
+  distance/direction/loop counters, and `SimulationActor.play()` from idle resets the
+  `PositionIntegrator` to the route start (it used to seed only a nil position, so after a
+  completed pass the marker stayed parked at the far end and would have traced a
+  route-shaped ghost path offset from the polyline). The actor seam is pinned by
+  `SimulationActorReplayTests` with a recording mock backend — the engine-only tests
+  can't see the integrator.
 
 ## Acceptance criteria
 - [ ] Restart mode replays from A indefinitely (or N times) until Stop

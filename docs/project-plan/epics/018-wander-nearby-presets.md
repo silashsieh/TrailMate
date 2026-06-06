@@ -59,10 +59,8 @@ across app relaunches.
 
 ## Acceptance criteria
 - [x] Sheet shows 250 m / 500 m / 750 m / custom and 30 min / 60 min / 120 min / custom
-- [ ] Pick a preset or custom value → quit → relaunch → sheet reopens with that selection
-      *(needs on-device verification by the owner)*
-- [ ] Wander route generation behaves identically apart from the new values
-      *(needs on-device verification by the owner)*
+- [x] Pick a preset or custom value → quit → relaunch → sheet reopens with that selection
+- [x] Wander route generation behaves identically apart from the new values
 
 ## Related
 - [[002-wander-nearby]] — the shipped feature this improves (never reopened)

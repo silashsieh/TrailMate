@@ -28,8 +28,6 @@ private struct SidebarView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        @Bindable var appState = appState
-
         List {
             Section("Connection") {
                 if appState.connectionStatus.isConnected {
@@ -41,26 +39,6 @@ private struct SidebarView: View {
                     DevicePickerArea()
                     ConnectionButton()
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text("GPS noise σ")
-                            .font(.caption)
-                        Spacer()
-                        Text(String(format: "%.1f m", appState.noiseSigmaMeters))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Slider(value: $appState.noiseSigmaMeters, in: 0...10, step: 0.5)
-                        .onChange(of: appState.noiseSigmaMeters) { _, _ in
-                            appState.persistTuning()
-                        }
-                }
-
-                Toggle("Restore last location on launch", isOn: $appState.restoreLastSimulatedLocation)
-                    .font(.caption)
-                    .help("Off: start with no simulated position until you teleport. The last position is remembered either way.")
             }
 
             if appState.connectionStatus.isConnected {

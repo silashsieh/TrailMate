@@ -13,6 +13,15 @@ struct TrailMateApp: App {
                 .onAppear { delegate.appState = appState }
         }
         .defaultSize(width: 1100, height: 700)
+
+        // Set-and-forget preferences (⌘, — epic 017). Must share the same
+        // AppState instance as the main window: the bindings' didSet paths
+        // (noise σ → SimulationActor, restore toggle → UserDefaults) are what
+        // keep the relocated controls behaving identically.
+        Settings {
+            SettingsView()
+                .environment(appState)
+        }
     }
 }
 

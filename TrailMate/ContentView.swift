@@ -1274,13 +1274,27 @@ private struct MapArea: View {
     // pointer position (map-local space); it's converted to a coordinate lazily at menu
     // time, since a stored coordinate would go stale if the camera moved under the cursor.
     @State private var lastHoverPoint: CGPoint?
+    // Draw mode (hand-drawn routes): gates the freehand stroke gesture and drops
+    // .pan from the map's interaction modes while active. The stroke is kept as
+    // coordinates (converted at capture time, so it stays world-anchored) plus the
+    // last raw screen point for jitter decimation.
+    @State private var isDrawingRoute = false
+    @State private var strokeCoords: [CLLocationCoordinate2D] = []
+    @State private var lastStrokePoint: CGPoint?
 
     var body: some View {
         MapReader { proxy in
-            Map(position: $cameraPosition) {
+            // Drawing claims the drag for the stroke; zoom stays live (scroll/pinch
+            // don't collide with a one-button drag), pan returns when drawing ends.
+            Map(position: $cameraPosition, interactionModes: isDrawingRoute ? .zoom : .all) {
                 if !appState.routeCoordinates.isEmpty {
                     MapPolyline(coordinates: appState.routeCoordinates)
                         .stroke(.blue, lineWidth: 4)
+                }
+
+                if strokeCoords.count >= 2 {
+                    MapPolyline(coordinates: strokeCoords)
+                        .stroke(.orange, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [6, 4]))
                 }
 
                 if let from = appState.fromCoordinate {
@@ -1364,6 +1378,11 @@ private struct MapArea: View {
                         }
                     }
             )
+            // Draw mode's gesture arbitration: while drawing, `.gesture` enables the
+            // stroke drag and masks out the long-press wrapped above (a slow stroke
+            // would otherwise trigger it); while not drawing, `.subviews` disables the
+            // stroke gesture entirely so the map's normal interactions are untouched.
+            .gesture(drawGesture(proxy: proxy), including: isDrawingRoute ? .gesture : .subviews)
             .onContinuousHover(coordinateSpace: .local) { phase in
                 // Keep the last point on .ended — the menu's content is evaluated after the
                 // right-click, by which time hover tracking has already stopped.
@@ -1383,6 +1402,12 @@ private struct MapArea: View {
                 }
             }
             .focusable()
+            .pointerStyle(isDrawingRoute ? .rectSelection : nil)
+            .onKeyPress(.escape) {
+                guard isDrawingRoute else { return .ignored }
+                exitDrawMode()
+                return .handled
+            }
             .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, "w", "a", "s", "d"], phases: [.down, .up]) { press in
                 guard appState.simState.joystickIsActive else {
                     return .ignored
@@ -1427,6 +1452,9 @@ private struct MapArea: View {
                             RecordButton()
                             followButton
                         }
+                        // Unlike Record/Follow, drawing is route *construction* and
+                        // needs no device — same as the sidebar planner.
+                        drawButton
                     }
 
                     if let dest = pendingDestination {
@@ -1486,13 +1514,81 @@ private struct MapArea: View {
         }
     }
 
+    private var drawButton: some View {
+        Button {
+            if isDrawingRoute {
+                exitDrawMode()
+            } else {
+                isDrawingRoute = true
+                // The camera must hold still under the stroke.
+                isFollowing = false
+            }
+        } label: {
+            Image(systemName: "pencil.line")
+                .font(.callout)
+                .foregroundStyle(isDrawingRoute ? Color.accentColor : Color.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .help(isDrawingRoute ? "Stop drawing (Esc)" : "Draw a route by dragging on the map")
+    }
+
+    // Freehand stroke capture. Raw drag locations are decimated in screen space
+    // (hand jitter lives there, and its meter size scales with zoom) and converted
+    // to coordinates immediately, so the stroke stays world-anchored no matter
+    // what the camera does afterwards.
+    private func drawGesture(proxy: MapProxy) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { value in
+                if let last = lastStrokePoint {
+                    let dx = value.location.x - last.x
+                    let dy = value.location.y - last.y
+                    guard dx * dx + dy * dy >= 9 else { return }  // < 3 pt: jitter
+                }
+                guard let coord = proxy.convert(value.location, from: .local) else { return }
+                lastStrokePoint = value.location
+                strokeCoords.append(coord)
+            }
+            .onEnded { _ in
+                finishStroke()
+            }
+    }
+
+    private func finishStroke() {
+        defer {
+            strokeCoords = []
+            lastStrokePoint = nil
+        }
+        let spacing = StrokeGeometry.spacing(forSpeedMPS: appState.effectiveBaseSpeedMPS)
+        guard let route = StrokeGeometry.resampleUniform(
+            StrokeGeometry.chaikin(strokeCoords),
+            spacingMeters: spacing
+        ) else {
+            // A stray click or jitter blob shouldn't kick the user out of draw mode.
+            appState.addLog("Stroke too short to form a route — drag a longer line.")
+            return
+        }
+        isDrawingRoute = false
+        Task { await appState.loadDrawnRoute(route) }
+    }
+
+    private func exitDrawMode() {
+        isDrawingRoute = false
+        strokeCoords = []
+        lastStrokePoint = nil
+    }
+
     // Right-click destination menu: same actions as DestinationActionBar (the long-press
     // capsule), presented as a native context menu at the pointer — macOS convention, and
     // consistent with the sidebar rows' .contextMenu. Empty content while disconnected
     // suppresses the menu entirely, mirroring the long-press guard.
     @ViewBuilder
     private func destinationMenu(proxy: MapProxy) -> some View {
-        if appState.connectionStatus.isConnected,
+        if !isDrawingRoute,
+           appState.connectionStatus.isConnected,
            let point = lastHoverPoint,
            let coordinate = proxy.convert(point, from: .local) {
             Section(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)) {
@@ -1549,6 +1645,9 @@ private struct MapArea: View {
     }
 
     private var mapHintText: String {
+        if isDrawingRoute {
+            return "Drag to draw a route — Esc to cancel"
+        }
         switch appState.connectionStatus {
         case .disconnected:
             return "Connect to a device to start"

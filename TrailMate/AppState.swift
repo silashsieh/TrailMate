@@ -526,6 +526,25 @@ final class AppState {
         isCalculatingRoute = false
     }
 
+    // Hand-drawn route from the map's draw mode. The stroke arrives already
+    // smoothed and resampled by the view layer (StrokeGeometry guarantees no
+    // degenerate segments); this is just the hand-off into the same playback
+    // path every other route source uses. No auto-play — a mouse-up is too
+    // accidental a trigger, unlike an explicit "Route here".
+    func loadDrawnRoute(_ coords: [CLLocationCoordinate2D]) async {
+        guard coords.count >= 2 else { return }
+        routeCoordinates = coords
+        await sim.loadRoute(coordinates: coords, baseSpeed: effectiveBaseSpeedMPS, resetStart: true)
+
+        var meters = 0.0
+        for i in 1..<coords.count {
+            meters += CLLocation(latitude: coords[i - 1].latitude, longitude: coords[i - 1].longitude)
+                .distance(from: CLLocation(latitude: coords[i].latitude, longitude: coords[i].longitude))
+        }
+        let estMin = effectiveBaseSpeedMPS > 0 ? meters / effectiveBaseSpeedMPS / 60 : 0
+        addLog(String(format: "Drawn route: %.1f km, ~%.0f min (%@)", meters / 1000, estMin, transportLabel))
+    }
+
     func startPlayback() {
         guard !routeCoordinates.isEmpty, connectionStatus.isConnected else { return }
         let mult = speedMultiplier

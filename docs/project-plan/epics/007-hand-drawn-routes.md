@@ -28,7 +28,7 @@ smoothly at a steady speed.
 
 ## Stories
 - [ ] Freehand drag gesture capturing a coordinate stroke (coexist with pan/zoom)
-- [ ] Smoothing + uniform resampling of the raw stroke
+- [x] Smoothing + uniform resampling of the raw stroke
 - [ ] Load the resampled polyline through the existing route-playback path
 
 ## Open questions

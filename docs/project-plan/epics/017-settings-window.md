@@ -27,14 +27,31 @@ set-and-forget options. The sidebar keeps only the live, session-relevant contro
 - Per-device profiles or settings sync.
 
 ## Stories
-- [ ] Inventory current sidebar settings; classify set-and-forget vs live session controls
+- [x] Inventory current sidebar settings; classify set-and-forget vs live session controls
 - [ ] Add a SwiftUI `Settings` scene (⌘, / app menu → Settings…)
 - [ ] Move set-and-forget options (GPS delta, …) into it; group sensibly
 - [ ] Slim the sidebar to live controls only
 
 ## Open questions
-- Exact split: which settings count as set-and-forget? (Decide during the inventory story —
-  candidates per the issue: GPS noise/delta; likely also calibrated speeds.)
+*(resolved — see the split decision below)*
+
+## Decisions made along the way
+- **Inventory result (2026-06-07):** exactly four persisted settings have sidebar UI; everything
+  else in the sidebar is session-only state (device picker, planner fields, playback
+  multiplier/loop — session-scoped by design) or data (waypoints/routes/recordings).
+  | Setting | Sidebar home | UserDefaults key | Classification |
+  |---|---|---|---|
+  | GPS noise σ slider | Connection | `noiseSigmaMeters` | set-and-forget |
+  | Restore last location on launch | Connection (parked by [[005-restore-sim-location]]) | `SimulatedPosition.restoreOnLaunch` | set-and-forget |
+  | Transport mode picker | Route | `transportMode` | live session control |
+  | Custom speed km/h | Route | `customSpeedKmh` | live session control |
+- **The split (2026-06-07, user decision):** move GPS noise σ and the launch-restore toggle
+  only. Transport mode + custom km/h stay in the Route section — they are picked per-route,
+  drive the MKDirections transport type, and cap the joystick speed, so they're live session
+  controls despite being persisted. ("Calibrated speeds" stay put.)
+- **Map camera, simulated position lat/lon, and wander presets are not settings** — they're
+  auto-persisted state with no explicit control (camera, red dot) or sheet-local recall
+  (wander); none relocate.
 
 ## Acceptance criteria
 - [ ] ⌘, opens a Settings window with the relocated options

@@ -6,39 +6,68 @@
 TrailMate/
 ├── README.md
 ├── CLAUDE.md                          # entry point for Claude Code sessions
+├── LICENSE.md
 ├── .gitignore
 │
 ├── TrailMate/                         # Swift sources (flat layout)
-│   ├── TrailMateApp.swift             # @main entry point
-│   ├── AppState.swift                 # root @Observable — connection, mode, all state
+│   ├── TrailMateApp.swift             # @main entry point; WindowGroup + Settings scenes
+│   ├── AppState.swift                 # root @Observable — connection, route/recorder/waypoint state
 │   ├── ContentView.swift              # NavigationSplitView with sidebar + map
 │   ├── DaemonBridge.swift             # Process wrapper, stdin/stdout IPC with daemon
-│   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (20 Hz tick)
-│   ├── JoystickEngine.swift           # 20Hz control loop (controller/virtual stick/WASD)
-│   ├── VirtualJoystickView.swift      # On-screen circular pad with DragGesture
-│   ├── SettingsView.swift             # Settings window (⌘,): set-and-forget preferences
-│   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper
+│   ├── DeviceDiscoveryService.swift   # USB/Wi-Fi device enumeration via tm_list_devices.py
 │   ├── GPXService.swift               # GPX import (XMLParser) and export
+│   ├── JoystickEngine.swift           # 20 Hz control loop (controller/virtual stick/WASD)
+│   ├── LocationNoise.swift            # Box-Muller Gaussian jitter on every emission
+│   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper
+│   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (20 Hz tick)
+│   ├── PositionIntegrator.swift       # sums engine velocity vectors; owns authoritative position
+│   ├── PythonBundle.swift             # resolves bundled interpreter + script paths
+│   ├── RecorderService.swift          # session recording: GPX files + index
+│   ├── RouteMath.swift                # polyline helpers (segment joining, distances)
+│   ├── RouteStop.swift                # intermediate-stop model for the route planner
+│   ├── SavedRoutesStore.swift         # per-route JSON persistence under Application Support
+│   ├── SettingsView.swift             # Settings window (⌘,): set-and-forget preferences
+│   ├── SimulatedPositionPersistence.swift  # red-dot persistence + launch-restore preference
+│   ├── SimulationActor.swift          # off-MainActor core: 20 Hz aggregator, engines, snapshot push
+│   ├── SimulationBackend.swift        # backend protocol + events (DaemonBridge implements it)
+│   ├── TunnelSupervisor.swift         # privileged tunnel bring-up via osascript, control file
+│   ├── VirtualJoystickView.swift      # on-screen circular pad with DragGesture
+│   ├── WanderPresetPersistence.swift  # wander sheet radius/duration recall
+│   ├── WanderRouteBuilder.swift       # chained MKDirections hops for Wander nearby
 │   └── Assets.xcassets
 │
-├── TrailMate.xcodeproj               # Xcode project (hand-managed, no XcodeGen)
+├── TrailMate.xcodeproj                # Xcode project (hand-managed, no XcodeGen)
+├── TrailMate.entitlements
+├── TrailMate.icon
+├── TrailMateTests/                    # test targets (currently empty — see docs/project-plan/testing.md)
+├── TrailMateUITests/
 │
 ├── PythonDaemon/
-│   └── tm_daemon.py                   # persistent daemon: SET/SETQ/CLEAR/HEARTBEAT/QUIT
+│   ├── tm_daemon.py                   # persistent daemon: SET/SETQ/CLEAR/HEARTBEAT/QUIT
+│   ├── tm_list_devices.py             # one-shot USB + Wi-Fi device lister
+│   └── tm_tunnel.sh                   # root-only tunnel starter (parent-watches the host)
+│
+├── PythonResources/                   # bundled CPython runtime (gitignored; built by packaging/build.sh)
+├── packaging/                         # build.sh (Python runtime), release.sh (DMG)
 │
 └── docs/                              # all detailed documentation
     ├── README.md                      # table of contents
     ├── quick-start.md                 # install / build / first teleport
     ├── project-plan/
-    │   ├── scope.md                   # goals and non-goals
-    │   ├── phases.md                  # implementation phases with steps and results
+    │   ├── scope.md                   # vision, goals and non-goals
+    │   ├── process.md                 # how work is planned, tracked, and triaged
+    │   ├── playbook.md                # step-by-step PM recipes
+    │   ├── roadmap.md                 # generated Dataview view: scheduled by milestone
+    │   ├── backlog.md                 # generated Dataview view: unscheduled work
+    │   ├── epics/                     # one file per accepted feature/idea (the plan's source of truth)
+    │   ├── phases.md                  # frozen historical implementation log
     │   ├── risks.md                   # risk register
-    │   └── testing.md                 # testing strategy
+    │   └── testing.md                 # planned test coverage
     └── technical/
         ├── architecture.md            # this file — structure, layers, processes, protocol
         ├── tech-stack.md              # framework choices and target versions
         ├── features.md                # what ships today, plus dropped/deferred items
-        └── decisions.md               # key technical decisions (D1–D6)
+        └── decisions.md               # key technical decisions and why
 ```
 
 ## Layer Diagram

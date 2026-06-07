@@ -21,6 +21,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
 - The simulated position (red dot) persists too and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (Settings window, ⌘,) opts out back to a start-empty launch — the position is recorded either way. A restored position is display-only until connect: the device receives it when the session attaches.
 - Follow control on the map overlay (next to Record) recenters on and tracks the simulated position, keeping the current zoom. Any manual camera gesture hands control back (MapKit user-tracking semantics); disabled until a simulated position exists; session-only, not persisted.
+- Pencil control beside them toggles freehand route drawing (see "Hand-drawn routes" below).
 
 ### Teleport
 
@@ -51,6 +52,23 @@ Single inventory of what ships in TrailMate today, plus items that were consider
   - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
   - **Append direct / Append route** — extend the loaded route from its end to the chosen point (straight line / `MKDirections`); offered only while a route is loaded.
   - **Wander nearby…** — opens a sheet to pick a radius (250 / 500 / 750 m or custom) and a duration (30 / 60 / 120 min or custom). The last selection — including custom values — persists across launches via `UserDefaults` (`WanderPresetPersistence`); first run defaults to 500 m / 60 min. `WanderRouteBuilder` chains `MKDirections` walking hops between random points around the chosen center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`. The wander may leak slightly beyond the disc; result is loaded into `NavigationEngine` and auto-plays. The generated route itself is one-shot, not persisted.
+
+### Hand-drawn routes
+
+- A pencil toggle on the map overlay (next to Record/Follow, but always visible — drawing is
+  route *construction* like the sidebar planner, so it needs no connection) enters draw mode:
+  map pan is disabled (zoom stays live), the pointer becomes a selection crosshair, and
+  dragging sketches a dashed orange preview stroke. Esc cancels; the right-click menu and
+  long-press are suppressed while drawing.
+- On release the stroke is smoothed (Chaikin corner-cutting, two passes) and uniformly
+  resampled by `StrokeGeometry` — spacing `clamp(base speed × 1 s, 2–15 m)`, ≈ one vertex per
+  second of 1× playback — then loaded through the same playback path as every other route
+  source: scrubber, loop modes, speed multipliers, joystick compositing, Export GPX all apply.
+  No auto-play; press Play (or scrub) to run it.
+- The route follows the stroke exactly — through parks, trails, anywhere off-road. Nothing
+  snaps to roads ("snap to road" is a possible future extension, out of scope today).
+- A click-sized stroke or jitter blob is rejected with a log line and draw mode stays active;
+  a successful stroke exits draw mode. Each stroke replaces the loaded route.
 
 ### Joystick
 

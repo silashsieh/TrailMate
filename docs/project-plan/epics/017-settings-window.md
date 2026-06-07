@@ -2,7 +2,7 @@
 type: epic
 id: 017
 title: Standalone Settings window
-status: open
+status: in-progress
 milestone: v1.5.0
 issue: 20
 opened: 2026-06-01

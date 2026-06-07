@@ -19,7 +19,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Simulated position rendered as a distinct marker.
 - Right-click opens the destination menu at the pointer; a 0.5 s long-press is kept as a fallback trigger (see "Map-driven travel" below).
 - Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
-- The simulated position (red dot) persists too and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (sidebar Connection section) opts out back to a start-empty launch — the position is recorded either way. A restored position is display-only until connect: the device receives it when the session attaches.
+- The simulated position (red dot) persists too and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (Settings window, ⌘,) opts out back to a start-empty launch — the position is recorded either way. A restored position is display-only until connect: the device receives it when the session attaches.
 - Follow control on the map overlay (next to Record) recenters on and tracks the simulated position, keeping the current zoom. Any manual camera gesture hands control back (MapKit user-tracking semantics); disabled until a simulated position exists; session-only, not persisted.
 
 ### Teleport
@@ -71,10 +71,19 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Always-on GPS noise
 
-- `LocationNoise` adds Box-Muller Gaussian jitter (σ default 5 m, configurable 0–10 m) to every `SETQ` emission, including idle.
+- `LocationNoise` adds Box-Muller Gaussian jitter (σ default 5 m, configurable 0–10 m in the Settings window) to every `SETQ` emission, including idle.
 - Single `AppState.emitSimulated()` chokepoint routes every coord through the noise filter.
 - 1 Hz idle re-emission keeps a "stationary" location wiggling like a real GPS fix.
 - The map marker shows the clean intent, not the jittered emission, so the on-screen position stays steady visually.
+
+### Settings window
+
+- Standard macOS `Settings` scene (⌘, / app menu → Settings…) holding the set-and-forget
+  preferences: GPS noise σ and "Restore last location on launch". Changing σ applies live to
+  an active session.
+- The sidebar holds only live route/session controls. Transport mode and custom km/h stay in
+  the Route section: they're per-route choices that drive the MKDirections transport type and
+  cap joystick speed.
 
 ### Saved waypoints
 

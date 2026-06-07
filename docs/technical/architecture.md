@@ -16,6 +16,7 @@ TrailMate/
 │   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (20 Hz tick)
 │   ├── JoystickEngine.swift           # 20Hz control loop (controller/virtual stick/WASD)
 │   ├── VirtualJoystickView.swift      # On-screen circular pad with DragGesture
+│   ├── SettingsView.swift             # Settings window (⌘,): set-and-forget preferences
 │   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper
 │   ├── GPXService.swift               # GPX import (XMLParser) and export
 │   └── Assets.xcassets
@@ -46,7 +47,7 @@ TrailMate/
 ┌──────────────────────────────────────────────────────────┐
 │  SwiftUI Views                                           │  Presentation
 │  (ContentView: Sidebar, MapArea, PlaybackProgress,       │
-│   VirtualJoystickView, log sheet)                        │
+│   VirtualJoystickView, log sheet, SettingsView)          │
 ├──────────────────────────────────────────────────────────┤
 │  AppState (@MainActor @Observable)                       │  Coordinator
 │  Connection lifecycle, route/recorder/waypoint state,    │  (MainActor)

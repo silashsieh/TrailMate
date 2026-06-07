@@ -28,9 +28,9 @@ set-and-forget options. The sidebar keeps only the live, session-relevant contro
 
 ## Stories
 - [x] Inventory current sidebar settings; classify set-and-forget vs live session controls
-- [ ] Add a SwiftUI `Settings` scene (⌘, / app menu → Settings…)
-- [ ] Move set-and-forget options (GPS delta, …) into it; group sensibly
-- [ ] Slim the sidebar to live controls only
+- [x] Add a SwiftUI `Settings` scene (⌘, / app menu → Settings…)
+- [x] Move set-and-forget options (GPS delta, …) into it; group sensibly
+- [x] Slim the sidebar to live controls only
 
 ## Open questions
 *(resolved — see the split decision below)*
@@ -52,6 +52,12 @@ set-and-forget options. The sidebar keeps only the live, session-relevant contro
 - **Map camera, simulated position lat/lon, and wander presets are not settings** — they're
   auto-persisted state with no explicit control (camera, red dot) or sheet-local recall
   (wander); none relocate.
+- **Single pane, no tabs (2026-06-07):** two settings don't justify a tab bar. A grouped
+  `Form` at fixed size, sections "Realism" (σ) and "Launch" (restore toggle). The σ slider
+  gains a one-line caption since it lost its Connection-section context — explanatory text,
+  not a new setting. `SettingsView` binds to the same `AppState` properties the sidebar
+  controls did (the Settings scene shares the app's single `AppState` instance), so the
+  persistence keys and live-propagation paths are untouched.
 
 ## Acceptance criteria
 - [ ] ⌘, opens a Settings window with the relocated options

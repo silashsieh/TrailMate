@@ -74,6 +74,6 @@ smoothly at a steady speed.
   in here.
 
 ## Acceptance criteria
-- [ ] A freehand stroke becomes a smooth, evenly-spaced playable route
-- [ ] Playback red-dot speed is steady (no stutter from raw sampling)
-- [ ] Route can leave roads (parks/trails) without snapping
+- [x] A freehand stroke becomes a smooth, evenly-spaced playable route
+- [x] Playback red-dot speed is steady (no stutter from raw sampling)
+- [x] Route can leave roads (parks/trails) without snapping

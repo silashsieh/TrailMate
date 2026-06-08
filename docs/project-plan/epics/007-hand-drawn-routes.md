@@ -2,11 +2,11 @@
 type: epic
 id: 007
 title: Hand-drawn routes on the map
-status: in-progress
+status: done
 milestone: v1.5.0
 issue: 15
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-08
 tags: [routing, map]
 ---
 

@@ -2,11 +2,11 @@
 type: epic
 id: 017
 title: Standalone Settings window
-status: in-progress
+status: done
 milestone: v1.5.0
 issue: 20
 opened: 2026-06-01
-shipped:
+shipped: 2026-06-08
 tags: [ui, settings]
 ---
 
@@ -60,6 +60,6 @@ set-and-forget options. The sidebar keeps only the live, session-relevant contro
   persistence keys and live-propagation paths are untouched.
 
 ## Acceptance criteria
-- [ ] ⌘, opens a Settings window with the relocated options
-- [ ] Relocated settings persist and behave identically to before
-- [ ] Sidebar contains only route/session controls
+- [x] ⌘, opens a Settings window with the relocated options
+- [x] Relocated settings persist and behave identically to before
+- [x] Sidebar contains only route/session controls

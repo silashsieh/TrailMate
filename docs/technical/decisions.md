@@ -10,15 +10,15 @@ Each `pymobiledevice3` CLI invocation pays Python interpreter startup (~500ms-1s
 
 ## D3: Why a separate privileged helper instead of running the whole app as root?
 
-Two reasons. First, only the TUN interface creation needs root; everything else (UI, MapKit, GameController, daemon stdin/stdout) is fine as the regular user. Running the whole app as root would be a gratuitous security mistake. Second, it's idiomatic macOS: SMAppService is the documented modern path, and the entitlements / installation flow is well-understood. The helper is ~100 lines of Swift.
+Two reasons. First, only the TUN interface creation needs root; everything else (UI, MapKit, GameController, daemon stdin/stdout) is fine as the regular user. Running the whole app as root would be a gratuitous security mistake. Second, isolating the privileged step keeps the root surface tiny: today only `tm_tunnel.sh` runs as root, brought up via `osascript … with administrator privileges`, while the app stays unprivileged. A packaged SMAppService helper is the documented modern path and would drop the per-session auth prompt, but it needs paid signing, so it's deferred (see features.md).
 
 ## D4: Why MapKit over Google Maps or OpenStreetMap?
 
 Free, no API key, no account, no quota, native SwiftUI integration, MKDirections for routing in one line. The only argument against is map data density — Apple's data for Taipei walking routes is decent but not as detailed as OSM in some neighborhoods. If that becomes a real problem, OSRM can be slotted in as the routing backend behind a `RoutingService` protocol while keeping MapKit for visualization.
 
-## D5: Why 10Hz for routes and 20Hz for joystick?
+## D5: Why 20 Hz for the simulation loop?
 
-CoreLocation typically delivers updates to apps at ~1Hz by default, and rapid updates get coalesced. 10Hz on the wire ensures we're never the bottleneck for route playback while not wasting CPU. Joystick mode benefits from a slightly tighter loop for perceived responsiveness during direction changes; 20Hz feels noticeably more direct than 10Hz in user testing of similar tools.
+CoreLocation typically delivers updates to apps at ~1 Hz by default, and rapid updates get coalesced, so wire rate is never the bottleneck for the apps under test. Route playback and joystick share a single 20 Hz aggregator in `SimulationActor` rather than running at separate rates: the joystick wants the tighter loop for perceived responsiveness during direction changes, and interpolating route playback at the same 20 Hz costs negligible CPU while keeping one tick path instead of two. SwiftUI redraws are decoupled by a 2 Hz snapshot-push throttle (see D7), so the backend still receives every 20 Hz tick.
 
 ## D6: Why local-flat coordinate math instead of geodesic (Haversine)?
 

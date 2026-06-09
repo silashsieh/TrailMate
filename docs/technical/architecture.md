@@ -40,7 +40,7 @@ TrailMate/
 ├── TrailMate.xcodeproj                # Xcode project (hand-managed, no XcodeGen)
 ├── TrailMate.entitlements
 ├── TrailMate.icon
-├── TrailMateTests/                    # test targets (currently empty — see docs/project-plan/testing.md)
+├── TrailMateTests/                    # unit tests (see docs/project-plan/testing.md)
 ├── TrailMateUITests/
 │
 ├── PythonDaemon/

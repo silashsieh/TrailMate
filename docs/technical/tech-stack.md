@@ -6,11 +6,11 @@
 |UI               |SwiftUI                                                |Native, fast iteration, no AppKit boilerplate          |
 |Map              |MapKit + MKDirections                                  |Free, no API key, built-in routing                     |
 |Joystick input   |GameController.framework                               |First-party, supports MFi / DualShock / Xbox / Joy-Cons|
-|IPC              |NSXPCConnection (for helper), Process+pipe (for Python)|Standard, well-documented                              |
-|Privileged helper|SMAppService (macOS 13+)                               |Modern replacement for SMJobBless                      |
+|IPC              |Process + pipe (stdin/stdout to the Python daemon)     |Standard, well-documented                              |
+|Privilege escalation|`osascript … with administrator privileges`         |One auth dialog per session; no paid signing. SMAppService helper deferred (see features.md)|
 |Device transport |pymobiledevice3 (pinned, vendored)                     |Only mature library supporting iOS 17+ RSD tunnel      |
 |Python runtime   |python-build-standalone, bundled in app                |Self-contained; no system Python dependency            |
-|Project gen      |XcodeGen                                               |`project.yml` is reviewable; .xcodeproj is generated   |
+|Project file     |Hand-managed `.xcodeproj`                              |No XcodeGen; the project is edited directly            |
 |Tests            |Swift Testing + XCTest                                 |Swift Testing for new code; XCTest for legacy interop  |
 
 ## Versions Targeted
@@ -33,7 +33,6 @@ Underlying libraries, frameworks, and platform documentation TrailMate builds on
 
 - [MapKit](https://developer.apple.com/documentation/mapkit) — map rendering, search, directions
 - [GameController.framework](https://developer.apple.com/documentation/gamecontroller) — MFi / DualShock / Xbox / Joy-Con input
-- [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice) — modern replacement for SMJobBless; privileged helper installation
 - [CLLocationSourceInformation](https://developer.apple.com/documentation/corelocation/cllocationsourceinformation) — the `isSimulatedBySoftware` flag that exposes spoofed coordinates to apps that check
 
 **Runtime packaging**

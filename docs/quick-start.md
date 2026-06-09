@@ -36,9 +36,9 @@ For users who just want to run TrailMate.
 2. The sidebar lists discovered iPhones — pick yours.
 3. Click **Connect**. macOS asks for your admin password (the RSD tunnel needs root). Approve once per session.
 4. The status pill shows **Connected**.
-5. Long-press anywhere on the map → **Teleport here**. Check Apple Maps on the iPhone — your location is now wherever you long-pressed.
+5. Right-click anywhere on the map → **Teleport** (a 0.5 s long-press is kept as a fallback trigger). Check Apple Maps on the iPhone — your location is now wherever you clicked.
 
-Click **Clear** in the sidebar to revert the device to its real GPS.
+Click **Disconnect** in the sidebar to revert the device to its real GPS — the daemon clears the simulated location on shutdown.
 
 -----
 

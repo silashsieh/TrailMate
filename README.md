@@ -10,7 +10,7 @@ TrailMate is a personal-use SwiftUI macOS application that controls an iPhone's 
 
 TrailMate offers three ways to control the device's location, all available at the same time:
 
-- **Teleport** — click anywhere on the map to instantly set the device's location.
+- **Teleport** — right-click (or long-press) anywhere on the map → Teleport to instantly set the device's location.
 - **Route** — enter From/To, calculate a walking/cycling/driving route, and play it back at configurable speed.
 - **Joystick** — drive the device's location in real time with a game controller or on-screen virtual stick.
 

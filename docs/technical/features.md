@@ -26,8 +26,8 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Teleport
 
 - Right-click (or long-press) → "Teleport" sets the device location instantly.
-- Works at any time while connected. Doubles as the way to set the starting location for joystick input when launch restore is off (or after Clear).
-- "Clear" reverts the device to its real GPS.
+- Works at any time while connected. Doubles as the way to set the starting location for joystick input when launch restore is off.
+- Disconnecting reverts the device to its real GPS — the daemon clears the DVT `simulate-location` handle on shutdown. (There is no separate user-facing "Clear" control.)
 
 ### Route playback
 
@@ -110,7 +110,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Saved routes
 
-- `SavedRoute` with name, transport mode, coordinates, and source (`calculated` / `directTravel` / `recorded` / `importedGPX`).
+- `SavedRoute` with name, transport mode, coordinates, and a `source` tag. Two values are written today: `recorded` (a recording promoted via "Save as Route…") and `calculated` (everything saved with the Route section's "Save Route…", which currently tags *all* loaded routes — planner, direct, imported, wander, and hand-drawn — as `calculated`).
 - Persisted as per-route JSON under `~/Library/Application Support/TrailMate/routes/`.
 - Per-row Load / Replay / Rename (inline, Finder-style) / Delete. To export a route as GPX,
   load it and use the Route section's Export GPX.
@@ -120,8 +120,8 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 - Record button on the map overlay; captures the clean (pre-noise) coordinate on every `emitSimulated` call.
 - Sessions persist as GPX with per-point timestamps under `~/Library/Application Support/TrailMate/recordings/YYYY-MM-DD/`.
-- Recordings sidebar groups by date; per-row Replay, Export, Delete, and "Save as Route…".
-- Replay uses original timestamps when present, otherwise falls back to constant-speed playback.
+- Recordings sidebar lists sessions newest-first; per-row Replay, Export, Delete, and "Save as Route…". (On disk they're grouped into per-date folders, per the path above.)
+- Replay plays the recorded coordinates at the current transport speed and multiplier (constant-speed); the per-point timestamps in the GPX are not used to pace playback.
 
 ### GPX import / export
 

@@ -115,7 +115,7 @@ recipes (triage, ship, drop, scope-change ripple checklist) in
 # Build & run debug
 xcodebuild -project TrailMate.xcodeproj -scheme TrailMate -configuration Debug build
 
-# Run tests (target is currently empty — see docs/project-plan/testing.md)
+# Run tests (see docs/project-plan/testing.md for current coverage)
 xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'platform=macOS'
 
 # Verify the Python daemon standalone (uses the bundled interpreter)

@@ -17,19 +17,22 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
   it from the main checkout (`ln -s ../TrailMate/PythonResources PythonResources`).
 - Headless runs (CI, agents) should add ad-hoc signing overrides to avoid keychain prompts:
   `CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO`.
-- `TrailMateUITests` is skipped in the shared scheme: both files are empty Xcode templates, and
-  XCUITest's app-automation needs TCC permissions that make it the classic headless flake. Re-enable
-  in the scheme when real UI tests exist.
+- The plain command above runs unit **and** UI suites; the UI tests launch the app and drive it
+  via accessibility, so the Mac must have a GUI session (and the terminal may need an
+  Automation/Accessibility grant on first run). Unit-only:
+  `-skip-testing:TrailMateUITests`; UI-only: `-only-testing:TrailMateUITests`.
 
 ## CI
 
-`.github/workflows/swift.yml` runs two parallel jobs on every push/PR to `main`:
+`.github/workflows/swift.yml` runs three parallel jobs on every push/PR to `main`:
 
 - **build** — `packaging/release.sh` (full DMG build), unchanged.
 - **test** — rebuilds `PythonResources/` (the app's Resources phase needs it; the
   python-build-standalone download is cached on `packaging/.cache`), then runs the
   `xcodebuild test` command above with ad-hoc signing and `-skip-testing:TrailMateUITests`.
   The `.xcresult` bundle is uploaded as an artifact when the job fails.
+- **ui-test** — same setup, `-only-testing:TrailMateUITests`. Separate job so an
+  XCUITest/TCC flake never taints the unit-test signal.
 
 ## Unit Tests (implemented)
 
@@ -44,6 +47,16 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 | `NavigationEngineSeekTests` | Scrubber/seek interpolation math. |
 | `SimulationActorReplayTests` | Integrator reset on re-play through the actor seam. |
 | `StrokeGeometryTests` | Hand-drawn stroke smoothing (Chaikin) + resampling. |
+
+## UI Tests (implemented)
+
+`TrailMateUITests` is a smoke suite: launch shows the main window with the Connection
+section and (untouched — it raises an admin dialog) Connect button; the sidebar Log
+section and View Full Log button exist; ⌘, opens Settings with the GPS-noise and
+restore-on-launch controls, and ⌘W closes it. Deliberately device-free and data-free, so
+it passes identically on a clean CI user and a dev Mac. Query gotcha for future tests:
+SwiftUI exposes sidebar headers/buttons as accessibility *labels* but Form/row `Text`s as
+*values* — match the latter with a `value ==` predicate.
 
 ## Unit Tests (TODO)
 

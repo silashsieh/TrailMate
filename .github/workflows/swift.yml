@@ -16,6 +16,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+    - name: Cache python-build-standalone download
+      uses: actions/cache@v4
+      with:
+        path: packaging/.cache
+        key: pbs-${{ hashFiles('packaging/build.sh') }}
     - name: Build
       run: ./packaging/release.sh
 
@@ -47,9 +52,11 @@ jobs:
           CODE_SIGN_STYLE=Manual \
           CODE_SIGN_IDENTITY=- \
           CODE_SIGNING_REQUIRED=NO
+    # Upload the parent dir so the .xcresult wrapper directory survives the
+    # zip round-trip (upload-artifact roots the artifact at the matched path).
     - name: Upload result bundle on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: build/TestResults.xcresult
+        path: build

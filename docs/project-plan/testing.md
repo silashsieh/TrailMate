@@ -53,8 +53,11 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 `TrailMateUITests` is a smoke suite: launch shows the main window with the Connection
 section and (untouched — it raises an admin dialog) Connect button; the sidebar Log
 section and View Full Log button exist; ⌘, opens Settings with the GPS-noise and
-restore-on-launch controls, and ⌘W closes it. Deliberately device-free and data-free, so
-it passes identically on a clean CI user and a dev Mac. Query gotcha for future tests:
+restore-on-launch controls, and ⌘W closes it; and settings persistence is real — the
+restore-on-launch toggle is flipped, the app fully relaunched, the value asserted, then
+flipped back so the suite leaves user preferences as it found them (UI tests run against
+the real `com.sh.TrailMate` defaults). Deliberately device-free and data-free otherwise,
+so it passes identically on a clean CI user and a dev Mac. Query gotcha for future tests:
 SwiftUI exposes sidebar headers/buttons as accessibility *labels* but Form/row `Text`s as
 *values* — match the latter with a `value ==` predicate.
 

@@ -38,15 +38,16 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v1.6.0 — Localization & testing:**
-  [015 — Localization (en + zh-Hant)](epics/015-localization.md),
-  [016 — Unit tests + test CI](epics/016-test-ci-unit-tests.md).
 - **v2.0.0 — Multi-device & AI control:**
   [012 — Simultaneous multi-device](epics/012-multi-device.md),
   [019 — AI tool integration (command layer, CLI, MCP)](epics/019-ai-integration.md),
   [021 — Menu bar presence & background mode](epics/021-menu-bar-background.md).
 - **v2.1.0 — Auth ergonomics:**
   [020 — Enter the admin password once](epics/020-single-auth-prompt.md).
+- **Shipped (v1.6.0 — 2026-06-11) — Localization, testing & Wi-Fi fix:**
+  [015 — Localization (en + zh-Hant)](epics/015-localization.md),
+  [016 — Unit tests + test CI](epics/016-test-ci-unit-tests.md),
+  [022 — Wi-Fi device discovery fix](epics/022-wifi-device-discovery.md).
 - **Shipped (v1.5.0 — 2026-06-08) — Advanced routing & settings:**
   [007 — Hand-drawn routes](epics/007-hand-drawn-routes.md),
   [017 — Standalone Settings window](epics/017-settings-window.md).

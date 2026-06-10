@@ -2,11 +2,11 @@
 type: epic
 id: 016
 title: Unit tests + test CI job
-status: in-progress
+status: done
 milestone: v1.6.0
 issue:
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-11
 tags: [testing, ci]
 ---
 

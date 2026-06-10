@@ -2,11 +2,11 @@
 type: epic
 id: 022
 title: Fix Wi-Fi device discovery in the picker
-status: in-progress
+status: done
 milestone: v1.6.0
 issue:
 opened: 2026-06-10
-shipped:
+shipped: 2026-06-11
 tags: [bug, connection]
 ---
 

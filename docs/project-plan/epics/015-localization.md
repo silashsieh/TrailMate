@@ -2,11 +2,11 @@
 type: epic
 id: 015
 title: Localization scaffold (en + zh-Hant)
-status: in-progress
+status: done
 milestone: v1.6.0
 issue:
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-11
 tags: [i18n]
 ---
 

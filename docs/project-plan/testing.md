@@ -1,6 +1,6 @@
 # Testing Strategy
 
-**Status:** Unit suites implemented and running in CI; integration and smoke tests remain TODO.
+**Status:** Unit suites implemented; CI runs them on every push/PR. Integration and smoke tests remain TODO.
 
 ## Running the tests
 
@@ -48,7 +48,8 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 ## Unit Tests (TODO)
 
 - **`DaemonProtocolTests`** — fake daemon process that records commands; verify `DaemonBridge`
-  sends correct command strings and parses responses. Deferred until the protocol needs to change.
+  sends correct command strings and parses responses. Needs a fake-daemon harness; build it the
+  next time the protocol changes.
 - **`RouteVMTests`** — search, From/To state transitions, route calculation result handling.
 - **`RecorderServiceTests`** — record → persist → reload → coords identical. Deferred: the
   app-hosted test process shares the real `~/Library/Application Support/TrailMate/`, so this
@@ -79,5 +80,6 @@ To live in `TrailMateTests/ManualSmokeTestPlan.md` once written.
 ## Implementation order for the remaining suites (suggested)
 
 1. `RecorderServiceTests` — once storage paths are injectable.
-2. `DaemonProtocolTests` — needs a fake daemon harness; defer until the protocol stabilizes.
-3. Smoke-test checklist — write it down and run it manually for the next release; automate piecewise later.
+2. `RouteVMTests` — pure state-machine coverage of search and From/To transitions.
+3. `DaemonProtocolTests` — needs a fake daemon harness; build it the next time the protocol changes.
+4. Smoke-test checklist — write it down and run it manually for the next release; automate piecewise later.

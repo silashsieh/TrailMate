@@ -119,7 +119,7 @@ xcodebuild -project TrailMate.xcodeproj -scheme TrailMate -configuration Debug b
 xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'platform=macOS'
 
 # Verify the Python daemon standalone (uses the bundled interpreter)
-./TrailMate/PythonResources/python/bin/python3 PythonDaemon/tm_daemon.py < test_commands.txt
+./PythonResources/python/bin/python3 PythonDaemon/tm_daemon.py < test_commands.txt
 
 # Smoke test the CLI path (bypass the app, for debugging)
 sudo pymobiledevice3 lockdown start-tunnel                                                  # terminal 1

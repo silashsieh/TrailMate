@@ -33,6 +33,14 @@ final class DeviceDiscoveryService {
 
     func scan() async {
         guard !isScanning else { return }
+        #if DEBUG
+        if UITestSupport.mockConnection {
+            devices = [DiscoveredDevice(udid: "UITEST-MOCK-UDID", name: "Mock iPhone",
+                                        connectionType: .usb, host: nil, port: nil)]
+            hasScanned = true
+            return
+        }
+        #endif
         isScanning = true
         lastError = nil
         defer {

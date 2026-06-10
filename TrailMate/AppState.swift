@@ -127,7 +127,7 @@ final class AppState {
     var showWanderSheet = false
     var pendingWanderCenter: CLLocationCoordinate2D?
 
-    private var daemonBridge: DaemonBridge?
+    private var daemonBridge: (any SimulationBackend)?
     private var eventsTask: Task<Void, Never>?
     private let tunnelSupervisor = TunnelSupervisor()
     private var didSweepStaleDaemons = false
@@ -230,6 +230,21 @@ final class AppState {
             connectionStatus = .error("No device selected")
             return
         }
+
+        #if DEBUG
+        // UI-test mock: skip the tunnel (admin prompt) and daemon entirely so
+        // connected-only UI flows are testable with no device.
+        if UITestSupport.mockConnection {
+            let backend = MockSimulationBackend()
+            daemonBridge = backend
+            connectionStatus = .connected
+            addLog("Connected (mock backend — UI test).")
+            await sim.updateBaseSpeed(effectiveBaseSpeedMPS)
+            await sim.attach(backend: backend)
+            await sim.startJoystick(baseSpeed: effectiveBaseSpeedMPS)
+            return
+        }
+        #endif
 
         sweepStaleDaemonsIfNeeded()
 

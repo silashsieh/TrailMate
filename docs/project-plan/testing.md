@@ -1,20 +1,58 @@
 # Testing Strategy
 
-**Status:** Mostly not yet implemented; first unit tests exist.
+**Status:** Unit suites implemented and running in CI; integration and smoke tests remain TODO.
 
-The `TrailMateTests` target contains `RouteMathTests` (segment joining/dedup), `NavigationEngineLoopTests` (loop playback boundary math), `NavigationEngineSeekTests` (scrubber/seek interpolation math), `SimulationActorReplayTests` (integrator reset on re-play), and `StrokeGeometryTests` (hand-drawn stroke smoothing + resampling). Everything else — broader unit coverage, integration tests, the smoke-test checklist — does not exist on disk. The CI workflow (`.github/workflows/swift.yml`) runs `packaging/release.sh` (build) only — there is no `xcodebuild test` step. Note the test target is hosted in TrailMate.app (`TEST_HOST`), so `xcodebuild test` launches the app bundle — it can't run while a live TrailMate session is open.
+## Running the tests
 
-Everything below is the plan, not the current state. Treat each item as a TODO.
+```bash
+xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'platform=macOS'
+```
 
-## Unit Tests (TODO — automated, fast, run on every save)
+- The test target is hosted in TrailMate.app (`TEST_HOST`), so `xcodebuild test` builds and
+  launches the app bundle. **Don't run it while a live TrailMate session is open** — the test
+  host is a second instance sharing the same bundle id and defaults. Build-only verification
+  (`xcodebuild build-for-testing`) is safe alongside a live session.
+- Because the app bundle embeds `PythonResources/` (gitignored), a fresh checkout or worktree
+  needs it present before any test build: run `./packaging/build.sh`, or in a worktree symlink
+  it from the main checkout (`ln -s ../TrailMate/PythonResources PythonResources`).
+- Headless runs (CI, agents) should add ad-hoc signing overrides to avoid keychain prompts:
+  `CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO`.
+- `TrailMateUITests` is skipped in the shared scheme: both files are empty Xcode templates, and
+  XCUITest's app-automation needs TCC permissions that make it the classic headless flake. Re-enable
+  in the scheme when real UI tests exist.
 
-- **`CoordinateMathTests`** — flat-projection math, distance calc, interpolation correctness vs. known reference points (e.g. Taipei 101 → Taipei Main Station distance should match Google's value to within 1%).
-- **`NavigationEngineTests`** — feed a fixed polyline, run the engine with mocked time, assert emitted coordinates match expected interpolation.
-- **`DaemonProtocolTests`** — fake daemon process that records commands; verify `DaemonBridge` sends correct command strings and parses responses.
+## CI
+
+`.github/workflows/swift.yml` runs two parallel jobs on every push/PR to `main`:
+
+- **build** — `packaging/release.sh` (full DMG build), unchanged.
+- **test** — rebuilds `PythonResources/` (the app's Resources phase needs it; the
+  python-build-standalone download is cached on `packaging/.cache`), then runs the
+  `xcodebuild test` command above with ad-hoc signing and `-skip-testing:TrailMateUITests`.
+  The `.xcresult` bundle is uploaded as an artifact when the job fails.
+
+## Unit Tests (implemented)
+
+| Suite | Covers |
+|---|---|
+| `CoordinateMathTests` | Flat-ENU math vs known references: Taipei 101 → Taipei Main Station distance within 1% (per the CLAUDE.md "Always do" rule), integrator steps cross-checked against CoreLocation geodesics incl. high-latitude cos scaling, NavigationEngine tick tangent direction/magnitude. |
+| `PositionIntegratorTests` | reset/clear/no-op guards; closed-form 1 s straight line at walking speed; multi-step accumulation. |
+| `LocationNoiseTests` | σ=0 identity; mean ≈ 0 and sample σ ≈ configured σ over 10 000 samples (tolerances ≥10 standard errors — the RNG isn't seedable, so tests are statistical but unflakeable in practice). |
+| `GPXServiceTests` | Generate→parse round-trips (plain and timestamped), speed-derived timestamp spacing, `trkpt`/`rtept` acceptance, malformed-point skipping. |
+| `RouteMathTests` | Segment joining/dedup tolerance behavior. |
+| `NavigationEngineLoopTests` | Loop playback boundary math (restart / ping-pong / counts). |
+| `NavigationEngineSeekTests` | Scrubber/seek interpolation math. |
+| `SimulationActorReplayTests` | Integrator reset on re-play through the actor seam. |
+| `StrokeGeometryTests` | Hand-drawn stroke smoothing (Chaikin) + resampling. |
+
+## Unit Tests (TODO)
+
+- **`DaemonProtocolTests`** — fake daemon process that records commands; verify `DaemonBridge`
+  sends correct command strings and parses responses. Deferred until the protocol needs to change.
 - **`RouteVMTests`** — search, From/To state transitions, route calculation result handling.
-- **`LocationNoiseTests`** — mean/variance over N samples, distribution shape.
-- **`PositionIntegratorTests`** — closed-form check against a 1-second straight-line at known speed.
-- **`RecorderServiceTests`** — record → persist → reload → coords identical.
+- **`RecorderServiceTests`** — record → persist → reload → coords identical. Deferred: the
+  app-hosted test process shares the real `~/Library/Application Support/TrailMate/`, so this
+  needs injectable storage paths first.
 
 ## Integration Tests (TODO — semi-automated, slower)
 
@@ -38,10 +76,8 @@ To live in `TrailMateTests/ManualSmokeTestPlan.md` once written.
 1. Sleep the Mac mid-session — on wake, UI is in `.disconnected` state (DVT session cannot survive sleep).
 1. Quit the app — verify no orphaned processes (`ps aux | grep -E "tm_daemon|tm_tunnel|pymobiledevice3"`).
 
-## Implementation order (suggested)
+## Implementation order for the remaining suites (suggested)
 
-1. `CoordinateMathTests` and `LocationNoiseTests` first — pure functions, no async, no fixtures. Trivially valuable.
-2. `NavigationEngineTests` with mocked time — locks in the route-playback contract before any refactor.
-3. `PositionIntegratorTests` — small and isolated; gives confidence to refactor the composite path.
-4. `DaemonProtocolTests` — needs a fake daemon harness; defer until the protocol stabilizes.
-5. Smoke-test checklist — write it down and run it manually for the next release; automate piecewise later.
+1. `RecorderServiceTests` — once storage paths are injectable.
+2. `DaemonProtocolTests` — needs a fake daemon harness; defer until the protocol stabilizes.
+3. Smoke-test checklist — write it down and run it manually for the next release; automate piecewise later.

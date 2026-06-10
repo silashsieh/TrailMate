@@ -19,7 +19,7 @@ struct SettingsView: View {
                     HStack {
                         Text("GPS noise σ")
                         Spacer()
-                        Text(String(format: "%.1f m", appState.noiseSigmaMeters))
+                        Text("\(appState.noiseSigmaMeters, specifier: "%.1f") m")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }

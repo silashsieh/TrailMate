@@ -33,6 +33,18 @@ enum TransportMode: String, CaseIterable {
         case .custom: nil
         }
     }
+
+    // Localized label for the UI. rawValue stays English — it's persisted in
+    // UserDefaults ("transportMode") and SavedRoute.transportModeRaw, so it
+    // must not change with the system language.
+    var displayName: String {
+        switch self {
+        case .walk: String(localized: "Walk")
+        case .cycle: String(localized: "Cycle")
+        case .drive: String(localized: "Drive")
+        case .custom: String(localized: "Custom")
+        }
+    }
 }
 
 struct SavedWaypoint: Codable, Identifiable {

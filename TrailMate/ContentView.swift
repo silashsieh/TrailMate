@@ -206,7 +206,7 @@ private struct TransportSpeedPicker: View {
         VStack(alignment: .leading, spacing: 6) {
             Picker("Transport", selection: $appState.transportMode) {
                 ForEach(TransportMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
+                    Text(mode.displayName).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
@@ -240,7 +240,7 @@ private struct TransportSpeedPicker: View {
 }
 
 private struct SearchField: View {
-    let label: String
+    let label: LocalizedStringKey
     let search: LocationSearch
     let onSelect: (MKLocalSearchCompletion) -> Void
 
@@ -455,7 +455,7 @@ private struct PlaybackProgress: View {
 
             if appState.simState.routeDeviationMeters > 5 {
                 HStack {
-                    Label(String(format: "Off-route: %.0f m", appState.simState.routeDeviationMeters),
+                    Label("Off-route: \(appState.simState.routeDeviationMeters, specifier: "%.0f") m",
                           systemImage: "arrow.triangle.branch")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -471,9 +471,9 @@ private struct PlaybackProgress: View {
 
     private func formatDistance(_ meters: Double) -> String {
         if meters >= 1000 {
-            return String(format: "%.1f km", meters / 1000)
+            return String(format: String(localized: "%.1f km"), meters / 1000)
         }
-        return String(format: "%.0f m", meters)
+        return String(format: String(localized: "%.0f m"), meters)
     }
 
     private var remainingTimeLabel: String {
@@ -485,7 +485,7 @@ private struct PlaybackProgress: View {
         let hours = total / 3600
         let minutes = (total % 3600) / 60
         let secs = total % 60
-        return String(format: "%02d:%02d:%02d left", hours, minutes, secs)
+        return String(format: String(localized: "%02d:%02d:%02d left"), hours, minutes, secs)
     }
 }
 
@@ -683,9 +683,9 @@ private struct SavedRouteRow: View {
     private var detail: String {
         let dist = route.distanceMeters
         let distStr = dist >= 1000
-            ? String(format: "%.2f km", dist / 1000)
-            : String(format: "%.0f m", dist)
-        return "\(route.transportMode.rawValue) · \(distStr) · \(route.coordinates.count) pts"
+            ? String(format: String(localized: "%.2f km"), dist / 1000)
+            : String(format: String(localized: "%.0f m"), dist)
+        return String(localized: "\(route.transportMode.displayName) · \(distStr) · \(route.coordinates.count) pts")
     }
 }
 
@@ -744,12 +744,12 @@ private struct RecordingRow: View {
     private var detail: String {
         let dist = session.distanceMeters
         let distStr = dist >= 1000
-            ? String(format: "%.2f km", dist / 1000)
-            : String(format: "%.0f m", dist)
+            ? String(format: String(localized: "%.2f km"), dist / 1000)
+            : String(format: String(localized: "%.0f m"), dist)
         let totalSec = Int(session.duration.rounded())
         let minutes = totalSec / 60
         let seconds = totalSec % 60
-        return "\(session.points.count) pts · \(distStr) · \(minutes)m \(seconds)s"
+        return String(localized: "\(session.points.count) pts · \(distStr) · \(minutes)m \(seconds)s")
     }
 }
 
@@ -810,13 +810,10 @@ private struct WanderSheet: View {
     @State private var durationChoice: DurationChoice
     @State private var customDurationText: String
 
-    private static let radiusOptions: [(label: String, meters: Double)] = [
-        ("250 m", 250), ("500 m", 500), ("750 m", 750)
-    ]
-
-    private static let durationOptions: [(label: String, seconds: TimeInterval)] = [
-        ("30 min", 30 * 60), ("60 min", 60 * 60), ("120 min", 120 * 60)
-    ]
+    // Numeric so the unit suffix can be a localizable label ("%lld m" /
+    // "%lld min") rendered inline, rather than a baked-in English string.
+    private static let radiusOptions: [Double] = [250, 500, 750]
+    private static let durationOptions: [TimeInterval] = [30 * 60, 60 * 60, 120 * 60]
 
     // Each open restores the last persisted selection (epic 018); the sheet
     // is created per presentation, so init is the restore point.
@@ -879,12 +876,12 @@ private struct WanderSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Radius").font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                    ForEach(Self.radiusOptions, id: \.label) { opt in
+                    ForEach(Self.radiusOptions, id: \.self) { meters in
                         ChoiceButton(
-                            label: opt.label,
-                            isSelected: radiusChoice == .fixed(opt.meters),
-                            accessibilityID: "wander.radius.\(Int(opt.meters))"
-                        ) { radiusChoice = .fixed(opt.meters) }
+                            label: "\(Int(meters)) m",
+                            isSelected: radiusChoice == .fixed(meters),
+                            accessibilityID: "wander.radius.\(Int(meters))"
+                        ) { radiusChoice = .fixed(meters) }
                     }
                     ChoiceButton(
                         label: "Custom",
@@ -906,12 +903,12 @@ private struct WanderSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Duration").font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                    ForEach(Self.durationOptions, id: \.label) { opt in
+                    ForEach(Self.durationOptions, id: \.self) { seconds in
                         ChoiceButton(
-                            label: opt.label,
-                            isSelected: durationChoice == .fixed(opt.seconds),
-                            accessibilityID: "wander.duration.\(Int(opt.seconds / 60))"
-                        ) { durationChoice = .fixed(opt.seconds) }
+                            label: "\(Int(seconds / 60)) min",
+                            isSelected: durationChoice == .fixed(seconds),
+                            accessibilityID: "wander.duration.\(Int(seconds / 60))"
+                        ) { durationChoice = .fixed(seconds) }
                     }
                     ChoiceButton(
                         label: "Custom",
@@ -1009,11 +1006,11 @@ private struct WanderSheet: View {
         let km = appState.effectiveBaseSpeedMPS * d / 1000
         let mode: String = {
             if appState.transportMode == .custom {
-                return String(format: "Custom %.0f km/h", appState.customSpeedKmh)
+                return String(format: String(localized: "Custom %.0f km/h"), appState.customSpeedKmh)
             }
-            return appState.transportMode.rawValue
+            return appState.transportMode.displayName
         }()
-        return String(format: "≈ %.1f km at %@ (%.0f km/h)", km, mode, kmh)
+        return String(format: String(localized: "≈ %.1f km at %@ (%.0f km/h)"), km, mode, kmh)
     }
 
     private func start() {
@@ -1026,7 +1023,7 @@ private struct WanderSheet: View {
 }
 
 private struct ChoiceButton: View {
-    let label: String
+    let label: LocalizedStringKey
     let isSelected: Bool
     // Disambiguates same-labeled buttons (the two "Custom"s) for UI tests.
     var accessibilityID: String? = nil
@@ -1086,9 +1083,17 @@ private struct DevicePickerArea: View {
                 }
                 .labelsHidden()
             } else if discovery.hasScanned && !discovery.isScanning {
-                Text(discovery.lastError ?? "No devices found.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Group {
+                    // lastError is a system NSError description (already
+                    // OS-localized) — render verbatim, not as a lookup key.
+                    if let err = discovery.lastError {
+                        Text(verbatim: err)
+                    } else {
+                        Text("No devices found.")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             if let udid = appState.selectedDeviceUDID,
@@ -1653,24 +1658,25 @@ private struct MapArea: View {
 
     private var mapHintText: String {
         if isDrawingRoute {
-            return "Drag to draw a route — Esc to cancel"
+            return String(localized: "Drag to draw a route — Esc to cancel")
         }
         switch appState.connectionStatus {
         case .disconnected:
-            return "Connect to a device to start"
+            return String(localized: "Connect to a device to start")
         case .connecting:
-            return "Connecting..."
+            return String(localized: "Connecting…")
         case .connected:
             if appState.simState.navigationPlaybackState == .playing {
                 let pct = Int(appState.simState.navigationProgress * 100)
-                return "Playing route — \(pct)%"
+                // Explicit format string keeps the lone % escaped as %%.
+                return String(format: String(localized: "Playing route — %d%%"), pct)
             }
             if let coord = appState.simState.simulatedCoordinate {
-                return String(format: "Simulating: %.4f, %.4f", coord.latitude, coord.longitude)
+                return String(format: String(localized: "Simulating: %.4f, %.4f"), coord.latitude, coord.longitude)
             }
-            return "Right-click the map to set a starting location"
+            return String(localized: "Right-click the map to set a starting location")
         case .error:
-            return "Connection error — check sidebar"
+            return String(localized: "Connection error — check sidebar")
         }
     }
 }

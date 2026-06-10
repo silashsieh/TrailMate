@@ -160,7 +160,7 @@ final class TrailMateUITests: XCTestCase {
         // persists every change (epic 018), so no wander is ever started and
         // Close loses nothing.
         var sheet = openWanderSheet(in: window)
-        sheet.buttons["Custom"].firstMatch.click()
+        sheet.buttons["wander.radius.custom"].click()
         let radiusField = sheet.textFields["meters"]
         XCTAssertTrue(radiusField.waitForExistence(timeout: 5))
         radiusField.click()
@@ -180,7 +180,7 @@ final class TrailMateUITests: XCTestCase {
 
         // Park the selection on the factory-default preset rather than the
         // test value (the original preset isn't accessibility-readable).
-        sheet.buttons["500 m"].firstMatch.click()
+        sheet.buttons["wander.radius.500"].click()
         sheet.buttons["Close"].click()
     }
 }

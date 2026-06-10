@@ -882,12 +882,14 @@ private struct WanderSheet: View {
                     ForEach(Self.radiusOptions, id: \.label) { opt in
                         ChoiceButton(
                             label: opt.label,
-                            isSelected: radiusChoice == .fixed(opt.meters)
+                            isSelected: radiusChoice == .fixed(opt.meters),
+                            accessibilityID: "wander.radius.\(Int(opt.meters))"
                         ) { radiusChoice = .fixed(opt.meters) }
                     }
                     ChoiceButton(
                         label: "Custom",
-                        isSelected: radiusChoice == .custom
+                        isSelected: radiusChoice == .custom,
+                        accessibilityID: "wander.radius.custom"
                     ) { radiusChoice = .custom }
                 }
                 if radiusChoice == .custom {
@@ -907,12 +909,14 @@ private struct WanderSheet: View {
                     ForEach(Self.durationOptions, id: \.label) { opt in
                         ChoiceButton(
                             label: opt.label,
-                            isSelected: durationChoice == .fixed(opt.seconds)
+                            isSelected: durationChoice == .fixed(opt.seconds),
+                            accessibilityID: "wander.duration.\(Int(opt.seconds / 60))"
                         ) { durationChoice = .fixed(opt.seconds) }
                     }
                     ChoiceButton(
                         label: "Custom",
-                        isSelected: durationChoice == .custom
+                        isSelected: durationChoice == .custom,
+                        accessibilityID: "wander.duration.custom"
                     ) { durationChoice = .custom }
                 }
                 if durationChoice == .custom {
@@ -1024,6 +1028,8 @@ private struct WanderSheet: View {
 private struct ChoiceButton: View {
     let label: String
     let isSelected: Bool
+    // Disambiguates same-labeled buttons (the two "Custom"s) for UI tests.
+    var accessibilityID: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -1039,6 +1045,7 @@ private struct ChoiceButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityID ?? "")
     }
 }
 

@@ -14,8 +14,9 @@ xcuserdata/
 *.xcworkspace/xcuserdata/
 DerivedData/
 
-# Bundled Python (rebuilt by packaging/build.sh)
-PythonResources/
+# Bundled Python (rebuilt by packaging/build.sh). No trailing slash: worktrees
+# symlink this from the main checkout, and `dir/` patterns don't match symlinks.
+PythonResources
 packaging/.cache/
 
 # Release artifacts produced by packaging/release.sh

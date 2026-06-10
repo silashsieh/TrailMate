@@ -29,6 +29,19 @@ final class TrailMateUITests: XCTestCase {
         element.staticTexts.matching(NSPredicate(format: "value == %@", value)).firstMatch
     }
 
+    private func switchValue(_ element: XCUIElement) -> String {
+        String(describing: element.value ?? "")
+    }
+
+    @discardableResult
+    private func openSettings() -> XCUIElement {
+        XCTAssertTrue(app.windows["TrailMate"].waitForExistence(timeout: 15))
+        app.typeKey(",", modifierFlags: .command)
+        let settings = app.windows["com_apple_SwiftUI_Settings_window"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        return settings
+    }
+
     @MainActor
     func testLaunchShowsMainWindowWithConnectionControls() throws {
         let window = app.windows["TrailMate"]
@@ -49,11 +62,7 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testSettingsWindowShowsRealismAndLaunchControls() throws {
-        XCTAssertTrue(app.windows["TrailMate"].waitForExistence(timeout: 15))
-        app.typeKey(",", modifierFlags: .command)
-
-        let settings = app.windows["com_apple_SwiftUI_Settings_window"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        let settings = openSettings()
         XCTAssertTrue(staticText(withValue: "GPS noise σ", in: settings).waitForExistence(timeout: 5))
         XCTAssertTrue(settings.sliders.firstMatch.exists)
         XCTAssertTrue(staticText(withValue: "Restore last location on launch", in: settings).exists)
@@ -61,5 +70,30 @@ final class TrailMateUITests: XCTestCase {
 
         app.typeKey("w", modifierFlags: .command)
         XCTAssertFalse(settings.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testSettingsTogglePersistsAcrossRelaunch() throws {
+        var settings = openSettings()
+        var toggle = settings.switches.firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+
+        // Flip the restore-on-launch toggle and confirm the UI registered it.
+        let original = switchValue(toggle)
+        toggle.click()
+        let flipped = switchValue(toggle)
+        XCTAssertNotEqual(original, flipped)
+
+        // Full quit + relaunch: the flipped value must come back from disk.
+        app.terminate()
+        app.launch()
+        settings = openSettings()
+        toggle = settings.switches.firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(switchValue(toggle), flipped)
+
+        // Leave the user's setting as we found it.
+        toggle.click()
+        XCTAssertEqual(switchValue(toggle), original)
     }
 }

@@ -24,7 +24,7 @@ Before changing code or proposing a design, read these. They are short, current,
 6. [docs/technical/decisions.md](docs/technical/decisions.md) — load-bearing decisions and rationale.
 7. [docs/technical/tech-stack.md](docs/technical/tech-stack.md) — frameworks, target versions, underlying-library references.
 8. [docs/project-plan/phases.md](docs/project-plan/phases.md) — **frozen** historical implementation log (Phases 0–13). New work is tracked as epics, not appended here.
-9. [docs/project-plan/testing.md](docs/project-plan/testing.md) — planned test coverage (not yet implemented).
+9. [docs/project-plan/testing.md](docs/project-plan/testing.md) — implemented test suites, how to run them, and the remaining test plan.
 10. [docs/project-plan/risks.md](docs/project-plan/risks.md) — risk register.
 
 If a task touches the daemon protocol, coordinate math, or the concurrency split, re-read the relevant section of `architecture.md` before editing.

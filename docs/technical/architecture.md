@@ -63,7 +63,7 @@ TrailMate/
     │   ├── epics/                     # one file per accepted feature/idea (the plan's source of truth)
     │   ├── phases.md                  # frozen historical implementation log
     │   ├── risks.md                   # risk register
-    │   └── testing.md                 # planned test coverage
+    │   └── testing.md                 # test coverage + strategy
     └── technical/
         ├── architecture.md            # this file — structure, layers, processes, protocol
         ├── tech-stack.md              # framework choices and target versions

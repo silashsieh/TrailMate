@@ -16,9 +16,5 @@ SORT status ASC, id ASC
 
 ## Static snapshot (for the GitHub reader)
 
-- **Accepted, unscheduled:**
-  [012 — Simultaneous multi-device](epics/012-multi-device.md) (issue #9). Unblocked by the
-  2026-06-01 [scope.md](scope.md) revision (multi-iPhone is now a goal); large architectural
-  change, needs deliberate planning before joining a release.
 - **Ideas (carried over from [phases.md](phases.md) Phase 5):**
   [014 — README screenshots & GIF](epics/014-readme-screenshots.md).

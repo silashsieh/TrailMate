@@ -51,6 +51,7 @@ Suite list and suggested implementation order live in [[testing]].
 - Beyond the epic's two stories, `PositionIntegratorTests` and `LocationNoiseTests` (testing.md
   priorities) were cheap to add in the same pass. `RecorderServiceTests` stays deferred — the
   app-hosted test process shares the real Application Support directory. (2026-06-10)
-- First full run happened in CI (PR #32: 56 tests, 0 failures). The local pass used
-  `build-for-testing` only because a live TrailMate session was up — the app-hosted test run
-  would have launched a second instance of the same bundle id. (2026-06-10)
+- First full run happened in CI (PR #32: 56 tests, 0 failures) because a live TrailMate
+  session was up — the app-hosted test run would have launched a second instance of the same
+  bundle id. Verified locally afterwards (56/56, twice) once the owner quit the session.
+  (2026-06-10)

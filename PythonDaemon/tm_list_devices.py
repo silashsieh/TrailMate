@@ -14,16 +14,33 @@ abort the process — partial results are still useful.
 
 import asyncio
 import json
+import re
 import sys
 
 from pymobiledevice3 import usbmux
 from pymobiledevice3.bonjour import browse_remoted
 from pymobiledevice3.lockdown import create_using_usbmux
 
+# A real iOS UDID: modern "8hex-16hex" (A12+) or the legacy 40-hex form. The
+# remoted service for a USB/NCM link is named "ncm._remoted._tcp." — not a
+# UDID — so this filters that (and any other non-device) advertisement out.
+UDID_RE = re.compile(r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}$|^[0-9a-f]{40}$")
+
 
 def emit(record: dict) -> None:
     sys.stdout.write(json.dumps(record) + "\n")
     sys.stdout.flush()
+
+
+def service_host(service) -> str | None:
+    """Zone-qualified address of a remoted service (e.g. fe80::…%en9). The
+    zone id matters — a link-local address is unusable without it — and the
+    raw Address object isn't JSON-serializable, so reduce it to its string."""
+    for addr in getattr(service, "addresses", None) or []:
+        full = getattr(addr, "full_ip", None) or getattr(addr, "ip", None)
+        if full:
+            return full
+    return getattr(service, "host", None)
 
 
 async def fetch_device_name(udid: str) -> str:
@@ -64,25 +81,36 @@ async def main() -> None:
 
     try:
         services = await browse_remoted(timeout=2)
-        for s in services:
+    except Exception as e:
+        sys.stderr.write(f"bonjour browse error: {e}\n")
+        services = []
+
+    for s in services:
+        # Isolate per service: one bad advertisement must not abort the whole
+        # Wi-Fi scan (the previous all-encompassing try did, hiding every
+        # Wi-Fi device behind a single serialization error).
+        try:
             instance = getattr(s, "instance", "") or ""
-            # Service instance names usually start with the UDID, e.g.
-            # "00008101-XXXXXX._remoted._tcp.local."
+            # A genuine Wi-Fi advertisement is "<UDID>._remoted._tcp.local.";
+            # the USB/NCM transport advertises "ncm._remoted._tcp.local." with
+            # no UDID. Only emit when we can read a real UDID, and skip devices
+            # already seen over USB.
             udid = instance.split(".")[0] if instance else ""
-            if not udid or udid in seen:
+            if not UDID_RE.match(udid):
+                sys.stderr.write(f"skipping remoted service without a UDID: {instance!r}\n")
+                continue
+            if udid in seen:
                 continue
             seen.add(udid)
-            addresses = getattr(s, "addresses", None) or []
-            host = addresses[0] if addresses else getattr(s, "host", None)
             emit({
                 "udid": udid,
                 "name": await fetch_device_name(udid),
                 "connectionType": "WiFi",
-                "host": host,
+                "host": service_host(s),
                 "port": getattr(s, "port", None),
             })
-    except Exception as e:
-        sys.stderr.write(f"bonjour error: {e}\n")
+        except Exception as e:
+            sys.stderr.write(f"bonjour service error: {e}\n")
 
 
 if __name__ == "__main__":

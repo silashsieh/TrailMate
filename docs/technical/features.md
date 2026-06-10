@@ -134,6 +134,12 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
 - Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick arming.
 
+### Localization
+
+- UI ships in English and Traditional Chinese (繁體中文); the app follows the system language with no in-app switch.
+- Strings live in a String Catalog (`TrailMate/Localizable.xcstrings`) — keys are the English source text, extracted by the compiler (`SWIFT_EMIT_LOC_STRINGS`) and synced via `xcstringstool`. The brand name and bare numeric/symbol tokens are marked do-not-translate.
+- Log and diagnostic messages (the Log sheet, `addLog` entries) stay English by design — they're for debugging. Device-supplied text (device names) and system error descriptions render verbatim.
+
 ### Bundled Python runtime
 
 - TrailMate ships a self-contained CPython interpreter + `pymobiledevice3` inside the `.app` bundle (`Contents/Resources/PythonResources/`). End users do not install Python, pip, or pymobiledevice3.

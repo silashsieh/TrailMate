@@ -12,6 +12,7 @@
 |Python runtime   |python-build-standalone, bundled in app                |Self-contained; no system Python dependency            |
 |Project file     |Hand-managed `.xcodeproj`                              |No XcodeGen; the project is edited directly            |
 |Tests            |Swift Testing + XCTest                                 |Swift Testing for new code; XCTest for legacy interop  |
+|Localization     |String Catalog (`.xcstrings`), compiler-extracted      |en + zh-Hant; no `.strings` files, follows system language|
 
 ## Versions Targeted
 

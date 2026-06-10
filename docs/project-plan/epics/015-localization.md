@@ -25,6 +25,7 @@ Localize all user-facing strings to en + zh-Hant; app follows system locale.
 ## Stories
 - [x] Extract hardcoded UI strings
 - [x] Add en + zh-Hant string resources
+- [x] In-app Language picker (System Default / English / 繁體中文) in the Settings window
 - [ ] Verify layout with longer Chinese strings in the sidebar
 
 ## Acceptance criteria
@@ -43,7 +44,13 @@ Localize all user-facing strings to en + zh-Hant; app follows system locale.
 - **Log/diagnostic messages stay English** (epic scope) — `addLog` text, the error enums
   (`DaemonError`/`TunnelError`/`BuilderError`, all log-only), device names, and system error
   descriptions are not localized. (2026-06-10)
+- **In-app Language picker** (owner request) — Settings-window override (System Default /
+  English / 繁體中文) on top of system-language following. Writes the standard `AppleLanguages`
+  key via `LanguagePreference`; applies on next launch, not live (`String(localized:)` binds the
+  launch-time bundle, and relaunching mid-session would drop a live device connection). The
+  picker says so. Covered by a relaunch UI test that only toggles System Default ↔ English, so
+  a missed reset can't leave other suites facing a non-English UI. (2026-06-10)
 - **Verified headless**: build succeeds, the catalog is fully translated with no stale states,
-  sync is idempotent, and the built bundle contains `zh-Hant.lproj/Localizable.strings`. The
-  runtime visual pass and the longer-string layout AC are left for the owner (native zh-Hant
-  speaker), who also reviews the translations in the PR. (2026-06-10)
+  sync is idempotent, the built bundle contains `zh-Hant.lproj/Localizable.strings`, and all 63
+  tests pass. The runtime visual pass and the longer-string layout AC are left for the owner
+  (native zh-Hant speaker), who also reviews the translations in the PR. (2026-06-10)

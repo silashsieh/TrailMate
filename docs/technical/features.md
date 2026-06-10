@@ -136,9 +136,10 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Localization
 
-- UI ships in English and Traditional Chinese (繁體中文); the app follows the system language with no in-app switch.
+- UI ships in English and Traditional Chinese (繁體中文). By default the app follows the system language; a **Language** picker in the Settings window (⌘,) overrides it — System Default / English / 繁體中文. "System Default" falls back to English when no system language matches.
+- The override writes the standard `AppleLanguages` UserDefaults key (`LanguagePreference`), which Foundation binds at process launch, so a change takes effect on the next launch — the picker notes this. (Not live: several strings resolve through `String(localized:)` against the launch-time bundle, and relaunching mid-session would also drop a live device connection.)
 - Strings live in a String Catalog (`TrailMate/Localizable.xcstrings`) — keys are the English source text, extracted by the compiler (`SWIFT_EMIT_LOC_STRINGS`) and synced via `xcstringstool`. The brand name and bare numeric/symbol tokens are marked do-not-translate.
-- Log and diagnostic messages (the Log sheet, `addLog` entries) stay English by design — they're for debugging. Device-supplied text (device names) and system error descriptions render verbatim.
+- Log and diagnostic messages (the Log sheet, `addLog` entries) stay English by design — they're for debugging. Device-supplied text (device names) and system error descriptions render verbatim. Language endonyms in the picker ("English", "繁體中文") show in their own script.
 
 ### Bundled Python runtime
 

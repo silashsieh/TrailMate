@@ -48,10 +48,12 @@ Suite list and suggested implementation order live in [[testing]].
 - **Persistence is verified through real relaunches** (owner request): the settings toggle and
   the Wander presets are changed in the UI, the app is terminated and relaunched, and the
   restored values asserted. Both tests put user preferences back as they found them. (2026-06-10)
-- **DEBUG-only mock connection** (owner request — "many features are only available after
+- **DEBUG-only test launch hooks** (owner request — "many features are only available after
   connect"): `--uitest-mock-connection` + `MockSimulationBackend` (the mock the
   `SimulationBackend` protocol doc anticipated) let UI tests exercise connected-gated flows
-  with no device, tunnel, admin prompt, or daemon. `AppState.daemonBridge` was widened from
+  with no device, tunnel, admin prompt, or daemon; `--uitest-open-wander` opens the Wander
+  sheet directly so its persistence test doesn't depend on the map long-press, which trips
+  XCUITest's alert-interruption handling on CI. `AppState.daemonBridge` was widened from
   `DaemonBridge?` to `(any SimulationBackend)?` — the only non-additive production change.
   (2026-06-10)
 - **`LocationNoise` tests are statistical, not seeded** — the RNG isn't injectable; N=10 000

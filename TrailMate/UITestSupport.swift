@@ -4,6 +4,12 @@ import Foundation
 // Launch-argument switches for UI tests, DEBUG-only so release builds carry
 // no test hooks.
 enum UITestSupport {
+    // True for any UI-test launch (every flag below starts with --uitest, and
+    // the harness also passes a bare --uitest). Used to skip the real device
+    // lister so its Bonjour/usbmux scan never raises the macOS Local Network
+    // permission dialog, which blocks automation on a clean CI user.
+    static let isUITesting = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--uitest") }
+
     // Replaces device discovery and the tunnel+daemon pair with mocks so
     // connected-only UI flows are testable with no device, tunnel, or admin
     // prompt (see docs/project-plan/testing.md).

@@ -40,6 +40,13 @@ final class DeviceDiscoveryService {
             hasScanned = true
             return
         }
+        // Any other UI-test launch: no real lister, so no Bonjour/usbmux and
+        // thus no Local Network permission prompt to block automation.
+        if UITestSupport.isUITesting {
+            devices = []
+            hasScanned = true
+            return
+        }
         #endif
         isScanning = true
         lastError = nil

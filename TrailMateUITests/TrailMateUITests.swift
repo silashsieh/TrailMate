@@ -2,13 +2,14 @@ import XCTest
 
 // Smoke-level UI tests: launch the real app and assert the primary surfaces
 // exist and open. Deliberately device-free and data-free — nothing here
-// clicks Connect (it raises an admin auth dialog), relies on a paired iPhone,
-// or assumes saved locations/routes exist, so the suite runs the same on a
-// clean CI user and on a dev Mac.
+// clicks Connect against a real device (the tunnel raises an admin auth
+// dialog) or assumes saved locations/routes exist, so the suite runs the
+// same on a clean CI user and on a dev Mac. Connected-only flows run against
+// the DEBUG-only mock backend via --uitest-mock-connection.
 //
 // Query notes (from the accessibility hierarchy): SwiftUI sidebar section
 // headers and buttons expose accessibility *labels*, but Form/row Texts
-// expose *values* — hence the value predicates for Settings content.
+// expose *values* — hence the value predicates.
 final class TrailMateUITests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -16,7 +17,6 @@ final class TrailMateUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launch()
     }
 
     @MainActor
@@ -42,8 +42,45 @@ final class TrailMateUITests: XCTestCase {
         return settings
     }
 
+    // Connect to the mock backend (requires launching with
+    // --uitest-mock-connection): pick "Mock iPhone", click Connect, wait for
+    // the status row. No admin prompt — the tunnel and daemon are mocked out.
+    private func connectMockDevice(in window: XCUIElement) {
+        let picker = window.popUpButtons.firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        picker.click()
+        let item = app.menuItems["USB · Mock iPhone"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.click()
+        let connect = window.buttons["Connect"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 5))
+        connect.click()
+        XCTAssertTrue(staticText(withValue: "Connected", in: window).waitForExistence(timeout: 10))
+    }
+
+    // Long-press the map until the destination action bar offers Wander
+    // (connected-only). With no simulated origin the first press teleports
+    // instead of opening the bar (by design), so a couple of attempts at
+    // varied spots cover both the fresh and existing-origin cases.
+    private func openWanderSheet(in window: XCUIElement) -> XCUIElement {
+        let map = window.maps.firstMatch
+        XCTAssertTrue(map.waitForExistence(timeout: 10))
+        let wanderButton = window.buttons["Wander nearby…"]
+        let spots: [CGVector] = [.init(dx: 0.5, dy: 0.4), .init(dx: 0.6, dy: 0.55), .init(dx: 0.4, dy: 0.6)]
+        for spot in spots where !wanderButton.exists {
+            map.coordinate(withNormalizedOffset: spot).press(forDuration: 1.0)
+            _ = wanderButton.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(wanderButton.exists)
+        wanderButton.click()
+        let sheet = window.sheets.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+        return sheet
+    }
+
     @MainActor
     func testLaunchShowsMainWindowWithConnectionControls() throws {
+        app.launch()
         let window = app.windows["TrailMate"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
         XCTAssertTrue(window.staticTexts["Connection"].exists)
@@ -53,6 +90,7 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testSidebarShowsLogSection() throws {
+        app.launch()
         let window = app.windows["TrailMate"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
         XCTAssertTrue(window.staticTexts["Log"].exists)
@@ -62,6 +100,7 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testSettingsWindowShowsRealismAndLaunchControls() throws {
+        app.launch()
         let settings = openSettings()
         XCTAssertTrue(staticText(withValue: "GPS noise σ", in: settings).waitForExistence(timeout: 5))
         XCTAssertTrue(settings.sliders.firstMatch.exists)
@@ -74,6 +113,7 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testSettingsTogglePersistsAcrossRelaunch() throws {
+        app.launch()
         var settings = openSettings()
         var toggle = settings.switches.firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
@@ -95,5 +135,52 @@ final class TrailMateUITests: XCTestCase {
         // Leave the user's setting as we found it.
         toggle.click()
         XCTAssertEqual(switchValue(toggle), original)
+    }
+
+    @MainActor
+    func testMockConnectionEnablesConnectedUI() throws {
+        app.launchArguments = ["--uitest-mock-connection"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        connectMockDevice(in: window)
+        // Connected-only map controls appear.
+        XCTAssertTrue(window.buttons["Disconnect"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testWanderPresetsPersistAcrossRelaunch() throws {
+        app.launchArguments = ["--uitest-mock-connection"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        connectMockDevice(in: window)
+
+        // Switch the radius to Custom and type a distinctive value. The sheet
+        // persists every change (epic 018), so no wander is ever started and
+        // Close loses nothing.
+        var sheet = openWanderSheet(in: window)
+        sheet.buttons["Custom"].firstMatch.click()
+        let radiusField = sheet.textFields["meters"]
+        XCTAssertTrue(radiusField.waitForExistence(timeout: 5))
+        radiusField.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("850")
+        sheet.buttons["Close"].click()
+
+        // Relaunch: the sheet must reopen in Custom mode with the typed value.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        connectMockDevice(in: window)
+        sheet = openWanderSheet(in: window)
+        let restoredField = sheet.textFields["meters"]
+        XCTAssertTrue(restoredField.waitForExistence(timeout: 5))
+        XCTAssertEqual(String(describing: restoredField.value ?? ""), "850")
+
+        // Park the selection on the factory-default preset rather than the
+        // test value (the original preset isn't accessibility-readable).
+        sheet.buttons["500 m"].firstMatch.click()
+        sheet.buttons["Close"].click()
     }
 }

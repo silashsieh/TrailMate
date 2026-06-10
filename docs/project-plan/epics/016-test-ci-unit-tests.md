@@ -27,6 +27,7 @@ Land a first bar of automated tests and wire a test job into CI.
 - [x] Coordinate-math tests with known-good reference values (per CLAUDE.md "Always do")
 - [x] GPX round-trip test
 - [x] Add an `xcodebuild test` job to `.github/workflows/swift.yml`
+- [x] UI smoke tests (owner request during PR #32 review)
 
 ## Acceptance criteria
 - [x] `xcodebuild test` runs a non-empty suite locally and in CI
@@ -39,9 +40,11 @@ Suite list and suggested implementation order live in [[testing]].
 - **Separate parallel `test` CI job** rather than a step after `release.sh` in the build job:
   failure isolation (a distinct PR check) and parallel wall-clock, at the cost of a second
   `PythonResources` build (PBS download cached on `packaging/.cache`). (2026-06-10)
-- **`TrailMateUITests` skipped in the shared scheme** (and `-skip-testing` in CI as a belt):
-  both files are empty templates, and XCUITest needs TCC automation permissions — the classic
-  headless flake. Target kept as future scaffolding. (2026-06-10)
+- **UI tests were first skipped in the shared scheme** (empty templates, TCC-flake risk), then
+  the owner asked for real ones in PR review: a device-/data-free smoke suite now covers
+  launch, sidebar Log section, and the Settings window. It runs in its own CI job
+  (`ui-test`) so an automation flake never taints the unit-test signal; the unit `test` job
+  still passes `-skip-testing:TrailMateUITests`. (2026-06-10)
 - **`LocationNoise` tests are statistical, not seeded** — the RNG isn't injectable; N=10 000
   with tolerances ≥10 standard errors makes flakes practically impossible without touching
   production code. (2026-06-10)

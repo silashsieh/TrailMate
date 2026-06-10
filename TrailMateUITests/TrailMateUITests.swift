@@ -58,23 +58,13 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(staticText(withValue: "Connected", in: window).waitForExistence(timeout: 10))
     }
 
-    // Long-press the map until the destination action bar offers Wander
-    // (connected-only). With no simulated origin the first press teleports
-    // instead of opening the bar (by design), so a couple of attempts at
-    // varied spots cover both the fresh and existing-origin cases.
-    private func openWanderSheet(in window: XCUIElement) -> XCUIElement {
-        let map = window.maps.firstMatch
-        XCTAssertTrue(map.waitForExistence(timeout: 10))
-        let wanderButton = window.buttons["Wander nearby…"]
-        let spots: [CGVector] = [.init(dx: 0.5, dy: 0.4), .init(dx: 0.6, dy: 0.55), .init(dx: 0.4, dy: 0.6)]
-        for spot in spots where !wanderButton.exists {
-            map.coordinate(withNormalizedOffset: spot).press(forDuration: 1.0)
-            _ = wanderButton.waitForExistence(timeout: 2)
-        }
-        XCTAssertTrue(wanderButton.exists)
-        wanderButton.click()
-        let sheet = window.sheets.firstMatch
-        XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+    // The Wander sheet is normally reached via a connected-only map
+    // long-press; --uitest-open-wander opens it at launch instead, so the
+    // persistence test stays deterministic (the map flow trips XCUITest's
+    // alert-interruption handling on CI). Launch with the flag, then grab it.
+    private func wanderSheet() -> XCUIElement {
+        let sheet = app.windows["TrailMate"].sheets.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 15))
         return sheet
     }
 
@@ -150,16 +140,13 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testWanderPresetsPersistAcrossRelaunch() throws {
-        app.launchArguments = ["--uitest-mock-connection"]
+        app.launchArguments = ["--uitest-open-wander"]
         app.launch()
-        let window = app.windows["TrailMate"]
-        XCTAssertTrue(window.waitForExistence(timeout: 15))
-        connectMockDevice(in: window)
 
         // Switch the radius to Custom and type a distinctive value. The sheet
         // persists every change (epic 018), so no wander is ever started and
         // Close loses nothing.
-        var sheet = openWanderSheet(in: window)
+        var sheet = wanderSheet()
         sheet.buttons["wander.radius.custom"].click()
         let radiusField = sheet.textFields["meters"]
         XCTAssertTrue(radiusField.waitForExistence(timeout: 5))
@@ -171,9 +158,7 @@ final class TrailMateUITests: XCTestCase {
         // Relaunch: the sheet must reopen in Custom mode with the typed value.
         app.terminate()
         app.launch()
-        XCTAssertTrue(window.waitForExistence(timeout: 15))
-        connectMockDevice(in: window)
-        sheet = openWanderSheet(in: window)
+        sheet = wanderSheet()
         let restoredField = sheet.textFields["meters"]
         XCTAssertTrue(restoredField.waitForExistence(timeout: 5))
         XCTAssertEqual(String(describing: restoredField.value ?? ""), "850")

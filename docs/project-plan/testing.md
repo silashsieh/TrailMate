@@ -59,14 +59,17 @@ asserted, then flipped back so the suite leaves user preferences as it found the
 tests run against the real `com.sh.TrailMate` defaults). Deliberately device-free and
 data-free otherwise, so it passes identically on a clean CI user and a dev Mac.
 
-**Mock connection for connected-only flows.** Launching with `--uitest-mock-connection`
-(DEBUG builds only; `UITestSupport.swift`) makes device discovery return a fake
-"Mock iPhone" and `connect()` attach a `MockSimulationBackend` — no tunnel, no admin
-prompt, no daemon; commands are accepted and location updates swallowed. This is the
-"record-only mock" backend the `SimulationBackend` protocol was shaped for. Tests use it
-to cover connected-gated UI: the destination action bar (map long-press), and the Wander
-sheet's preset persistence across a full relaunch (epic 018's contract — selection is
-saved on every change, not just Start).
+**Test-only launch hooks (DEBUG builds only; `UITestSupport.swift`).**
+
+- `--uitest-mock-connection` makes device discovery return a fake "Mock iPhone" and
+  `connect()` attach a `MockSimulationBackend` — no tunnel, no admin prompt, no daemon;
+  commands are accepted and location updates swallowed. This is the "record-only mock"
+  backend the `SimulationBackend` protocol was shaped for, and it unlocks any
+  connected-gated UI (`testMockConnectionEnablesConnectedUI` exercises the connect flow).
+- `--uitest-open-wander` opens the Wander sheet at launch with a synthetic center, so the
+  preset-persistence test (epic 018's contract — selection saved on every change, not just
+  Start) can verify a full relaunch round-trip without driving the map long-press, which
+  trips XCUITest's alert-interruption handling on CI.
 
 Query gotcha for future tests: SwiftUI exposes sidebar headers/buttons as accessibility
 *labels* but Form/row `Text`s as *values* — match the latter with a `value ==` predicate.

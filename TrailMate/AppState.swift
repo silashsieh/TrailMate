@@ -190,6 +190,13 @@ final class AppState {
             Task { await sim.teleport(to: restored) }
         }
 
+        #if DEBUG
+        if UITestSupport.openWander {
+            pendingWanderCenter = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
+            showWanderSheet = true
+        }
+        #endif
+
         // Consume simulation events (route abort) for log writes.
         let stream = sim.events
         simEventsTask = Task { [weak self] in

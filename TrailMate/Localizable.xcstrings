@@ -130,7 +130,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "附加直線"
+            "value": "延伸直線"
           }
         }
       }
@@ -140,7 +140,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "附加路線"
+            "value": "延伸路線"
           }
         }
       }
@@ -380,7 +380,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "駕車"
+            "value": "汽車"
           }
         }
       }

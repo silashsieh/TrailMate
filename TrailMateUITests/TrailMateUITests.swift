@@ -132,6 +132,34 @@ final class TrailMateUITests: XCTestCase {
     }
 
     @MainActor
+    func testLanguagePickerPersistsAcrossRelaunch() throws {
+        app.launch()
+        var settings = openSettings()
+        let picker = settings.popUpButtons["settings.language"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        XCTAssertEqual(String(describing: picker.value ?? ""), "System Default")
+
+        // Only ever toggle System Default ↔ English: a missed reset can't leave
+        // a non-English UI that would break the other suites' assertions.
+        picker.click()
+        app.menuItems["English"].click()
+        XCTAssertEqual(String(describing: picker.value ?? ""), "English")
+
+        // Relaunch: the choice persists.
+        app.terminate()
+        app.launch()
+        settings = openSettings()
+        let restored = settings.popUpButtons["settings.language"]
+        XCTAssertTrue(restored.waitForExistence(timeout: 5))
+        XCTAssertEqual(String(describing: restored.value ?? ""), "English")
+
+        // Reset to System Default so the override doesn't leak to other tests.
+        restored.click()
+        app.menuItems["System Default"].click()
+        XCTAssertEqual(String(describing: restored.value ?? ""), "System Default")
+    }
+
+    @MainActor
     func testMockConnectionEnablesConnectedUI() throws {
         app.launchArguments += ["--uitest-mock-connection"]
         app.launch()

@@ -10,10 +10,31 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
 
+    // Seeded from the persisted choice; onChange writes it back. Launch-only —
+    // AppleLanguages is bound at process start, so it doesn't need to live on
+    // AppState or drive any live view update.
+    @State private var language = LanguagePreference.current
+
     var body: some View {
         @Bindable var appState = appState
 
         Form {
+            Section("Language") {
+                Picker("Language", selection: $language) {
+                    ForEach(AppLanguage.allCases) { lang in
+                        Text(verbatim: lang.displayName).tag(lang)
+                    }
+                }
+                .labelsHidden()
+                .accessibilityIdentifier("settings.language")
+                .onChange(of: language) { _, newValue in
+                    LanguagePreference.current = newValue
+                }
+                Text("Takes effect after you relaunch TrailMate.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Realism") {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -39,6 +60,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 220)
+        .frame(width: 420, height: 320)
     }
 }

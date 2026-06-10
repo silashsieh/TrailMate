@@ -17,6 +17,10 @@ final class TrailMateUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        // Base flag for every UI test: suppresses the real device lister so no
+        // Local Network permission dialog appears on a clean CI user. Tests
+        // append the specific --uitest-* hooks they need before launching.
+        app.launchArguments = ["--uitest"]
     }
 
     @MainActor
@@ -129,7 +133,7 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testMockConnectionEnablesConnectedUI() throws {
-        app.launchArguments = ["--uitest-mock-connection"]
+        app.launchArguments += ["--uitest-mock-connection"]
         app.launch()
         let window = app.windows["TrailMate"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
@@ -140,7 +144,7 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testWanderPresetsPersistAcrossRelaunch() throws {
-        app.launchArguments = ["--uitest-open-wander"]
+        app.launchArguments += ["--uitest-open-wander"]
         app.launch()
 
         // Switch the radius to Custom and type a distinctive value. The sheet

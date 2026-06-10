@@ -61,6 +61,10 @@ data-free otherwise, so it passes identically on a clean CI user and a dev Mac.
 
 **Test-only launch hooks (DEBUG builds only; `UITestSupport.swift`).**
 
+- `--uitest` (passed on every UI-test launch) skips the real device lister, so its
+  Bonjour/usbmux scan never raises the macOS Local Network permission dialog — that
+  `UserNotificationCenter` prompt sits on top of the UI and blocks automation on a clean CI
+  user (it doesn't appear locally once the permission has been answered).
 - `--uitest-mock-connection` makes device discovery return a fake "Mock iPhone" and
   `connect()` attach a `MockSimulationBackend` — no tunnel, no admin prompt, no daemon;
   commands are accepted and location updates swallowed. This is the "record-only mock"

@@ -144,6 +144,10 @@ final class AppState {
     private let tunnelSupervisor = TunnelSupervisor()
     private var didSweepStaleDaemons = false
 
+    // Routing kernel (D4). Swappable behind the protocol; MapKit today. Stateless
+    // and shared (the MapKit throttle is per-process, not per-route).
+    private let router: any RoutingService = MapKitRoutingService()
+
     var effectiveBaseSpeedMPS: Double {
         let kmh = transportMode.fixedSpeedKmh ?? max(0.1, customSpeedKmh)
         return kmh / 3.6
@@ -542,7 +546,7 @@ final class AppState {
         )
 
         do {
-            let result = try await WanderRouteBuilder.build(options: options)
+            let result = try await WanderRouteBuilder.build(options: options, router: router)
             routeCoordinates = result.coordinates
             await sim.loadRoute(coordinates: result.coordinates, baseSpeed: speed, resetStart: true)
 
@@ -1004,67 +1008,45 @@ final class AppState {
         return transportMode.rawValue
     }
 
-    private func extractCoordinates(from polyline: MKPolyline) -> [CLLocationCoordinate2D] {
-        var coords = [CLLocationCoordinate2D](
-            repeating: CLLocationCoordinate2D(),
-            count: polyline.pointCount
-        )
-        polyline.getCoordinates(&coords, range: NSRange(location: 0, length: polyline.pointCount))
-        return coords
-    }
-
     private func stopLabel(at index: Int, total: Int) -> String {
         if index == 0 { return "From" }
         if index == total - 1 { return "To" }
         return "Stop \(index)"
     }
 
+    // Thin wrapper over the routing kernel: forwards to `router`, then maps the
+    // typed RoutingError back to the same per-leg log lines this used to emit
+    // inline. Keeping the tuple signature means callers (calculateRoute /
+    // appendRoute / routeFromCurrent) are unchanged.
     private func buildRoute(
         from: CLLocationCoordinate2D,
         via: [CLLocationCoordinate2D],
         to: CLLocationCoordinate2D
     ) async -> (coords: [CLLocationCoordinate2D], distance: Double, time: TimeInterval)? {
-        let stopsList = [from] + via + [to]
-        var combined: [CLLocationCoordinate2D] = []
-        var totalDistance = 0.0
-        var totalTime: TimeInterval = 0.0
-
-        for i in 0..<(stopsList.count - 1) {
-            let a = stopsList[i]
-            let b = stopsList[i + 1]
-            let aLoc = CLLocation(latitude: a.latitude, longitude: a.longitude)
-            let bLoc = CLLocation(latitude: b.latitude, longitude: b.longitude)
-            if aLoc.distance(from: bLoc) < 1.0 { continue }
-
-            let request = MKDirections.Request()
-            request.source = MKMapItem(location: aLoc, address: nil)
-            request.destination = MKMapItem(location: bLoc, address: nil)
-            request.transportType = effectiveDirectionsTransportType
-
-            let fromLabel = stopLabel(at: i, total: stopsList.count)
-            let toLabel = stopLabel(at: i + 1, total: stopsList.count)
-
-            do {
-                let response = try await MKDirections(request: request).calculate()
-                guard let route = response.routes.first else {
-                    addLog("Route failed: \(fromLabel) → \(toLabel): no route found.")
-                    return nil
-                }
-                let segCoords = extractCoordinates(from: route.polyline)
-                combined = RouteMath.joinSegments(combined, segCoords)
-                totalDistance += route.distance
-                totalTime += route.expectedTravelTime
-            } catch {
-                addLog("Route failed: \(fromLabel) → \(toLabel): \(error.localizedDescription)")
-                return nil
-            }
-        }
-
-        guard combined.count >= 2 else {
+        let waypoints = [from] + via + [to]
+        do {
+            let plan = try await router.calculateRoute(
+                waypoints: waypoints,
+                transportType: effectiveDirectionsTransportType
+            )
+            return (plan.coordinates, plan.distanceMeters, plan.travelTimeSeconds)
+        } catch let RoutingError.legNotFound(index) {
+            let f = stopLabel(at: index, total: waypoints.count)
+            let t = stopLabel(at: index + 1, total: waypoints.count)
+            addLog("Route failed: \(f) → \(t): no route found.")
+            return nil
+        } catch let RoutingError.legFailed(index, underlying) {
+            let f = stopLabel(at: index, total: waypoints.count)
+            let t = stopLabel(at: index + 1, total: waypoints.count)
+            addLog("Route failed: \(f) → \(t): \(underlying.localizedDescription)")
+            return nil
+        } catch RoutingError.degenerate {
             addLog("Start and end are the same location.")
             return nil
+        } catch {
+            addLog("Route failed: \(error.localizedDescription)")
+            return nil
         }
-        return (combined, totalDistance, totalTime)
     }
 
     func addLog(_ message: String) {

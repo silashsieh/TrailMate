@@ -38,7 +38,7 @@ enum WanderRouteBuilder {
 
     private static let metersPerDegLat = 111_320.0
 
-    static func build(options: Options) async throws -> Result {
+    static func build(options: Options, router: any RoutingService) async throws -> Result {
         let targetMeters = max(0, options.speedMPS * options.durationSeconds)
         let sampleRadius = options.radiusMeters * options.sampleRadiusScale
 
@@ -62,11 +62,13 @@ enum WanderRouteBuilder {
             )
 
             do {
-                let (segment, distance) = try await directionsHop(
+                let hop = try await router.calculateHop(
                     from: current,
                     to: target,
                     transportType: options.transportType
                 )
+                let segment = hop.coordinates
+                let distance = hop.distanceMeters
                 if segment.count > 1 {
                     polyline.append(contentsOf: segment.dropFirst())
                     accumulated += distance
@@ -94,30 +96,6 @@ enum WanderRouteBuilder {
         }
 
         return Result(coordinates: polyline, distanceMeters: accumulated, hopFailures: totalFailures)
-    }
-
-    // MARK: - Hop
-
-    private static func directionsHop(
-        from: CLLocationCoordinate2D,
-        to: CLLocationCoordinate2D,
-        transportType: MKDirectionsTransportType
-    ) async throws -> (segment: [CLLocationCoordinate2D], distance: Double) {
-        let request = MKDirections.Request()
-        request.source = MKMapItem(location: CLLocation(latitude: from.latitude, longitude: from.longitude), address: nil)
-        request.destination = MKMapItem(location: CLLocation(latitude: to.latitude, longitude: to.longitude), address: nil)
-        request.transportType = transportType
-
-        let directions = MKDirections(request: request)
-        let response = try await directions.calculate()
-        guard let route = response.routes.first else {
-            return ([], 0)
-        }
-
-        let polyline = route.polyline
-        var coords = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: polyline.pointCount)
-        polyline.getCoordinates(&coords, range: NSRange(location: 0, length: polyline.pointCount))
-        return (coords, route.distance)
     }
 
     // MARK: - Sampling

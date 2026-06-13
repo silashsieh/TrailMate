@@ -17,12 +17,7 @@ struct TrailMateApp: App {
         Window("TrailMate", id: "main") {
             ContentView()
                 .environment(appState)
-                .onAppear {
-                    delegate.appState = appState
-                    // Window present → regular activation (Dock icon + focus).
-                    // Covers both first launch and reopen from the menu bar.
-                    delegate.applyActivationPolicy(windowVisible: true)
-                }
+                .modifier(MainWindowConfigurator(delegate: delegate, appState: appState))
         }
         .defaultSize(width: 1100, height: 700)
 
@@ -48,6 +43,27 @@ struct TrailMateApp: App {
     }
 }
 
+// Captures the SwiftUI openWindow action (unreachable from AppKit) into the
+// delegate so applicationShouldHandleReopen — a Dock-icon click with no window
+// open — can re-show the single "main" Window, which SwiftUI (unlike a
+// WindowGroup) does not auto-reopen. Also wires the delegate's appState and the
+// initial activation policy on first appear.
+private struct MainWindowConfigurator: ViewModifier {
+    let delegate: AppDelegate
+    let appState: AppState
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            delegate.appState = appState
+            delegate.reopenMainWindow = { openWindow(id: "main") }
+            // Window present → regular activation (Dock icon + focus). Covers
+            // both first launch and reopen from the menu bar.
+            delegate.applyActivationPolicy(windowVisible: true)
+        }
+    }
+}
+
 // App lifecycle owner (epic 021) plus the Cmd-Q disconnect bridge (below).
 // Bridges Cmd-Q (and any other NSApp.terminate path) into our async
 // disconnect() so the daemon gets a real QUIT → EXIT handshake before the
@@ -55,6 +71,10 @@ struct TrailMateApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var appState: AppState?
+
+    // Set by the main window on first appear (MainWindowConfigurator). Lets
+    // applicationShouldHandleReopen re-show a closed single Window.
+    var reopenMainWindow: (() -> Void)?
 
     // Menu-bar / Dock preference keys. Registered with defaults below so the
     // AppDelegate's UserDefaults reads match the @AppStorage defaults in the UI
@@ -100,6 +120,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // the main window leaves the process (and its socket/simulation) running.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    // Dock-icon click (or `open` of the already-running app) with no visible
+    // window. A single Window scene — unlike a WindowGroup — is not auto-reopened
+    // by SwiftUI, so without this the app could be stranded windowless (e.g. with
+    // the menu bar item hidden). Same reopen dance as the menu bar's Open action.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            reopenMainWindow?()
+        }
+        return true
     }
 
     // MARK: - Activation policy (epic 021)
@@ -155,7 +188,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let coord = self.appState?.simState.simulatedCoordinate {
                 SimulatedPositionPersistence.save(coord)
             }
-            await self.appState?.disconnect()
+            // prepareForQuit stops the AI socket (unlinks ai.sock) before the
+            // device disconnect, so quit honors epic 019's unlink contract.
+            await self.appState?.prepareForQuit()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

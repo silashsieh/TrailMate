@@ -37,7 +37,9 @@ enum SocketPath {
             throw Error.unresolvedSupportDirectory
         }
         let dir = support.appendingPathComponent(directoryName, isDirectory: true)
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Owner-only — the socket's auth model is filesystem permissions.
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true,
+                               attributes: [.posixPermissions: 0o700])
 
         let socketURL = dir.appendingPathComponent(socketFileName, isDirectory: false)
         let path = socketURL.path

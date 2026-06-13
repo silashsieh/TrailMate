@@ -111,6 +111,33 @@ Pre-seeded from the design discussion (2026-06), so the rationale survives:
 
 ## Bugs / follow-ups found while building
 
+Adversarial review (2026-06-13, ultracode workflow) found and **fixed before merge**:
+SIGPIPE crash on socket write, unbounded read-buffer DoS, fd close/shutdown race,
+unbounded `semaphore.wait()` on a wedged tunnel, EINTR write truncation, 0700 socket
+perms, quit-time `stop()`/unlink, single-`Window` Dock-reopen (`applicationShouldHandleReopen`),
+GUI-only discovery (now scanned from `dispatch`), DEVICES/STATUS shape parity. (See the
+review synthesis in the run transcript.)
+
+**Tracked, not yet done (medium/low — none blocking the off-by-default single-device path):**
+- [ ] `start()`/`stop()` epoch guard — a fast toggle off→on could spawn an accept loop on a
+      reused listen fd; capture an epoch under the lock and bail if stale. Also `continue` on
+      `accept()` EINTR vs treating it as fatal.
+- [ ] `willClose` activation-policy check is timing-dependent (one main-actor hop may not have
+      cleared the closing window's `isVisible`); capture the specific closing `NSWindow` and
+      exclude it when counting remaining main windows.
+- [ ] `showMenuBarItem` runtime toggle doesn't re-run `applyActivationPolicy` (safe today only
+      because you can't be windowless while flipping it). Add `.onChange`.
+- [ ] `openMainWindow` raise targets `NSApp.keyWindow`, which may not exist yet — defer one
+      runloop or match by identifier.
+- [ ] **Multi-device dispatch test** — "device A never moves device B" holds today only because
+      there's one `session`; at [[012-multi-device]] add an integration test asserting a
+      foreign/not-connected UDID returns the error code and mutates no session.
+- [ ] **Docs owed before merge** — add the command-protocol section to `architecture.md` and the
+      AI-control entry to `features.md` (CLAUDE.md same-change rule; deferred only because the
+      feature isn't merged yet).
+- [ ] **`trailmate` CLI (step 12) + MCP shim** still deferred — every "via the CLI" acceptance
+      criterion is currently exercisable only over the raw socket (`nc -U`).
+
 ## Acceptance criteria
 
 - [ ] With AI control enabled, Claude Code can (via the CLI): list devices, teleport a chosen

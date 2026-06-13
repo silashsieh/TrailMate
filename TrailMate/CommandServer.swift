@@ -37,6 +37,13 @@ final class CommandServer: @unchecked Sendable {
     private var socketPath: String?
     private var clientFDs: Set<Int32> = []
 
+    // A legal command is well under 1 KiB; cap the per-connection read buffer so
+    // a client streaming newline-less bytes can't grow it without bound (OOM).
+    private static let maxLineBytes = 64 * 1024
+    // Upper bound a connection thread waits for a dispatched command before it
+    // returns a timeout — a wedged tunnel (TUNNEL_DOWN) must not park it forever.
+    private static let dispatchTimeout: DispatchTimeInterval = .seconds(15)
+
     init(appState: AppState) {
         self.appState = appState
     }
@@ -92,6 +99,11 @@ final class CommandServer: @unchecked Sendable {
             return
         }
 
+        // Owner-only (0700): the auth model is filesystem permissions. The parent
+        // dir is already user-private, but lock the socket node down too rather
+        // than rely on the dir + umask.
+        chmod(path, S_IRWXU)
+
         guard listen(fd, 4) == 0 else {
             lock.unlock()
             close(fd)
@@ -123,19 +135,20 @@ final class CommandServer: @unchecked Sendable {
         listenFD = -1
         let path = socketPath
         socketPath = nil
-        let clients = clientFDs
-        clientFDs.removeAll()
-        lock.unlock()
-
-        // Closing the listen fd unblocks the accept() in the loop, which then
-        // sees isRunning == false and exits its dedicated thread.
-        if fd >= 0 { close(fd) }
-        // shutdown() (not close) reliably wakes a read() blocked on a client fd
-        // without the fd-reuse race a bare close would invite; the connection
-        // thread then sees read() return 0/-1 and closes the fd itself.
-        for client in clients {
+        // shutdown() each live client *under the lock* to wake its blocked
+        // read() — but do NOT close or untrack them here. The connection thread
+        // is the sole closer (closeClient), gated on set membership, so close()
+        // and this shutdown() can't interleave into a close-then-reuse-then-
+        // shutdown race. shutdown doesn't free the fd, so it stays valid until
+        // the woken thread closes it.
+        for client in clientFDs {
             shutdown(client, SHUT_RDWR)
         }
+        lock.unlock()
+
+        // Closing the listen fd unblocks accept(); the loop sees isRunning ==
+        // false and exits its dedicated thread.
+        if fd >= 0 { close(fd) }
         if let path { unlink(path) }
         logEvent("AI control: stopped.")
     }
@@ -158,6 +171,11 @@ final class CommandServer: @unchecked Sendable {
                 close(clientFD)
                 return
             }
+            // Darwin raises SIGPIPE (fatal by default) on write() to a peer that
+            // already closed; SO_NOSIGPIPE turns that into an EPIPE return we
+            // handle in writeLine, so a client disconnecting can't crash the app.
+            var noSigPipe: Int32 = 1
+            setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
             // One blocking read loop per connection, off on a concurrent thread
             // so accept() can immediately return to listening.
             DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -169,10 +187,7 @@ final class CommandServer: @unchecked Sendable {
     // MARK: - Connection handling
 
     private func handleConnection(_ clientFD: Int32) {
-        defer {
-            untrack(clientFD)
-            close(clientFD)
-        }
+        defer { closeClient(clientFD) }
 
         writeLine(aiGreetingLine(), to: clientFD)
 
@@ -195,6 +210,15 @@ final class CommandServer: @unchecked Sendable {
                 let response = handle(line: line)
                 writeLine(response.line(), to: clientFD)
             }
+
+            // A client streaming bytes with no newline must not grow the buffer
+            // without bound (local OOM). Past the cap, reject and drop the
+            // connection — every legal command is far smaller.
+            if buffer.count > Self.maxLineBytes {
+                writeLine(CommandResponse.failure(code: "line_too_long",
+                    message: "command exceeds \(Self.maxLineBytes) bytes").line(), to: clientFD)
+                break
+            }
         }
     }
 
@@ -216,7 +240,12 @@ final class CommandServer: @unchecked Sendable {
                 box.store(response)
                 semaphore.signal()
             }
-            semaphore.wait()
+            // Bounded wait: ROUTE/CLEAR await the daemon, and a wedged tunnel
+            // (TUNNEL_DOWN is anticipated) could make that never return, parking
+            // this connection thread forever. The late signal/store is harmless.
+            if semaphore.wait(timeout: .now() + Self.dispatchTimeout) == .timedOut {
+                return .failure(code: "timeout", message: "command timed out")
+            }
             return box.take() ?? .failure(code: "internal_error", message: "dispatch produced no response")
         }
     }
@@ -238,9 +267,15 @@ final class CommandServer: @unchecked Sendable {
         return true
     }
 
-    private func untrack(_ fd: Int32) {
-        lock.lock(); defer { lock.unlock() }
-        clientFDs.remove(fd)
+    // The sole closer of a client fd. Closes only if the fd is still tracked, so
+    // it runs exactly once even when stop() has shutdown() the fd concurrently —
+    // both take the lock, so close() and stop()'s shutdown() can't interleave
+    // into a close-then-reuse-then-shutdown race.
+    private func closeClient(_ fd: Int32) {
+        lock.lock()
+        let wasTracked = clientFDs.remove(fd) != nil
+        lock.unlock()
+        if wasTracked { close(fd) }
     }
 
     // MARK: - Socket write
@@ -252,8 +287,13 @@ final class CommandServer: @unchecked Sendable {
             let written = bytes[offset...].withUnsafeBytes { raw in
                 write(fd, raw.baseAddress, raw.count)
             }
-            if written <= 0 { break }   // peer gone; abandon this connection
-            offset += written
+            if written > 0 { offset += written; continue }
+            // EINTR/EAGAIN are transient — retry rather than truncate the JSON
+            // line (which would corrupt the client's parse). SO_NOSIGPIPE makes
+            // a gone peer return EPIPE here instead of crashing the process.
+            if written < 0 && (errno == EINTR || errno == EAGAIN) { continue }
+            logEvent("AI control: response write abandoned (errno \(errno)).")
+            return
         }
     }
 

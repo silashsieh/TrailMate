@@ -292,6 +292,14 @@ final class AppState {
         await session.disconnect()
         connectedUDID = nil
     }
+
+    // Quit cleanup: stop the AI command socket (unlinks ai.sock) before the
+    // device disconnect, so a leftover socket node isn't left behind at quit.
+    // stop() is idempotent, so this is safe whether or not AI control was on.
+    func prepareForQuit() async {
+        commandServer.stop()
+        await disconnect()
+    }
     func teleport(to coordinate: CLLocationCoordinate2D) { session.teleport(to: coordinate) }
     func clearLocation() async { await session.clearLocation() }
     func selectFrom(_ completion: MKLocalSearchCompletion) async { await session.selectFrom(completion) }
@@ -340,6 +348,15 @@ final class AppState {
     // not-connected device is an expected, machine-readable outcome the agent
     // must be able to branch on, not an exception that drops the connection.
     func dispatch(_ command: Command) async -> CommandResponse {
+        // Ensure discovery has run so DEVICES isn't empty and the unknown-vs-not-
+        // connected labeling is accurate even in windowless mode, where the GUI
+        // device picker may never have triggered a scan. DEVICES forces a fresh
+        // scan (hot-plug); other verbs only need a one-time populate.
+        if case .devices = command {
+            await discovery.scan()
+        } else if !discovery.hasScanned {
+            await discovery.scan()
+        }
         switch command {
         case .devices:
             return CommandResponse.success(devicesDocument())
@@ -505,7 +522,7 @@ final class AppState {
     }
 
     private func devicesDocument() -> JSONValue {
-        let entries: [JSONValue] = discovery.devices.map { device in
+        var entries: [JSONValue] = discovery.devices.map { device in
             .object([
                 "udid": .string(device.udid),
                 "name": .string(device.name),
@@ -513,7 +530,17 @@ final class AppState {
                 "connected": .bool(connectedUDID == device.udid && session.connectionStatus.isConnected)
             ])
         }
+        // Surface the connected device even if it's absent from the discovery
+        // snapshot, mirroring statusDocument so DEVICES never hides it.
+        let seen = Set(discovery.devices.map { $0.udid })
+        if let udid = connectedUDID, !seen.contains(udid) {
+            entries.append(.object([
+                "udid": .string(udid),
+                "connected": .bool(session.connectionStatus.isConnected)
+            ]))
+        }
         return .object([
+            "protocol": .int(AIProtocol.version),
             "devices": .array(entries)
         ])
     }

@@ -5,7 +5,9 @@ import Foundation
 // world-writable, which is the whole auth model: filesystem permissions, no
 // network port (epic 019 — the Unix socket has no browser-reachable attack
 // surface a TCP port would).
-enum SocketPath {
+// nonisolated: pure path computation called from CommandServer's background
+// threads (default main-actor isolation would otherwise trap it off-main).
+nonisolated enum SocketPath {
     enum Error: LocalizedError {
         case unresolvedSupportDirectory
         case pathTooLong(length: Int, max: Int)

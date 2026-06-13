@@ -24,7 +24,13 @@ import os
 // Every command hops to MainActor and calls appState.dispatch(), which routes
 // through the *same* session/AppState methods the GUI uses so every move passes
 // the SimulationActor.emit() chokepoint (noise + recording).
-final class CommandServer: @unchecked Sendable {
+// `nonisolated` is load-bearing: this project builds with default main-actor
+// isolation, so without it the class and its closures would be @MainActor and
+// trap at runtime when the accept/connection threads run off-main — e.g. the
+// write() closure in writeLine fired SIGTRAP on the first client connect. This
+// is a background-thread server; it only touches MainActor via explicit
+// `Task { @MainActor in }` hops (dispatch, addLog).
+nonisolated final class CommandServer: @unchecked Sendable {
     private let appState: AppState
     private let log = Logger(subsystem: "com.harry.trailmate", category: "CommandServer")
 
@@ -308,7 +314,7 @@ final class CommandServer: @unchecked Sendable {
 // blocked connection thread. The semaphore establishes the happens-before edge
 // (store on MainActor → signal → wait → take), so a plain lock around the value
 // is enough; @unchecked Sendable documents that the synchronization is manual.
-private final class ResultBox: @unchecked Sendable {
+nonisolated private final class ResultBox: @unchecked Sendable {
     private let lock = NSLock()
     private var value: CommandResponse?
 

@@ -2,7 +2,7 @@
 type: epic
 id: 019
 title: AI tool integration — command layer, CLI, MCP
-status: open
+status: in-progress
 milestone: v2.0.0
 issue:
 opened: 2026-06-10

@@ -27,6 +27,10 @@ enum PythonBundle {
         rootURL.appendingPathComponent("tm_tunnel.sh")
     }
 
+    nonisolated static var tunneldWrapperScript: URL {
+        rootURL.appendingPathComponent("tm_tunneld.sh")
+    }
+
     nonisolated static var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PYTHONHOME"] = pythonHome.path

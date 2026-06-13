@@ -12,11 +12,36 @@ import UniformTypeIdentifiers
 // unowned to avoid a retain cycle.
 @Observable
 @MainActor
-final class DeviceSession {
+final class DeviceSession: Identifiable {
     unowned let manager: AppState
+
+    // Stable identity for the session collection + the sidebar switcher's
+    // selection. Not the UDID: an unbound (never-connected) slot has no UDID
+    // yet, and two slots could briefly target the same device. Routing
+    // correctness keys on `connectedUDID` (below), never on this id or list
+    // position.
+    let id = UUID()
 
     // Connection
     var connectionStatus: ConnectionStatus = .disconnected
+
+    // The device this slot will connect to — the per-slot picker value (moved
+    // off the manager so each slot targets its own device). Retained across a
+    // disconnect so a reconnect is one click.
+    var selectedDeviceUDID: String?
+
+    // The device actually connected, or nil when disconnected. Snapshotted from
+    // `selectedDeviceUDID` only on a *successful* connect, so AI dispatch can
+    // match a command's UDID against the live connection without reading the
+    // GUI's mutable picker selection. This is the structural routing key — the
+    // session that owns this UDID is the only one a UDID-scoped command reaches.
+    private(set) var connectedUDID: String?
+
+    // Last-known device name, for the switcher row + menu bar. Resolved from
+    // discovery at connect; retained across a disconnect so the row still names
+    // the device it was bound to.
+    var deviceName: String?
+
     // RSD address/port are resolved from the shared TunnelBroker on connect; not
     // user-facing inputs.
     private var rsdAddress: String = ""
@@ -65,11 +90,14 @@ final class DeviceSession {
 
     func connect() async {
         guard connectionStatus != .connecting else { return }
-        guard let udid = manager.selectedDeviceUDID, !udid.isEmpty else {
+        guard let udid = selectedDeviceUDID, !udid.isEmpty else {
             manager.addLog("Pick a device first.")
             connectionStatus = .error("No device selected")
             return
         }
+        // Resolve the display name now so the switcher row names the device
+        // while connecting; keep the prior name if discovery doesn't know it.
+        deviceName = manager.discovery.devices.first { $0.udid == udid }?.name ?? deviceName
 
         #if DEBUG
         // UI-test mock: skip the tunnel (admin prompt) and daemon entirely so
@@ -78,10 +106,12 @@ final class DeviceSession {
             let backend = MockSimulationBackend()
             daemonBridge = backend
             connectionStatus = .connected
+            connectedUDID = udid
             manager.addLog("Connected (mock backend — UI test).")
             await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
             await sim.attach(backend: backend)
-            await sim.startJoystick(baseSpeed: manager.effectiveBaseSpeedMPS)
+            // Joystick arming is centralized in AppState.syncActiveJoystick()
+            // (selected device only); every connect path calls it after.
             return
         }
         #endif
@@ -92,64 +122,95 @@ final class DeviceSession {
         manager.addLog("Authenticating tunnel broker for device …\(udid.suffix(8))")
         do {
             // Shared broker: ensureRunning() prompts once per session (idempotent
-            // thereafter); the RSD endpoint is resolved fresh because tunneld
-            // reassigns address+port on every (re)establishment (epic 012 spike).
+            // thereafter).
             try await manager.tunnelBroker.ensureRunning()
-            let info = try await manager.tunnelBroker.rsdEndpoint(udid: udid)
-            rsdAddress = info.address
-            rsdPort = String(info.port)
-            manager.addLog("Tunnel up: [\(info.address)]:\(info.port)")
         } catch {
             connectionStatus = .error(error.localizedDescription)
             manager.addLog("Tunnel failed: \(error.localizedDescription)")
             return
         }
 
-        manager.addLog("Connecting to [\(rsdAddress)]:\(rsdPort)...")
+        // Connect with retry. When a second device is freshly added, tunneld is
+        // still settling its tunnel and keeps reassigning the device's RSD
+        // address+port (they're ephemeral). A daemon spawned against an address
+        // that then rotates wedges at the DVT handshake. So each attempt
+        // re-queries a *settled* endpoint (rsdEndpoint waits for stability), and
+        // on failure we fully release the (possibly wedged) daemon — freeing the
+        // device's DVT session so it can't block the next try — then pause to let
+        // tunneld settle and the device reclaim the session before retrying.
+        let maxAttempts = 3
+        var lastError: Error?
+        for attempt in 1...maxAttempts {
+            let info: TunnelBroker.TunnelInfo
+            do {
+                info = try await manager.tunnelBroker.rsdEndpoint(udid: udid)
+            } catch {
+                // No tunnel for this device at all — not a transient; stop.
+                connectionStatus = .error(error.localizedDescription)
+                manager.addLog("Tunnel failed: \(error.localizedDescription)")
+                return
+            }
+            rsdAddress = info.address
+            rsdPort = String(info.port)
+            let suffix = attempt > 1 ? " (attempt \(attempt)/\(maxAttempts))" : ""
+            manager.addLog("Connecting to [\(rsdAddress)]:\(rsdPort)…\(suffix)")
 
-        let bridge = DaemonBridge()
-        self.daemonBridge = bridge
-
-        // Consume out-of-band events (daemon death, tunnel down). The stream is
-        // Sendable so the iterator runs off MainActor; each event hops back
-        // here to mutate UI-bound state. Cancelled in disconnect/teardown.
-        eventsTask?.cancel()
-        let stream = bridge.events
-        eventsTask = Task { [weak self] in
-            for await event in stream {
-                guard let self else { return }
-                await MainActor.run {
-                    switch event {
-                    case .unexpectedExit(let status, let reason):
-                        self.handleDaemonExit(status: status, reason: reason)
-                    case .tunnelDown(let line):
-                        self.handleTunnelDown(line: line)
+            let bridge = DaemonBridge()
+            // Consume out-of-band events (daemon death, tunnel down) for THIS
+            // bridge. The stream is Sendable so the iterator runs off MainActor;
+            // each event hops back here to mutate UI-bound state.
+            let stream = bridge.events
+            let attemptEvents = Task { [weak self] in
+                for await event in stream {
+                    guard let self else { return }
+                    await MainActor.run {
+                        switch event {
+                        case .unexpectedExit(let status, let reason):
+                            self.handleDaemonExit(status: status, reason: reason)
+                        case .tunnelDown(let line):
+                            self.handleTunnelDown(line: line)
+                        }
                     }
+                }
+            }
+
+            do {
+                try await bridge.start(rsdAddress: rsdAddress, rsdPort: rsdPort)
+                // Success — commit this bridge as the live one.
+                eventsTask?.cancel()
+                eventsTask = attemptEvents
+                daemonBridge = bridge
+                connectionStatus = .connected
+                connectedUDID = udid
+                manager.addLog("Connected — ready for commands.")
+                await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
+                await sim.attach(backend: bridge)
+                // Joystick arming is centralized in AppState.syncActiveJoystick()
+                // (selected device only); every connect path calls it after.
+                if simState.simulatedCoordinate == nil {
+                    manager.addLog("Long-press the map to set a starting location")
+                }
+                return
+            } catch {
+                lastError = error
+                attemptEvents.cancel()
+                // start() already terminates+SIGKILLs the daemon on failure;
+                // stop() is a no-op then but harmless, and covers any path that
+                // left the process alive. Releases the device's DVT session.
+                await bridge.stop()
+                manager.addLog("Connect attempt \(attempt) failed: \(error.localizedDescription)")
+                if attempt < maxAttempts {
+                    // Let tunneld finish settling and the device reclaim its DVT
+                    // session before re-querying a fresh endpoint.
+                    try? await Task.sleep(for: .seconds(3))
                 }
             }
         }
 
-        do {
-            try await bridge.start(rsdAddress: rsdAddress, rsdPort: rsdPort)
-            connectionStatus = .connected
-            manager.addLog("Connected — ready for commands.")
-            await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
-            await sim.attach(backend: bridge)
-            await sim.startJoystick(baseSpeed: manager.effectiveBaseSpeedMPS)
-            if simState.simulatedCoordinate == nil {
-                manager.addLog("Joystick armed (\(manager.transportLabel) speed) — long-press the map to set a starting location")
-            } else {
-                manager.addLog("Joystick armed (\(manager.transportLabel) speed)")
-            }
-        } catch {
-            connectionStatus = .error(error.localizedDescription)
-            manager.addLog("Connection failed: \(error.localizedDescription)")
-            eventsTask?.cancel()
-            eventsTask = nil
-            self.daemonBridge = nil
-            // Leave the broker running — it's shared; a retry just re-queries the
-            // (possibly refreshed) endpoint.
-        }
+        connectionStatus = .error(lastError?.localizedDescription ?? "Connection failed")
+        manager.addLog("Connection failed after \(maxAttempts) attempts.")
+        daemonBridge = nil
+        // Leave the broker running — it's shared across devices.
     }
 
     func disconnect() async {
@@ -165,7 +226,26 @@ final class DeviceSession {
         // (AppState.prepareForQuit). The daemon's QUIT/CLEAR ran above over the
         // still-live tunnel.
         connectionStatus = .disconnected
+        connectedUDID = nil
         manager.addLog("Disconnected.")
+    }
+
+    // MARK: - Joystick arming (centralized: selected device only)
+
+    // Arm or disarm this session's joystick engine. AppState.syncActiveJoystick()
+    // is the single caller; it keeps exactly the selected, connected session
+    // armed so one physical controller drives one device. A disarmed engine
+    // contributes no velocity even though its actor still reads the controller,
+    // so non-selected devices never move from joystick input.
+    func setJoystickArmed(_ armed: Bool) {
+        let speed = manager.effectiveBaseSpeedMPS
+        Task {
+            if armed {
+                await sim.startJoystick(baseSpeed: speed)
+            } else {
+                await sim.stopJoystick()
+            }
+        }
     }
 
     // MARK: - Teleport
@@ -612,6 +692,7 @@ final class DeviceSession {
     private func teardownLiveState(statusMessage: String) {
         eventsTask?.cancel(); eventsTask = nil
         daemonBridge = nil
+        connectedUDID = nil
         // Detach this device's sim; leave the shared broker up (tunneld may
         // re-establish the tunnel, and other devices still need it).
         Task { await sim.detach() }
@@ -660,3 +741,18 @@ final class DeviceSession {
         return "Stop \(index)"
     }
 }
+
+#if DEBUG
+extension DeviceSession {
+    // Test seam (same file, so it can set the private(set) connectedUDID): mark
+    // this session connected to a UDID without a tunnel or daemon, so
+    // CommandDispatchTests can prove dispatch routes a command to exactly the
+    // named device's session. No backend attached — teleport's integrator move
+    // doesn't need one (emit tolerates a nil backend).
+    func bindConnectedForTesting(udid: String) {
+        selectedDeviceUDID = udid
+        connectedUDID = udid
+        connectionStatus = .connected
+    }
+}
+#endif

@@ -29,9 +29,22 @@ private struct SidebarView: View {
 
     var body: some View {
         List {
-            Section("Connection") {
+            Section("Devices") {
+                // The switcher: one compact row per session, tap to select which
+                // device the control surface (route/playback/joystick) + map
+                // planning target. Add Device appends a slot.
+                ForEach(appState.sessions) { session in
+                    DeviceSwitcherRow(session: session)
+                }
+                Button {
+                    appState.addSession()
+                } label: {
+                    Label("Add Device", systemImage: "plus")
+                }
+
+                // Connection controls for the *selected* session. The row above
+                // shows its status; this is the action surface.
                 if appState.connectionStatus.isConnected {
-                    StatusRow()
                     Button("Disconnect") {
                         Task { await appState.disconnect() }
                     }
@@ -1052,12 +1065,19 @@ private struct DevicePickerArea: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        @Bindable var appState = appState
+        // Bind the picker to the selected session's own target UDID (the per-slot
+        // picker value), not a manager-global one.
+        @Bindable var session = appState.selectedSession
         let discovery = appState.discovery
+        // Hide devices another session is already connected to, so two slots
+        // can't fight over one device.
+        let available = discovery.devices.filter { device in
+            !appState.sessions.contains { $0.id != session.id && $0.connectedUDID == device.udid }
+        }
 
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Devices")
+                Text("Device")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -1074,10 +1094,10 @@ private struct DevicePickerArea: View {
                 .help("Rescan")
             }
 
-            if !discovery.devices.isEmpty {
-                Picker("Device", selection: $appState.selectedDeviceUDID) {
+            if !available.isEmpty {
+                Picker("Device", selection: $session.selectedDeviceUDID) {
                     Text("Select…").tag(String?.none)
-                    ForEach(discovery.devices) { device in
+                    ForEach(available) { device in
                         Text(device.displayLabel).tag(Optional(device.udid))
                     }
                 }
@@ -1096,8 +1116,8 @@ private struct DevicePickerArea: View {
                 .foregroundStyle(.secondary)
             }
 
-            if let udid = appState.selectedDeviceUDID,
-               discovery.devices.first(where: { $0.udid == udid }) != nil {
+            if let udid = session.selectedDeviceUDID,
+               available.first(where: { $0.udid == udid }) != nil {
                 Text("Connect will request admin access to open the RSD tunnel.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1115,7 +1135,7 @@ private struct ConnectionButton: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        let noDevice = (appState.selectedDeviceUDID ?? "").isEmpty
+        let noDevice = (appState.selectedSession.selectedDeviceUDID ?? "").isEmpty
         let isConnecting = appState.connectionStatus == .connecting
         Button {
             Task { await appState.connect() }
@@ -1132,16 +1152,75 @@ private struct ConnectionButton: View {
     }
 }
 
-private struct StatusRow: View {
+// One row in the device switcher. Tap selects which device the control surface
+// and map planning target; a color swatch ties the row to that device's marker
+// and route on the map. Context menu disconnects this specific session or
+// removes its slot (the collection never empties).
+private struct DeviceSwitcherRow: View {
+    let session: DeviceSession
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        HStack {
-            Circle()
-                .fill(appState.connectionStatus.isConnected ? Color.green : .gray)
-                .frame(width: 10, height: 10)
-            Text("Connected")
-                .font(.callout)
+        let isSelected = session.id == appState.selectedSessionID
+        Button {
+            appState.selectedSessionID = session.id
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(appState.color(for: session))
+                    .frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(session.deviceName ?? String(localized: "No device"))
+                        .font(.callout)
+                    Text(statusText)
+                        .font(.caption2)
+                        .foregroundStyle(statusColor)
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        .contextMenu {
+            if session.connectionStatus.isConnected {
+                Button("Disconnect") {
+                    Task {
+                        await session.disconnect()
+                        appState.syncActiveJoystick()
+                    }
+                }
+            }
+            if appState.sessions.count > 1 {
+                Button("Remove", role: .destructive) {
+                    appState.removeSession(session)
+                }
+            }
+        }
+    }
+
+    private var statusText: String {
+        switch session.connectionStatus {
+        case .disconnected:
+            return session.selectedDeviceUDID == nil
+                ? String(localized: "Not configured")
+                : String(localized: "Disconnected")
+        case .connecting: return String(localized: "Connecting…")
+        case .connected: return String(localized: "Connected")
+        case .error(let message): return String(localized: "Error: \(message)")
+        }
+    }
+
+    private var statusColor: Color {
+        switch session.connectionStatus {
+        case .connected: return .green
+        case .error: return .orange
+        default: return .secondary
         }
     }
 }
@@ -1299,9 +1378,27 @@ private struct MapArea: View {
             // Drawing claims the drag for the stroke; zoom stays live (scroll/pinch
             // don't collide with a one-button drag), pan returns when drawing ends.
             Map(position: $cameraPosition, interactionModes: isDrawingRoute ? .zoom : .all) {
-                if !appState.routeCoordinates.isEmpty {
-                    MapPolyline(coordinates: appState.routeCoordinates)
-                        .stroke(.blue, lineWidth: 4)
+                // Every session's route + simulated dot, color-coded so multiple
+                // devices are distinguishable on the shared map. The selected
+                // session is emphasized (thicker line, larger dot+ring); its
+                // planning markers (start/stop/end below) belong to it alone.
+                ForEach(Array(appState.sessions.enumerated()), id: \.element.id) { index, session in
+                    let color = AppState.sessionPalette[index % AppState.sessionPalette.count]
+                    let isSelected = session.id == appState.selectedSessionID
+
+                    if !session.routeCoordinates.isEmpty {
+                        MapPolyline(coordinates: session.routeCoordinates)
+                            .stroke(color.opacity(isSelected ? 1.0 : 0.7), lineWidth: isSelected ? 4 : 3)
+                    }
+
+                    if let coord = session.simState.simulatedCoordinate {
+                        Annotation("", coordinate: coord) {
+                            Circle()
+                                .fill(color)
+                                .frame(width: isSelected ? 16 : 12, height: isSelected ? 16 : 12)
+                                .overlay(Circle().stroke(.white, lineWidth: isSelected ? 3 : 2))
+                        }
+                    }
                 }
 
                 if strokeCoords.count >= 2 {
@@ -1326,15 +1423,6 @@ private struct MapArea: View {
                 if let to = appState.toCoordinate {
                     Marker("End", systemImage: "mappin", coordinate: to)
                         .tint(.orange)
-                }
-
-                if let coord = appState.simState.simulatedCoordinate {
-                    Annotation("", coordinate: coord) {
-                        Circle()
-                            .fill(.red)
-                            .frame(width: 14, height: 14)
-                            .overlay(Circle().stroke(.white, lineWidth: 2))
-                    }
                 }
 
                 if let dest = pendingDestination {

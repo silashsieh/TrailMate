@@ -59,11 +59,17 @@ Sequencing (each step shippable):
 1. **Sessionize the singletons** — `DeviceSession`/`DeviceManager` with a collection of size 1;
    behavior identical to today. Extract a `RoutingService` protocol while in the route code
    (D4 already names it; MapKit stays the default kernel — its per-Mac throttle is the
-   multi-device risk that would trigger self-hosted OSRM later).
+   multi-device risk that would trigger self-hosted OSRM later). ✅ **Done** (Stage A).
 2. **N-up the lifecycle** — tunnel broker (one prompt, N tunnels), per-device daemon,
-   UDID-keyed reconnect, sleep teardown for all sessions.
+   UDID-keyed reconnect, sleep teardown for all sessions. ✅ **Done** (B1).
 3. **N-up the UI** — markers/route lines per device, sidebar switcher, per-device status.
-4. **Device-addressed command layer** — lands as [[019-ai-integration]].
+   ✅ **Implemented** (`feat/multi-device-ui`): `AppState` owns `[DeviceSession]` +
+   `selectedSessionID`; forwarding accessors resolve to the selected session; the map iterates
+   all sessions for color-coded routes + dots; a compact sidebar switcher (+ Add Device /
+   Remove) selects the active device; the joystick arms on the selected, connected session only
+   (`syncActiveJoystick`); `dispatch` resolves the target session by `connectedUDID`
+   (`CommandDispatchTests` proves A-never-moves-B). Pending Harry's on-device verify → release.
+4. **Device-addressed command layer** — lands as [[019-ai-integration]]. ✅ **Done.**
 
 New top correctness risk: **device-routing** — a command for device A must reach device A's
 daemon. Keep every path UDID-keyed end to end; sending A's coordinate to B's DVT handle is a

@@ -47,8 +47,11 @@ final class TrailMateUITests: XCTestCase {
     }
 
     // Connect to the mock backend (requires launching with
-    // --uitest-mock-connection): pick "Mock iPhone", click Connect, wait for
-    // the status row. No admin prompt — the tunnel and daemon are mocked out.
+    // --uitest-mock-connection): pick "Mock iPhone", click Connect, wait for the
+    // connected state. The device switcher's connected gate is the Disconnect
+    // button (shown only when the selected session is connected) — more robust
+    // than the row's status caption, which lives inside the row Button. No admin
+    // prompt — the tunnel and daemon are mocked out.
     private func connectMockDevice(in window: XCUIElement) {
         let picker = window.popUpButtons.firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
@@ -59,7 +62,7 @@ final class TrailMateUITests: XCTestCase {
         let connect = window.buttons["Connect"]
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
         connect.click()
-        XCTAssertTrue(staticText(withValue: "Connected", in: window).waitForExistence(timeout: 10))
+        XCTAssertTrue(window.buttons["Disconnect"].waitForExistence(timeout: 10))
     }
 
     // The Wander sheet is normally reached via a connected-only map
@@ -77,7 +80,7 @@ final class TrailMateUITests: XCTestCase {
         app.launch()
         let window = app.windows["TrailMate"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
-        XCTAssertTrue(window.staticTexts["Connection"].exists)
+        XCTAssertTrue(window.staticTexts["Devices"].exists)
         // Exists but stays untouched: clicking Connect raises an admin dialog.
         XCTAssertTrue(window.buttons["Connect"].exists)
     }

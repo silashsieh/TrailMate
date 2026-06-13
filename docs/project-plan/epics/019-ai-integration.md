@@ -61,9 +61,16 @@ without bypassing the simulation core. Off by default; zero attack surface when 
 
 ## Open questions — answered at planning (2026-06-13)
 
-- **Command granularity** → v1 = `DEVICES`, `TELEPORT <udid>`, `ROUTE <udid>`,
-  `PLAY`/`PAUSE`/`STOP`/`SEEK <udid>`, `STATUS`, `CLEAR`. Defer `WANDER` and saved/hand-drawn
-  playback-by-name to a follow-up.
+- **Command granularity** → v1 = `DEVICES`, `CONNECT <udid>`, `DISCONNECT <udid>`,
+  `TELEPORT <udid>`, `ROUTE <udid>`, `PLAY`/`PAUSE`/`STOP`/`SEEK <udid>`, `STATUS`, `CLEAR`.
+  Defer `WANDER` and saved/hand-drawn playback-by-name to a follow-up.
+- **`CONNECT` is async-ack (human-gated until B1).** Connecting triggers the sudo admin
+  prompt + tunnel + daemon — slower than the socket's dispatch timeout and not something an
+  agent can authorize — so `CONNECT` resolves the UDID against discovery, kicks off the
+  connect, and returns `{state:"connecting"}` immediately; the agent polls `STATUS` →
+  `connection.state` (`connecting`→`connected`/`error`). `DISCONNECT` is awaited (fast). Once
+  [[012-multi-device]]'s `tunneld` broker lands, the prompt disappears and `CONNECT` becomes
+  fully autonomous — no change to the verb, just the tunnel layer beneath `connect()`.
 - **`status` shape** → one all-devices document with explicit per-device state (so
   "running-but-device-not-connected" is unambiguous and machine-readable).
 - **Protocol versioning** → a `VERSION` integer + greeting line on connect (not versioned

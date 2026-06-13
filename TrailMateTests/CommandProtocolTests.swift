@@ -46,6 +46,14 @@ struct CommandProtocolTests {
         #expect(Command.parse("CLEAR dev") == .success(.clear(udid: "dev")))
     }
 
+    @Test func parsesConnectDisconnect() {
+        #expect(Command.parse("CONNECT 00008110-0005442826C3801E")
+            == .success(.connect(udid: "00008110-0005442826C3801E")))
+        #expect(Command.parse("DISCONNECT dev") == .success(.disconnect(udid: "dev")))
+        #expect(Command.parse("CONNECT") == .failure(.missingArguments(verb: "CONNECT")))
+        #expect(Command.parse("DISCONNECT") == .failure(.missingArguments(verb: "DISCONNECT")))
+    }
+
     @Test func parsesSeek() {
         #expect(Command.parse("SEEK dev 0.5") == .success(.seek(udid: "dev", progress: 0.5)))
     }

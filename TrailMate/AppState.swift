@@ -418,6 +418,30 @@ final class AppState {
                 await self.session.clearLocation()
                 return CommandResponse.success()
             }
+
+        case .connect(let udid):
+            guard discovery.devices.contains(where: { $0.udid == udid }) else {
+                return CommandResponse.failure(code: "unknown_device",
+                    message: "no discovered device with UDID \(udid) (try DEVICES)")
+            }
+            if connectedUDID == udid, session.connectionStatus.isConnected {
+                return CommandResponse.success(.object(["state": .string("connected"), "udid": .string(udid)]))
+            }
+            // Connecting triggers the admin (sudo) prompt + tunnel + daemon —
+            // human-gated and slower than the socket's dispatch timeout — so kick
+            // it off and acknowledge immediately; the agent polls STATUS for the
+            // realized state (connection.state → connecting → connected/error).
+            selectedDeviceUDID = udid
+            Task { await connect() }
+            return CommandResponse.success(.object(["state": .string("connecting"), "udid": .string(udid)]))
+
+        case .disconnect(let udid):
+            guard connectedUDID == udid else {
+                return CommandResponse.failure(code: "not_connected",
+                    message: "device \(udid) is not connected")
+            }
+            await disconnect()
+            return CommandResponse.success(.object(["state": .string("disconnected"), "udid": .string(udid)]))
         }
     }
 
@@ -494,8 +518,29 @@ final class AppState {
 
         return .object([
             "protocol": .int(AIProtocol.version),
+            "connection": connectionStateObject(),
             "devices": .array(entries)
         ])
+    }
+
+    // The active session's connection lifecycle, so an agent that issued CONNECT
+    // can poll for the result (connecting → connected, or error with a message)
+    // rather than inferring it from the per-device `connected` flag alone.
+    private func connectionStateObject() -> JSONValue {
+        let state: String
+        var error: String?
+        switch session.connectionStatus {
+        case .disconnected: state = "disconnected"
+        case .connecting: state = "connecting"
+        case .connected: state = "connected"
+        case .error(let message): state = "error"; error = message
+        }
+        // connectedUDID is set only on success; while connecting/errored, the
+        // target is the one we're attempting (selectedDeviceUDID).
+        var fields: [String: JSONValue] = ["state": .string(state)]
+        if let udid = connectedUDID ?? selectedDeviceUDID { fields["udid"] = .string(udid) }
+        if let error { fields["error"] = .string(error) }
+        return .object(fields)
     }
 
     private func deviceStatusEntry(udid: String, name: String?) -> JSONValue {

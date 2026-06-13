@@ -30,6 +30,8 @@ nonisolated enum Command: Equatable {
     case stop(udid: String)
     case clear(udid: String)
     case seek(udid: String, progress: Double)
+    case connect(udid: String)
+    case disconnect(udid: String)
 
     // A plain lat/lon pair. Not CLLocationCoordinate2D so this layer stays
     // Foundation-only and trivially Equatable for tests.
@@ -109,12 +111,14 @@ nonisolated extension Command {
             }
             return .success(.route(udid: udid, coordinates: coords))
 
-        case "PLAY", "PAUSE", "STOP", "CLEAR":
+        case "PLAY", "PAUSE", "STOP", "CLEAR", "CONNECT", "DISCONNECT":
             guard let udid = args.first else { return .failure(.missingArguments(verb: upper)) }
             switch upper {
             case "PLAY": return .success(.play(udid: udid))
             case "PAUSE": return .success(.pause(udid: udid))
             case "STOP": return .success(.stop(udid: udid))
+            case "CONNECT": return .success(.connect(udid: udid))
+            case "DISCONNECT": return .success(.disconnect(udid: udid))
             default: return .success(.clear(udid: udid))
             }
 

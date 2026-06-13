@@ -5,7 +5,9 @@ on:
 
 jobs:
   release:
-    runs-on: macos-26
+    # Self-hosted runner (same as CI in swift.yml) — GitHub-hosted macOS runners
+    # are billed and were blocked by an account spending limit.
+    runs-on: [self-hosted, macOS, ARM64]
     permissions:
       contents: write
     steps:

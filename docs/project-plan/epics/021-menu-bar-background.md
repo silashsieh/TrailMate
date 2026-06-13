@@ -2,11 +2,11 @@
 type: epic
 id: 021
 title: Menu bar presence & background mode
-status: in-progress
+status: done
 milestone: v2.0.0
 issue:
 opened: 2026-06-10
-shipped:
+shipped: 2026-06-14
 tags: [ui, lifecycle]
 ---
 

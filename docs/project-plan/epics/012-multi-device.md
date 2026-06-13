@@ -2,11 +2,11 @@
 type: epic
 id: 012
 title: Simultaneous multi-device connection
-status: in-progress
+status: done
 milestone: v2.0.0
 issue: 9
 opened: 2026-05-29
-shipped:
+shipped: 2026-06-14
 tags: [architecture]
 ---
 

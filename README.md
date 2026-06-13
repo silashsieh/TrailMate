@@ -16,6 +16,8 @@ TrailMate offers three ways to control the device's location, all available at t
 
 These coexist rather than being mutually exclusive: teleport to a starting point, play a route, then grab the joystick to deviate from it — no mode switch required.
 
+TrailMate can drive **several paired iPhones at once**: a sidebar switcher picks the active device, the map shows every device's route and position color-coded, and the joystick controls whichever device is selected. One admin prompt covers all of them. (Designed for a few devices, not dozens.)
+
 The Mac acts as a controller; the iPhone reports the simulated coordinates to every app on the device through standard CoreLocation. No app is installed on the iPhone, and no jailbreak is required. The Python runtime ships bundled inside the app, so there's nothing to install on the Mac side either.
 
 The interface is available in English and Traditional Chinese (繁體中文); it follows your system language by default, with a Language picker in Settings (⌘,) to override it.

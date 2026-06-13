@@ -7,10 +7,11 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Connection & device discovery
 
 - USB and Wi-Fi devices enumerated by `PythonDaemon/tm_list_devices.py` (uses `usbmux.list_devices` + `bonjour.browse_remoted` from pymobiledevice3). For each discovered UDID the lister opens a lockdown client (`autopair=False`) to read `DeviceName`, so the picker labels devices with their iOS-set name; falls back to the UDID suffix when lockdown isn't reachable (unpaired or pure-remoted only).
-- Sidebar device picker; selecting a device kicks off the connection flow — no more pasting RSD address/port by hand.
-- `TunnelSupervisor` opens the privileged `pymobiledevice3 lockdown start-tunnel` via `osascript … with administrator privileges`; one auth dialog per session. RSD address/port returned via a per-call control file.
-- macOS sleep (`NSWorkspace.willSleepNotification`) triggers a clean disconnect, since the DVT session can't survive sleep.
-- Tunnel-down / daemon-exit callbacks tear live state down automatically — no polling heartbeat, no stale "connected" state.
+- **Simultaneous multi-device (epic 012).** Connect and drive several paired iPhones at once. A sidebar device *switcher* lists one row per device (color-coded, with status); selecting a row binds the shared control surface — route planner, playback bar, joystick — to that device. "Add Device" opens another slot. The map shows every connected device's route + simulated dot in its own color, with the selected device emphasized. Designed for *a few* devices (each is an independent 20 Hz loop + daemon), not dozens.
+- `TunnelBroker` opens one privileged `pymobiledevice3 remote tunneld` (`PythonDaemon/tm_tunneld.sh`) via `osascript … with administrator privileges` — **one auth dialog per session, N tunnels**, with hot-plug and promptless sleep/wake recovery. Each device's RSD endpoint is resolved fresh from tunneld's HTTP API at connect (the address+port are ephemeral — tunneld reassigns them on every (re)establishment), keyed by the stable UDID.
+- Each connected device runs its own `tm_daemon.py`; commands route to a device by its bound UDID end-to-end, so a command for one device never reaches another.
+- macOS sleep (`NSWorkspace.willSleepNotification`) triggers a clean disconnect of every device, since the DVT session can't survive sleep.
+- Tunnel-down / daemon-exit callbacks tear the affected device's live state down automatically — no polling heartbeat, no stale "connected" state.
 
 ### Map view
 
@@ -72,7 +73,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Joystick
 
-- Arms on connect — no Start button. The engine stays inert (no SETQ, no marker) until a position seeds the integrator — the restored launch position (broadcast at attach) or, with restore off, the first teleport; from then on, stick input drives the simulated location at the configured base speed.
+- Arms on connect — no Start button — and only on the **selected** device, so the one physical controller / WASD / virtual stick drives one device at a time (switching the selected device re-homes the joystick). The engine stays inert (no SETQ, no marker) until a position seeds the integrator — the restored launch position (broadcast at attach) or, with restore off, the first teleport; from then on, stick input drives the simulated location at the configured base speed.
 - Hardware game controller via `GameController.framework` (MFi / DualShock / Xbox / Joy-Con; hot-pluggable).
 - On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback.
 - WASD + arrow-key input on the focused map view.

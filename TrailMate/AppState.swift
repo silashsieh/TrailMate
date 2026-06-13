@@ -69,22 +69,34 @@ struct SavedWaypoint: Codable, Identifiable {
 @Observable
 @MainActor
 final class AppState {
-    // The active device session. Implicitly-unwrapped because it back-references
-    // self and so must be built in init() after the stored properties exist;
-    // assigned once and never nil thereafter.
-    private(set) var session: DeviceSession!
+    // The device sessions — one per connectable slot. Always ≥ 1: launch creates
+    // a single unbound session (it holds the restored red dot + pre-connect route
+    // planning, like the old eager `session`), and removeSession() never empties
+    // the collection. Command routing keys on each session's connectedUDID, never
+    // on a position in this array.
+    private(set) var sessions: [DeviceSession] = []
 
-    // The UDID the active session is currently connected to, or nil when
-    // disconnected. Snapshotted from selectedDeviceUDID *after* a successful
-    // connect (in the connect() forwarder), so it's a stable binding the AI
-    // dispatch can match against without ever reading the live GUI selection —
-    // which the user can change mid-session. At multi-device (epic 012) this
-    // collapses into the UDID-keyed session collection the manager will own.
-    private(set) var connectedUDID: String?
+    // The session the control surface (route panel, playback, joystick, map
+    // planning markers) targets and the map highlights. A stable session id, not
+    // a UDID — an unbound slot has no UDID yet. Changing it re-homes the single
+    // physical joystick to the newly selected device (syncActiveJoystick).
+    // Placeholder default so `self` is fully initialized before init() builds the
+    // first session (whose id then overwrites this); never observed before then.
+    var selectedSessionID: DeviceSession.ID = UUID() {
+        didSet {
+            guard selectedSessionID != oldValue else { return }
+            syncActiveJoystick()
+        }
+    }
 
-    // AI command server. Implicitly-unwrapped for the same reason as `session`:
-    // it back-references self. Holds the AF_UNIX listener; only running while
-    // aiControlEnabled is on.
+    // The resolved selected session. Falls back to the first session, which
+    // always exists, so it is never nil.
+    var selectedSession: DeviceSession {
+        sessions.first { $0.id == selectedSessionID } ?? sessions[0]
+    }
+
+    // AI command server. Implicitly-unwrapped because it back-references self.
+    // Holds the AF_UNIX listener; only running while aiControlEnabled is on.
     private var commandServer: CommandServer!
 
     // MARK: App-global tuning (the control surface edits these; bound in the UI)
@@ -110,7 +122,9 @@ final class AppState {
     var noiseSigmaMeters: Double = 5.0 {
         didSet {
             let sigma = noiseSigmaMeters
-            Task { await session.sim.updateNoiseSigma(sigma) }
+            for s in sessions {
+                Task { await s.sim.updateNoiseSigma(sigma) }
+            }
         }
     }
 
@@ -141,7 +155,6 @@ final class AppState {
     // MARK: App-global services & libraries
 
     let discovery = DeviceDiscoveryService()
-    var selectedDeviceUDID: String?
     // App-global tunnel broker (epic 012): one privileged `tunneld` for all
     // devices, one auth prompt per session. Sessions resolve their RSD endpoint
     // through it on connect; torn down only at app quit.
@@ -178,10 +191,12 @@ final class AppState {
     }
 
     init() {
-        // All other stored properties have default values, so `self` is fully
-        // initialized here; build the session first so the tuning didSets and
-        // the restore-teleport below have a `session.sim` to reach.
-        self.session = DeviceSession(manager: self)
+        // Build the first (unbound) session before anything reads selectedSession
+        // or the tuning didSets fan out. selectedSessionID isn't Optional, so it
+        // must be seeded here from the session we just made.
+        let first = DeviceSession(manager: self)
+        self.sessions = [first]
+        self.selectedSessionID = first.id
         self.commandServer = CommandServer(appState: self)
 
         let storedCustom = UserDefaults.standard.double(forKey: "customSpeedKmh")
@@ -198,18 +213,21 @@ final class AppState {
         // didSets don't fire for in-init assignments, so seed the engine
         // explicitly (base speed is also re-pushed on connect).
         let initialSigma = noiseSigmaMeters
-        Task { await session.sim.updateNoiseSigma(initialSigma) }
+        Task { await first.sim.updateNoiseSigma(initialSigma) }
 
         // System sleep tears down the DVT session unconditionally (Apple's
-        // design — see v2-features.md). Drop the connection cleanly so the
-        // UI doesn't claim we're still connected after wake.
+        // design — see v2-features.md). Drop every connection cleanly so the
+        // UI doesn't claim any device is still connected after wake.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                await self?.session.handleSystemSleep()
+                guard let self else { return }
+                for s in self.sessions {
+                    await s.handleSystemSleep()
+                }
             }
         }
 
@@ -230,7 +248,7 @@ final class AppState {
         if restoreLastSimulatedLocation {
             let restored = SimulatedPositionPersistence.load()
                 ?? SimulatedPositionPersistence.defaultCoordinate
-            Task { await session.sim.teleport(to: restored) }
+            Task { await first.sim.teleport(to: restored) }
         }
 
         #if DEBUG
@@ -249,98 +267,169 @@ final class AppState {
         UserDefaults.standard.set(transportMode.rawValue, forKey: "transportMode")
     }
 
+    // App-global tuning fans out to every session's engine — the $-bound controls
+    // are shared, so a change applies to all connected devices, not just the
+    // selected one.
     private func syncEngineSpeeds() async {
-        await session.sim.updateBaseSpeed(effectiveBaseSpeedMPS)
+        let speed = effectiveBaseSpeedMPS
+        for s in sessions {
+            await s.sim.updateBaseSpeed(speed)
+        }
     }
 
     private func pushLoopConfig() {
         let mode = loopMode
         let count = loopCount
-        Task { await session.sim.updateLoop(mode: mode, count: count) }
+        for s in sessions {
+            Task { await s.sim.updateLoop(mode: mode, count: count) }
+        }
     }
 
-    // MARK: - Per-device forwards (UI reads/calls AppState; we resolve the active session)
+    // MARK: - Session collection management
 
-    var simState: SimulationStateBridge { session.simState }
-    var connectionStatus: ConnectionStatus { session.connectionStatus }
-    var isCalculatingRoute: Bool { session.isCalculatingRoute }
+    // Colors map the markers/routes/swatches of each session on the shared map
+    // and in the switcher. Indexed by the session's position; wraps past the
+    // palette (the practical ceiling is a few devices, well within it).
+    static let sessionPalette: [Color] = [.red, .blue, .green, .orange, .purple, .teal, .pink, .indigo]
+
+    func color(for session: DeviceSession) -> Color {
+        guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else { return .red }
+        return Self.sessionPalette[idx % Self.sessionPalette.count]
+    }
+
+    // Append a fresh unbound slot and select it, so the sidebar shows its device
+    // picker.
+    func addSession() {
+        let s = DeviceSession(manager: self)
+        sessions.append(s)
+        seedTuning(into: s)
+        selectedSessionID = s.id
+    }
+
+    // Seed a freshly created session's engine with the current app-global tuning,
+    // so it behaves identically to the existing sessions before its first connect.
+    // (Base speed is also re-pushed on connect; noise σ and loop have no
+    // connect-time hook, so without this a session added after the user changed
+    // them would diverge.)
+    private func seedTuning(into s: DeviceSession) {
+        let sigma = noiseSigmaMeters
+        let speed = effectiveBaseSpeedMPS
+        let mode = loopMode
+        let count = loopCount
+        Task {
+            await s.sim.updateNoiseSigma(sigma)
+            await s.sim.updateBaseSpeed(speed)
+            await s.sim.updateLoop(mode: mode, count: count)
+        }
+    }
+
+    // Remove a slot (disconnecting it first). The collection never empties: if
+    // this was the last session, leave a fresh unbound one in its place. If the
+    // removed session was selected, fall back to the first remaining session.
+    func removeSession(_ session: DeviceSession) {
+        Task { await session.disconnect() }
+        sessions.removeAll { $0.id == session.id }
+        if sessions.isEmpty {
+            sessions = [DeviceSession(manager: self)]
+        }
+        if !sessions.contains(where: { $0.id == selectedSessionID }) {
+            selectedSessionID = sessions[0].id
+        }
+        syncActiveJoystick()
+    }
+
+    // Keep exactly the selected, connected session's joystick armed, so the one
+    // physical controller / WASD / virtual stick drives one device. Called on
+    // selection change and after every connect/disconnect. A disarmed engine
+    // still reads the controller in its tick but contributes no velocity, so
+    // non-selected devices never move from joystick input.
+    func syncActiveJoystick() {
+        for s in sessions {
+            s.setJoystickArmed(s.id == selectedSessionID && s.connectionStatus.isConnected)
+        }
+    }
+
+    // MARK: - Per-device forwards (UI reads/calls AppState; we resolve the selected session)
+
+    var simState: SimulationStateBridge { selectedSession.simState }
+    var connectionStatus: ConnectionStatus { selectedSession.connectionStatus }
+    var isCalculatingRoute: Bool { selectedSession.isCalculatingRoute }
     var routeCoordinates: [CLLocationCoordinate2D] {
-        get { session.routeCoordinates }
-        set { session.routeCoordinates = newValue }
+        get { selectedSession.routeCoordinates }
+        set { selectedSession.routeCoordinates = newValue }
     }
-    var fromSearch: LocationSearch { session.fromSearch }
-    var toSearch: LocationSearch { session.toSearch }
+    var fromSearch: LocationSearch { selectedSession.fromSearch }
+    var toSearch: LocationSearch { selectedSession.toSearch }
     var fromCoordinate: CLLocationCoordinate2D? {
-        get { session.fromCoordinate }
-        set { session.fromCoordinate = newValue }
+        get { selectedSession.fromCoordinate }
+        set { selectedSession.fromCoordinate = newValue }
     }
     var toCoordinate: CLLocationCoordinate2D? {
-        get { session.toCoordinate }
-        set { session.toCoordinate = newValue }
+        get { selectedSession.toCoordinate }
+        set { selectedSession.toCoordinate = newValue }
     }
     var stops: [RouteStop] {
-        get { session.stops }
-        set { session.stops = newValue }
+        get { selectedSession.stops }
+        set { selectedSession.stops = newValue }
     }
-    var canCalculateRoute: Bool { session.canCalculateRoute }
+    var canCalculateRoute: Bool { selectedSession.canCalculateRoute }
 
     func connect() async {
-        // Snapshot the GUI selection *before* connecting, then commit it as the
-        // session's bound UDID only if the connect succeeds. dispatch() matches
-        // AI commands against this stable value, never the live selection.
-        let udid = selectedDeviceUDID
-        await session.connect()
-        connectedUDID = session.connectionStatus.isConnected ? udid : nil
+        await selectedSession.connect()
+        syncActiveJoystick()
     }
     func disconnect() async {
-        await session.disconnect()
-        connectedUDID = nil
+        await selectedSession.disconnect()
+        syncActiveJoystick()
     }
 
     // Quit cleanup: stop the AI command socket (unlinks ai.sock) before the
-    // device disconnect, so a leftover socket node isn't left behind at quit.
+    // device disconnects, so a leftover socket node isn't left behind at quit.
     // stop() is idempotent, so this is safe whether or not AI control was on.
+    // Every connected session is disconnected (sleep/quit tears down all DVT
+    // sessions), then the shared broker is torn down last — the daemons'
+    // QUIT/CLEAR need the tunnel still alive.
     func prepareForQuit() async {
         commandServer.stop()
-        await disconnect()
-        // Tear down the broker last — disconnect()'s daemon QUIT/CLEAR needs the
-        // tunnel still alive.
+        for s in sessions {
+            await s.disconnect()
+        }
         tunnelBroker.stop()
     }
-    func teleport(to coordinate: CLLocationCoordinate2D) { session.teleport(to: coordinate) }
-    func clearLocation() async { await session.clearLocation() }
-    func selectFrom(_ completion: MKLocalSearchCompletion) async { await session.selectFrom(completion) }
-    func useCurrentLocationAsFrom() { session.useCurrentLocationAsFrom() }
-    func selectTo(_ completion: MKLocalSearchCompletion) async { await session.selectTo(completion) }
-    func addStop() { session.addStop() }
-    func removeStop(id: UUID) { session.removeStop(id: id) }
-    func selectStop(id: UUID, completion: MKLocalSearchCompletion) async { await session.selectStop(id: id, completion: completion) }
-    func moveStop(fromOffsets: IndexSet, toOffset: Int) { session.moveStop(fromOffsets: fromOffsets, toOffset: toOffset) }
-    func calculateRoute() async { await session.calculateRoute() }
-    func travelDirectly(to dest: CLLocationCoordinate2D) { session.travelDirectly(to: dest) }
-    func appendDirectly(to dest: CLLocationCoordinate2D) async { await session.appendDirectly(to: dest) }
-    func appendRoute(to dest: CLLocationCoordinate2D) async { await session.appendRoute(to: dest) }
-    func routeFromCurrent(to dest: CLLocationCoordinate2D) async { await session.routeFromCurrent(to: dest) }
+    func teleport(to coordinate: CLLocationCoordinate2D) { selectedSession.teleport(to: coordinate) }
+    func clearLocation() async { await selectedSession.clearLocation() }
+    func selectFrom(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectFrom(completion) }
+    func useCurrentLocationAsFrom() { selectedSession.useCurrentLocationAsFrom() }
+    func selectTo(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectTo(completion) }
+    func addStop() { selectedSession.addStop() }
+    func removeStop(id: UUID) { selectedSession.removeStop(id: id) }
+    func selectStop(id: UUID, completion: MKLocalSearchCompletion) async { await selectedSession.selectStop(id: id, completion: completion) }
+    func moveStop(fromOffsets: IndexSet, toOffset: Int) { selectedSession.moveStop(fromOffsets: fromOffsets, toOffset: toOffset) }
+    func calculateRoute() async { await selectedSession.calculateRoute() }
+    func travelDirectly(to dest: CLLocationCoordinate2D) { selectedSession.travelDirectly(to: dest) }
+    func appendDirectly(to dest: CLLocationCoordinate2D) async { await selectedSession.appendDirectly(to: dest) }
+    func appendRoute(to dest: CLLocationCoordinate2D) async { await selectedSession.appendRoute(to: dest) }
+    func routeFromCurrent(to dest: CLLocationCoordinate2D) async { await selectedSession.routeFromCurrent(to: dest) }
     func wanderNearby(center: CLLocationCoordinate2D, radius: Double, duration: TimeInterval) async {
-        await session.wanderNearby(center: center, radius: radius, duration: duration)
+        await selectedSession.wanderNearby(center: center, radius: radius, duration: duration)
     }
-    func loadDrawnRoute(_ coords: [CLLocationCoordinate2D]) async { await session.loadDrawnRoute(coords) }
-    func startPlayback() { session.startPlayback() }
-    func pausePlayback() { session.pausePlayback() }
-    func resumePlayback() { session.resumePlayback() }
-    func stopPlayback() { session.stopPlayback() }
-    func beginPlaybackScrub() { session.beginPlaybackScrub() }
-    func scrubPlayback(toProgress progress: Double) { session.scrubPlayback(toProgress: progress) }
-    func seekPlayback(toProgress progress: Double) { session.seekPlayback(toProgress: progress) }
-    func endPlaybackScrub() { session.endPlaybackScrub() }
-    func rejoinRoute() { session.rejoinRoute() }
-    func updateStickInput(x: Float, y: Float) { session.updateStickInput(x: x, y: y) }
-    func pressDirection(_ direction: JoystickEngine.Direction) { session.pressDirection(direction) }
-    func releaseDirection(_ direction: JoystickEngine.Direction) { session.releaseDirection(direction) }
-    func importGPX() { session.importGPX() }
-    func exportGPX() { session.exportGPX() }
-    func toggleRecording() { session.toggleRecording() }
-    func replayRecording(_ recording: RecorderService.Session) { session.replayRecording(recording) }
+    func loadDrawnRoute(_ coords: [CLLocationCoordinate2D]) async { await selectedSession.loadDrawnRoute(coords) }
+    func startPlayback() { selectedSession.startPlayback() }
+    func pausePlayback() { selectedSession.pausePlayback() }
+    func resumePlayback() { selectedSession.resumePlayback() }
+    func stopPlayback() { selectedSession.stopPlayback() }
+    func beginPlaybackScrub() { selectedSession.beginPlaybackScrub() }
+    func scrubPlayback(toProgress progress: Double) { selectedSession.scrubPlayback(toProgress: progress) }
+    func seekPlayback(toProgress progress: Double) { selectedSession.seekPlayback(toProgress: progress) }
+    func endPlaybackScrub() { selectedSession.endPlaybackScrub() }
+    func rejoinRoute() { selectedSession.rejoinRoute() }
+    func updateStickInput(x: Float, y: Float) { selectedSession.updateStickInput(x: x, y: y) }
+    func pressDirection(_ direction: JoystickEngine.Direction) { selectedSession.pressDirection(direction) }
+    func releaseDirection(_ direction: JoystickEngine.Direction) { selectedSession.releaseDirection(direction) }
+    func importGPX() { selectedSession.importGPX() }
+    func exportGPX() { selectedSession.exportGPX() }
+    func toggleRecording() { selectedSession.toggleRecording() }
+    func replayRecording(_ recording: RecorderService.Session) { selectedSession.replayRecording(recording) }
 
     // MARK: - AI command dispatch (epic 019)
 
@@ -371,14 +460,14 @@ final class AppState {
             return CommandResponse.success(statusDocument())
 
         case .teleport(let udid, let lat, let lon):
-            return resolvingConnected(udid) {
+            return resolvingConnected(udid) { session in
                 let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-                self.session.teleport(to: coord)
+                session.teleport(to: coord)
                 return CommandResponse.success()
             }
 
         case .route(let udid, let coordinates):
-            return await resolvingConnectedAsync(udid) {
+            return await resolvingConnectedAsync(udid) { session in
                 guard coordinates.count >= 2 else {
                     return CommandResponse.failure(code: "bad_route", message: "route needs at least two coordinates")
                 }
@@ -388,41 +477,41 @@ final class AppState {
                 // loadDrawnRoute is the existing "load these coords, no autoplay"
                 // path; PLAY is a separate command. It already logs and pushes
                 // through the same loadRoute the GUI uses.
-                await self.session.loadDrawnRoute(coords)
+                await session.loadDrawnRoute(coords)
                 return CommandResponse.success()
             }
 
         case .play(let udid):
-            return resolvingConnected(udid) {
-                guard !self.session.routeCoordinates.isEmpty else {
+            return resolvingConnected(udid) { session in
+                guard !session.routeCoordinates.isEmpty else {
                     return CommandResponse.failure(code: "no_route", message: "no route loaded to play")
                 }
-                self.session.startPlayback()
+                session.startPlayback()
                 return CommandResponse.success()
             }
 
         case .pause(let udid):
-            return resolvingConnected(udid) {
-                self.session.pausePlayback()
+            return resolvingConnected(udid) { session in
+                session.pausePlayback()
                 return CommandResponse.success()
             }
 
         case .stop(let udid):
-            return resolvingConnected(udid) {
-                self.session.stopPlayback()
+            return resolvingConnected(udid) { session in
+                session.stopPlayback()
                 return CommandResponse.success()
             }
 
         case .seek(let udid, let progress):
-            return resolvingConnected(udid) {
+            return resolvingConnected(udid) { session in
                 let clamped = min(max(progress, 0), 1)
-                self.session.seekPlayback(toProgress: clamped)
+                session.seekPlayback(toProgress: clamped)
                 return CommandResponse.success()
             }
 
         case .clear(let udid):
-            return await resolvingConnectedAsync(udid) {
-                await self.session.clearLocation()
+            return await resolvingConnectedAsync(udid) { session in
+                await session.clearLocation()
                 return CommandResponse.success()
             }
 
@@ -431,84 +520,92 @@ final class AppState {
                 return CommandResponse.failure(code: "unknown_device",
                     message: "no discovered device with UDID \(udid) (try DEVICES)")
             }
-            if connectedUDID == udid, session.connectionStatus.isConnected {
+            if connectedSession(udid) != nil {
                 return CommandResponse.success(.object(["state": .string("connected"), "udid": .string(udid)]))
             }
             // Connecting triggers the admin (sudo) prompt + tunnel + daemon —
             // human-gated and slower than the socket's dispatch timeout — so kick
             // it off and acknowledge immediately; the agent polls STATUS for the
-            // realized state (connection.state → connecting → connected/error).
-            selectedDeviceUDID = udid
-            Task { await connect() }
+            // realized state (this device's entry: state connecting → connected/
+            // error). Find-or-make a slot for the device; never touch the GUI's
+            // selected session (AI is a command source, not a focus owner).
+            let target = sessionForConnecting(udid: udid)
+            target.selectedDeviceUDID = udid
+            Task { await connectSession(target) }
             return CommandResponse.success(.object(["state": .string("connecting"), "udid": .string(udid)]))
 
         case .disconnect(let udid):
-            guard connectedUDID == udid else {
+            guard let session = connectedSession(udid) else {
                 return CommandResponse.failure(code: "not_connected",
                     message: "device \(udid) is not connected")
             }
-            await disconnect()
+            await session.disconnect()
+            syncActiveJoystick()
             return CommandResponse.success(.object(["state": .string("disconnected"), "udid": .string(udid)]))
         }
     }
 
-    // Resolves the target for a device-scoped command and runs `body` only if
-    // the UDID names the connected session. Distinguishes "unknown device" from
-    // "known but not connected" so the agent gets an actionable error — and so
-    // a command for device A can never fall through onto device B.
-    private func resolvingConnected(_ udid: String, _ body: () -> CommandResponse) -> CommandResponse {
-        switch resolveTarget(udid) {
-        case .connected:
-            return body()
-        case .notConnected:
-            return CommandResponse.failure(code: "not_connected", message: "device \(udid) is not connected")
-        case .unknown:
-            return CommandResponse.failure(code: "unknown_device", message: "no device with UDID \(udid)")
-        }
+    // The connected session bound to this UDID, or nil. This is the structural
+    // routing key: a UDID-scoped command reaches exactly the session that owns
+    // the UDID, and each session forwards only to its own private DaemonBridge —
+    // so a command for device A can never move device B. Liveness comes from the
+    // status, not connectedUDID alone (an unexpected drop flips the status before
+    // the disconnect() forwarder nils connectedUDID).
+    private func connectedSession(_ udid: String) -> DeviceSession? {
+        sessions.first { $0.connectedUDID == udid && $0.connectionStatus.isConnected }
     }
 
-    private func resolvingConnectedAsync(_ udid: String, _ body: () async -> CommandResponse) async -> CommandResponse {
-        switch resolveTarget(udid) {
-        case .connected:
-            return await body()
-        case .notConnected:
-            return CommandResponse.failure(code: "not_connected", message: "device \(udid) is not connected")
-        case .unknown:
-            return CommandResponse.failure(code: "unknown_device", message: "no device with UDID \(udid)")
+    // Resolves the target for a device-scoped command and runs `body` with that
+    // session only if the UDID names a connected session. Distinguishes "unknown
+    // device" from "known but not connected" so the agent gets an actionable
+    // error — and so a command for device A can never fall through onto device B.
+    private func resolvingConnected(_ udid: String, _ body: (DeviceSession) -> CommandResponse) -> CommandResponse {
+        if let session = connectedSession(udid) {
+            return body(session)
         }
+        return notConnectedOrUnknown(udid)
     }
 
-    private enum DispatchTarget {
-        case connected      // the live session is bound to this UDID and connected
-        case notConnected   // a known device, but not the connected session
-        case unknown        // no device with this UDID anywhere we can see
+    private func resolvingConnectedAsync(_ udid: String, _ body: (DeviceSession) async -> CommandResponse) async -> CommandResponse {
+        if let session = connectedSession(udid) {
+            return await body(session)
+        }
+        return notConnectedOrUnknown(udid)
     }
 
-    // Liveness comes from session.connectionStatus, not connectedUDID alone:
-    // an unexpected drop (daemon death, tunnel down, sleep) flips the status
-    // without routing through the disconnect() forwarder, so connectedUDID can
-    // briefly lag. The status read is the authoritative gate.
-    private func resolveTarget(_ udid: String) -> DispatchTarget {
-        if connectedUDID == udid, session.connectionStatus.isConnected {
-            return .connected
-        }
+    private func notConnectedOrUnknown(_ udid: String) -> CommandResponse {
         let known = discovery.devices.contains { $0.udid == udid }
-            || connectedUDID == udid
-            || selectedKnownUDIDs.contains(udid)
-        return known ? .notConnected : .unknown
+            || sessions.contains { $0.connectedUDID == udid || $0.selectedDeviceUDID == udid }
+        return known
+            ? CommandResponse.failure(code: "not_connected", message: "device \(udid) is not connected")
+            : CommandResponse.failure(code: "unknown_device", message: "no device with UDID \(udid)")
     }
 
-    // UDIDs we've ever bound to count as "known" even if discovery hasn't
-    // re-scanned — otherwise a command issued right after a drop would read as
-    // unknown rather than not-connected.
-    private var selectedKnownUDIDs: Set<String> {
-        Set([connectedUDID].compactMap { $0 })
+    // Find a slot to connect this UDID through: reuse one already targeting or
+    // bound to it, else a spare idle/unbound slot, else append a fresh one.
+    // Never changes selectedSessionID — AI connect must not steal GUI focus.
+    private func sessionForConnecting(udid: String) -> DeviceSession {
+        if let s = sessions.first(where: { $0.selectedDeviceUDID == udid || $0.connectedUDID == udid }) {
+            return s
+        }
+        if let spare = sessions.first(where: { !$0.connectionStatus.isConnected && $0.selectedDeviceUDID == nil }) {
+            return spare
+        }
+        let s = DeviceSession(manager: self)
+        sessions.append(s)
+        seedTuning(into: s)
+        return s
+    }
+
+    private func connectSession(_ session: DeviceSession) async {
+        await session.connect()
+        syncActiveJoystick()
     }
 
     // One all-devices document with explicit per-device connection state, so a
     // "running-but-not-connected" condition is unambiguous and machine-readable
-    // (epic 019). Built from discovery plus the connected session; the session's
-    // simulation read-state comes from its MainActor simState bridge.
+    // (epic 019). Built from discovery plus every connected session; each
+    // device's simulation read-state comes from its session's MainActor bridge.
     private func statusDocument() -> JSONValue {
         var entries: [JSONValue] = []
         var seen = Set<String>()
@@ -517,10 +614,13 @@ final class AppState {
             seen.insert(device.udid)
             entries.append(deviceStatusEntry(udid: device.udid, name: device.name))
         }
-        // The connected device may not be in the last discovery snapshot;
-        // surface it regardless so its live state is never hidden.
-        if let udid = connectedUDID, !seen.contains(udid) {
-            entries.append(deviceStatusEntry(udid: udid, name: nil))
+        // A connected device may be absent from the last discovery snapshot;
+        // surface every session's device regardless so live state is never hidden.
+        for s in sessions {
+            if let udid = s.connectedUDID, !seen.contains(udid) {
+                seen.insert(udid)
+                entries.append(deviceStatusEntry(udid: udid, name: s.deviceName))
+            }
         }
 
         return .object([
@@ -530,41 +630,53 @@ final class AppState {
         ])
     }
 
-    // The active session's connection lifecycle, so an agent that issued CONNECT
-    // can poll for the result (connecting → connected, or error with a message)
-    // rather than inferring it from the per-device `connected` flag alone.
+    // The selected session's connection lifecycle (back-compat top-level view).
+    // Per-device lifecycle lives in each device entry's `state`, so an agent that
+    // CONNECTed a non-selected device polls that device's entry, not this.
     private func connectionStateObject() -> JSONValue {
-        let state: String
-        var error: String?
-        switch session.connectionStatus {
-        case .disconnected: state = "disconnected"
-        case .connecting: state = "connecting"
-        case .connected: state = "connected"
-        case .error(let message): state = "error"; error = message
-        }
-        // connectedUDID is set only on success; while connecting/errored, the
-        // target is the one we're attempting (selectedDeviceUDID).
-        var fields: [String: JSONValue] = ["state": .string(state)]
-        if let udid = connectedUDID ?? selectedDeviceUDID { fields["udid"] = .string(udid) }
-        if let error { fields["error"] = .string(error) }
+        let session = selectedSession
+        var fields: [String: JSONValue] = ["state": .string(connectionStateString(session.connectionStatus))]
+        if let udid = session.connectedUDID ?? session.selectedDeviceUDID { fields["udid"] = .string(udid) }
+        if case .error(let message) = session.connectionStatus { fields["error"] = .string(message) }
         return .object(fields)
     }
 
+    private func connectionStateString(_ status: ConnectionStatus) -> String {
+        switch status {
+        case .disconnected: return "disconnected"
+        case .connecting: return "connecting"
+        case .connected: return "connected"
+        case .error: return "error"
+        }
+    }
+
     private func deviceStatusEntry(udid: String, name: String?) -> JSONValue {
-        let isConnected = connectedUDID == udid && session.connectionStatus.isConnected
+        // The slot handling this device: the one connected to it, else one
+        // targeting it (e.g. mid-connect). Lets the entry report a per-device
+        // connection lifecycle the agent can poll after CONNECT <udid>.
+        let slot = sessions.first { $0.connectedUDID == udid }
+            ?? sessions.first { $0.selectedDeviceUDID == udid }
+        let isConnected = slot?.connectedUDID == udid && (slot?.connectionStatus.isConnected ?? false)
+
         var fields: [String: JSONValue] = [
             "udid": .string(udid),
             "connected": .bool(isConnected)
         ]
         if let name {
             fields["name"] = .string(name)
+        } else if let n = slot?.deviceName {
+            fields["name"] = .string(n)
         }
-        if isConnected {
-            let s = session.simState
+        if let slot {
+            fields["state"] = .string(connectionStateString(slot.connectionStatus))
+            if case .error(let message) = slot.connectionStatus { fields["error"] = .string(message) }
+        }
+        if isConnected, let slot {
+            let s = slot.simState
             fields["playback"] = .string(playbackStateString(s.navigationPlaybackState))
             fields["progress"] = .double(s.navigationProgress)
             fields["recording"] = .bool(s.isRecording)
-            fields["hasRoute"] = .bool(!session.routeCoordinates.isEmpty)
+            fields["hasRoute"] = .bool(!slot.routeCoordinates.isEmpty)
             if let coord = s.simulatedCoordinate {
                 fields["latitude"] = .double(coord.latitude)
                 fields["longitude"] = .double(coord.longitude)
@@ -574,22 +686,29 @@ final class AppState {
     }
 
     private func devicesDocument() -> JSONValue {
-        var entries: [JSONValue] = discovery.devices.map { device in
-            .object([
+        var entries: [JSONValue] = []
+        var seen = Set<String>()
+        for device in discovery.devices {
+            seen.insert(device.udid)
+            entries.append(.object([
                 "udid": .string(device.udid),
                 "name": .string(device.name),
                 "connection": .string(device.connectionType.rawValue),
-                "connected": .bool(connectedUDID == device.udid && session.connectionStatus.isConnected)
-            ])
-        }
-        // Surface the connected device even if it's absent from the discovery
-        // snapshot, mirroring statusDocument so DEVICES never hides it.
-        let seen = Set(discovery.devices.map { $0.udid })
-        if let udid = connectedUDID, !seen.contains(udid) {
-            entries.append(.object([
-                "udid": .string(udid),
-                "connected": .bool(session.connectionStatus.isConnected)
+                "connected": .bool(connectedSession(device.udid) != nil)
             ]))
+        }
+        // Surface any connected device absent from the discovery snapshot,
+        // mirroring statusDocument so DEVICES never hides it.
+        for s in sessions {
+            if let udid = s.connectedUDID, !seen.contains(udid) {
+                seen.insert(udid)
+                var fields: [String: JSONValue] = [
+                    "udid": .string(udid),
+                    "connected": .bool(s.connectionStatus.isConnected)
+                ]
+                if let n = s.deviceName { fields["name"] = .string(n) }
+                entries.append(.object(fields))
+            }
         }
         return .object([
             "protocol": .int(AIProtocol.version),
@@ -608,7 +727,7 @@ final class AppState {
     // MARK: - Saved Locations (app-global library; reaches into the active session)
 
     func saveCurrentLocation(name: String) {
-        guard let coord = session.simState.simulatedCoordinate else { return }
+        guard let coord = selectedSession.simState.simulatedCoordinate else { return }
         let waypoint = SavedWaypoint(name: name, latitude: coord.latitude, longitude: coord.longitude)
         savedWaypoints.append(waypoint)
         persistWaypoints()
@@ -627,7 +746,7 @@ final class AppState {
     }
 
     func teleportToWaypoint(_ waypoint: SavedWaypoint) {
-        session.teleport(to: waypoint.coordinate)
+        selectedSession.teleport(to: waypoint.coordinate)
     }
 
     // MARK: - Recording library
@@ -657,6 +776,7 @@ final class AppState {
     // MARK: - Saved Routes (app-global library; reaches into the active session)
 
     func saveCurrentRoute(name: String, source: String = "calculated", sourceDetail: String? = nil) {
+        let session = selectedSession
         guard !session.routeCoordinates.isEmpty else {
             addLog("No route to save.")
             return
@@ -696,6 +816,7 @@ final class AppState {
     }
 
     func loadSavedRoute(_ route: SavedRoute, autoPlay: Bool = false) {
+        let session = selectedSession
         let coords = route.clCoordinates
         guard !coords.isEmpty else { return }
 

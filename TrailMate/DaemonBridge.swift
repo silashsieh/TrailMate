@@ -25,7 +25,12 @@ actor DaemonBridge: SimulationBackend {
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
-    private var readTask: Task<Void, Never>?
+    // Accumulates partial stdout between reads; drained into whole lines by
+    // ingest(). The reader Task drains an ordered byte stream fed by the
+    // readabilityHandler, so ingest is called in arrival order.
+    private var stdoutBuffer = Data()
+    private var stdoutReader: Task<Void, Never>?
+    private var stdoutContinuation: AsyncStream<Data>.Continuation?
     private var pendingContinuation: CheckedContinuation<String?, Never>?
     private var pendingSentinel: UUID?
     private var bufferedLines: [String] = []
@@ -87,14 +92,24 @@ actor DaemonBridge: SimulationBackend {
         let handle = stdinPipe.fileHandleForWriting
         writeQueue.sync { self.writeHandle = handle }
 
-        readTask = Task.detached { [weak self] in
-            let handle = stdoutPipe.fileHandleForReading
-            do {
-                for try await line in handle.bytes.lines {
-                    await self?.receiveLine(line)
-                }
-            } catch {}
-            await self?.receiveLine(nil)
+        // Read stdout with an event-driven readabilityHandler rather than
+        // `FileHandle.bytes.lines`. The latter does a *blocking* read that holds
+        // Foundation's shared file-handle async-read queue; with multiple devices
+        // connected, one daemon's idle reader (blocked waiting for its next line)
+        // starves every other daemon's reader, so a second device never sees its
+        // READY and wedges. readabilityHandler fires only when data is actually
+        // available and never blocks, so concurrent bridges read independently.
+        // The handler feeds an ordered AsyncStream that a single Task drains into
+        // the actor, so ingest() sees bytes in arrival order.
+        let (byteStream, byteCont) = AsyncStream.makeStream(of: Data.self)
+        self.stdoutContinuation = byteCont
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            byteCont.yield(handle.availableData)
+        }
+        stdoutReader = Task { [weak self] in
+            for await data in byteStream {
+                await self?.ingest(data)
+            }
         }
 
         // Bounded wait for READY. On timeout, treat as startup failure. The
@@ -115,6 +130,9 @@ actor DaemonBridge: SimulationBackend {
                 kill(proc.processIdentifier, SIGKILL)
                 _ = await waitForExit(proc: proc, timeout: .seconds(1))
             }
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            stdoutContinuation?.finish(); stdoutContinuation = nil
+            stdoutReader?.cancel(); stdoutReader = nil
             writeQueue.sync { self.writeHandle = nil }
             closePipes()
             self.process = nil
@@ -185,7 +203,9 @@ actor DaemonBridge: SimulationBackend {
             _ = await waitForExit(proc: proc, timeout: .seconds(1))
         }
 
-        readTask?.cancel()
+        stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+        stdoutContinuation?.finish(); stdoutContinuation = nil
+        stdoutReader?.cancel(); stdoutReader = nil
         // Block any further SETQ before closing the fd. Pairs with the latch
         // in start() so concurrent setLocationQuiet sees nil and bails.
         writeQueue.sync { self.writeHandle = nil }
@@ -278,6 +298,27 @@ actor DaemonBridge: SimulationBackend {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return !proc.isRunning
+    }
+
+    // Accumulate stdout bytes from the readabilityHandler and emit whole lines.
+    // Empty data signals EOF (pipe closed). Lines are newline-delimited; the
+    // daemon's protocol tokens are ASCII, so byte-level newline splitting is
+    // safe (no multibyte split across a newline).
+    private func ingest(_ data: Data) {
+        guard !data.isEmpty else {
+            stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+            stdoutContinuation?.finish(); stdoutContinuation = nil
+            receiveLine(nil)
+            return
+        }
+        stdoutBuffer.append(data)
+        while let nl = stdoutBuffer.firstIndex(of: 0x0A) {
+            let lineData = stdoutBuffer[stdoutBuffer.startIndex..<nl]
+            stdoutBuffer = Data(stdoutBuffer[stdoutBuffer.index(after: nl)...])
+            if let line = String(data: lineData, encoding: .utf8) {
+                receiveLine(line.trimmingCharacters(in: CharacterSet(charactersIn: "\r\n")))
+            }
+        }
     }
 
     private func receiveLine(_ line: String?) {

@@ -67,6 +67,8 @@ cp "$ROOT/PythonDaemon/tm_daemon.py" "$OUT/"
 cp "$ROOT/PythonDaemon/tm_list_devices.py" "$OUT/"
 cp "$ROOT/PythonDaemon/tm_tunnel.sh" "$OUT/"
 chmod +x "$OUT/tm_tunnel.sh"
+cp "$ROOT/PythonDaemon/tm_tunneld.sh" "$OUT/"
+chmod +x "$OUT/tm_tunneld.sh"
 
 # 5. Trim caches. Keep *.dist-info — some packages query their own metadata
 # at runtime via importlib.metadata, and stripping it triggers obscure failures

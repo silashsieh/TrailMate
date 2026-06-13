@@ -97,13 +97,24 @@ actor DaemonBridge: SimulationBackend {
             await self?.receiveLine(nil)
         }
 
-        // Bounded wait for READY (10 s). On timeout, treat as startup failure.
-        let firstLine = await nextLine(timeout: .seconds(10))
+        // Bounded wait for READY. On timeout, treat as startup failure. The
+        // budget is generous (20 s) because a second device's RSD/DVT setup can
+        // run well past the ~few seconds a lone device takes — observed taking
+        // longer than 10 s under multi-device contention, which made the app
+        // give up while the daemon was still successfully connecting.
+        let firstLine = await nextLine(timeout: .seconds(20))
         guard firstLine == "READY" else {
             expectingExit = true
             let stderr = readStderr()
+            // A daemon spawned against a stale/dead RSD address can wedge in a
+            // blocking connect that ignores SIGTERM, so escalate to SIGKILL —
+            // otherwise the failed attempt leaks a stuck Python process.
             proc.terminate()
             _ = await waitForExit(proc: proc, timeout: .seconds(2))
+            if proc.isRunning {
+                kill(proc.processIdentifier, SIGKILL)
+                _ = await waitForExit(proc: proc, timeout: .seconds(1))
+            }
             writeQueue.sync { self.writeHandle = nil }
             closePipes()
             self.process = nil

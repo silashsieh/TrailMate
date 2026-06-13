@@ -73,13 +73,48 @@ final class TunnelBroker {
     // Current RSD endpoint for a device — resolved fresh every call (addresses
     // are ephemeral; see the type comment). Picks the usbmux-<UDID>-Network entry
     // tunneld exposes; falls back to the first entry.
+    //
+    // While tunneld is still establishing a freshly-discovered device's tunnel
+    // (e.g. right after the user adds a second device), it can briefly publish a
+    // transient (address,port) and then rotate it. A daemon spawned against the
+    // transient endpoint wedges on a now-dead address. So wait for the endpoint
+    // to read identical twice in a row before trusting it — and, as a bonus, wait
+    // for the entry to appear at all, covering the "no tunnel yet" race when a
+    // device is connected the instant after it's plugged in.
     func rsdEndpoint(udid: String) async throws -> TunnelInfo {
-        let map = try await fetchTunnelMap()
-        guard let entries = map[udid], !entries.isEmpty else {
-            throw TunnelError.startFailed("device \(udid) has no tunnel yet — is it connected?")
+        // Require the endpoint to read identical several times in a row before
+        // trusting it: a freshly-establishing tunnel can hold one (address,port)
+        // briefly, then rotate. Two reads can both land inside a transient window;
+        // demanding `stableReadsRequired` consecutive matches (~1.8 s of held
+        // stability) makes catching a mid-rotation value far less likely.
+        let stableReadsRequired = 3
+        var lastSeen: TunnelInfo?
+        var stableCount = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+        while ContinuousClock.now < deadline {
+            let map = try await fetchTunnelMap()
+            if let entries = map[udid], !entries.isEmpty {
+                let entry = entries.first { $0.interface.contains("usbmux") } ?? entries[0]
+                let info = TunnelInfo(address: entry.address, port: entry.port)
+                if let lastSeen, lastSeen.address == info.address, lastSeen.port == info.port {
+                    stableCount += 1
+                    if stableCount >= stableReadsRequired - 1 {
+                        return info   // held identical across enough reads
+                    }
+                } else {
+                    stableCount = 0   // changed — restart the stability count
+                }
+                lastSeen = info
+            } else {
+                lastSeen = nil; stableCount = 0   // not present yet
+            }
+            try? await Task.sleep(for: .milliseconds(600))
         }
-        let entry = entries.first { $0.interface.contains("usbmux") } ?? entries[0]
-        return TunnelInfo(address: entry.address, port: entry.port)
+        // Never stabilized within the window: hand back the last reading if we
+        // ever saw one (best effort; the connect retry will recover), otherwise
+        // report the device as untunneled.
+        if let lastSeen { return lastSeen }
+        throw TunnelError.startFailed("device \(udid) has no tunnel yet — is it connected?")
     }
 
     // Tear down the whole broker (all tunnels). Called at app quit, not on a

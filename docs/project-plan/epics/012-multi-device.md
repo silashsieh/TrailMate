@@ -73,6 +73,61 @@ silent, baffling bug. The single-device two-writers rule generalizes: nothing ta
 Practical ceiling: designed for *a few* devices (N × 20 Hz loops + N daemons are trivial on
 Apple Silicon), not dozens — say so in user-facing docs when this ships.
 
+## Detailed design (v2.0.0 planning workflow, 2026-06-13)
+
+Grounded in the current code: `AppState.swift` (~1074 lines) fuses three layers the refactor
+splits — **app-global** (→ `DeviceManager`: tunnel broker, discovery, stale sweep, selected
+device, noise σ, restore-on-launch, log, `GCController`), **per-device** (→ `DeviceSession`:
+connectionStatus, RSD addr/port, its `SimulationActor` + `SimulationStateBridge` +
+`DaemonBridge`, events tasks, route/playback state — `transportMode`/`customSpeedKmh`/
+`speedMultiplier`/`loopMode`/`loopCount` — persisted position), and the **control surface**
+(drives the *selected* session). The D7 actor seam is already clean per-instance.
+
+**Structural routing guarantee (top risk, made structural not runtime):** each `DeviceSession`
+holds its `DaemonBridge` **private**; `DeviceManager` exposes `teleport(udid:…)`-style facade
+methods that resolve `sessions[udid]` and forward. A `SimulationActor` only ever talks to the
+backend injected at its own `attach(backend:)`. "A's coordinate reaches B's daemon" is then
+impossible by construction. `dispatch` (used by [[019-ai-integration]]) **must never read
+`selectedDeviceUDID`** — that's GUI/joystick state only. `tm_daemon.py`'s line protocol is
+**unchanged** (device identity is structural — one daemon per RSD addr/port).
+
+**Four shared sinks** are the real refactor work beyond actor replication: (1)
+`SimulationStateBridge` → per-session; (2) `RecorderService` → split `RecordingCapture`
+(per-session) / `RecordingsLibrary` (app-wide); (3) `SimulatedPositionPersistence` →
+UDID-keyed; (4) `GCController`/joystick → single observer on `DeviceManager`, input bound to
+the selected session only (switch = stop old engine + start new). `RoutingService` is a
+**stateless app-level shared service** (the MapKit throttle is per-process; per-session buys
+nothing); route *output* is per-session. Stale-daemon `pkill -f tm_daemon.py` is **cold-start
+orphan cleanup only** — per-device reconnect kills only that session's `Process`.
+
+**Tunnel broker — `remote tunneld` hybrid (gated on the spike below).** Generalize
+`TunnelSupervisor` → `TunnelBroker`: reuse the existing `osascript` elevation + parent-PID
+watch + `.stop` sentinel, but launch `pymobiledevice3 remote tunneld` instead of one
+`lockdown start-tunnel`; the app queries `GET /` for the per-UDID RSD map. One prompt, N
+tunnels, hot-plug. **Fallback** if the spike fails: one root process managing N
+`start-tunnel` sessions (no hot-plug), behind the same two-method `TunnelBroker` interface so
+callers don't change. Do **not** assert sleep/wake recovery as fact until verified.
+
+### BLOCKING spike (run before the broker story — step 5)
+Against the bundled interpreter, same env `tm_tunnel.sh` exports:
+```
+PR=/Users/harry/Documents/pikmin/TrailMate/PythonResources
+sudo PYTHONHOME=$PR/python PYTHONPATH=$PR/python-libs PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 \
+  $PR/python/bin/python3.13 -m pymobiledevice3 remote tunneld --port 49151 -p tcp
+curl -s http://127.0.0.1:49151/          # expect {udid:[{tunnel-address,tunnel-port,interface}]}
+```
+Then on macOS 26.4 / iOS 26.4: (a) plug 2nd iPhone → re-`GET /` shows it (hot-plug);
+(b) unplug → gone; (c) **sleep→wake→re-`GET /` recovers tunnels with NO new auth dialog**
+(the decisive test choosing `tunneld` over per-device start-tunnel); (d) take an
+`(address,port)` from `GET /`, run `tm_daemon.py <address> <port>`, push a `SETQ`, confirm the
+dot moves — proves a tunneld tunnel is DVT-usable. `tunneld` returns a **list per UDID** (pick
+the usbmux/USB TCP entry); make the port configurable (49151 may collide).
+
+### Open-question answers
+- **Restore seeding before connect** → use the last-selected UDID's slot.
+- **Log lines** → one app-wide store, device-tagged prefix per line.
+- **Multi-transport pick** → prefer usbmux/USB TCP (confirm in spike).
+
 ## Notes
 The issue flags this as a **large architectural change** to the connection layer. When this is
 picked up, re-read [[architecture]] (daemon protocol, concurrency topology) first — per

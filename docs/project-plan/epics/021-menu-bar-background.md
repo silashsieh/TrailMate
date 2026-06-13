@@ -53,14 +53,34 @@ running; the window reopens from the menu bar item. Behavior is controlled from 
       no window, lid open).
 - [ ] Docs: features.md + quick-start describe the menu bar mode.
 
-## Open questions
+## Open questions — answered at planning (2026-06-13)
 
-- Menu bar style: plain dropdown (`.menu`) vs panel (`.window`)? Start with `.menu`; the
-  panel only earns its keep if we want a mini-map or richer status.
-- Default posture: Dock icon always (Claude Desktop style) vs accessory-when-window-closed
-  (Ollama style)? Leaning dynamic; Settings makes it reversible either way.
-- Should the 2 Hz snapshot push pause when nothing observes it, or is it cheap enough to
-  leave alone? (Likely leave alone — measure first.)
+- **Menu bar style** → start `.menu` (plain dropdown); `.window` panel only if we later want a
+  mini-map / richer status.
+- **Default posture** → accessory-when-window-closed (Ollama style), with a Settings override.
+- **2 Hz snapshot push when unobserved** → leave alone; measure first.
+
+## Detailed design (v2.0.0 planning workflow, 2026-06-13)
+
+- **`WindowGroup` → `Window(id: "main")`** — a single reopenable instance, not a multiplying
+  group. Reopen path: set `.regular` → `NSApp.activate` → `openWindow(id: "main")` →
+  `orderFrontRegardless`.
+- **Activation policy is programmatic** (`.regular` on window-appear, `.accessory` on
+  `NSWindow.willCloseNotification`) in `AppDelegate` — **no `LSUIElement`** (that would force
+  accessory always).
+- **`applicationShouldTerminateAfterLastWindowClosed = false`** — closing the window keeps the
+  app (and the AI socket + simulation) alive.
+- **App Nap token stays connection-scoped** (held `attach`→`detach`), NOT window-scoped and
+  NOT relocated — it already covers the windowless case because the root `@State` survives
+  window close. Step is verify-only (long route, no window, lid open), no code change expected.
+- **Unreachable-app guard:** never allow "hide menu bar item" while `.accessory` with no
+  window (no Dock icon + no menu item = invisible, unquittable). Couple the toggle with
+  forcing a Dock icon, or disallow hiding while windowless.
+- **Quick-action targets = the selected session.** Quit handshake fans out over
+  `DeviceManager.sessions` (save-all + disconnect-all).
+- **Single-owner note (orchestration):** this epic's agent owns `TrailMateApp.swift` and
+  `SettingsView.swift` — the two merge hot-spots — integrating 019's quit-unlink + AI-control
+  `Section` (handed over as a self-contained subview) and 012's quit fan-out in one pass.
 
 ## Decisions made along the way
 

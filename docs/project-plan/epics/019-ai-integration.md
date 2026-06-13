@@ -59,14 +59,33 @@ without bypassing the simulation core. Off by default; zero attack surface when 
       (initialize / tools-list / tools-call, < 500 lines, zero deps), spawned by the AI client,
       relaying to the same socket; registered via a stable symlink, not a bundle path.
 
-## Open questions
+## Open questions — answered at planning (2026-06-13)
 
-- Command granularity: expose `wander` and saved/hand-drawn route playback by name, or keep
-  v1 to teleport + route + playback + status?
-- `status` shape: one document for all devices vs per-device query? (Agents need
-  "running-but-device-not-connected" to be unambiguous.)
-- Protocol versioning: a `VERSION` line at connect, or versioned commands?
-- Does the CLI ship in v2.0.0 with multi-device, or land mid-cycle behind the toggle?
+- **Command granularity** → v1 = `DEVICES`, `TELEPORT <udid>`, `ROUTE <udid>`,
+  `PLAY`/`PAUSE`/`STOP`/`SEEK <udid>`, `STATUS`, `CLEAR`. Defer `WANDER` and saved/hand-drawn
+  playback-by-name to a follow-up.
+- **`status` shape** → one all-devices document with explicit per-device state (so
+  "running-but-device-not-connected" is unambiguous and machine-readable).
+- **Protocol versioning** → a `VERSION` integer + greeting line on connect (not versioned
+  verbs).
+- **CLI in v2.0.0?** → yes, behind the off-by-default toggle; its *multi-device* acceptance
+  gates on [[012-multi-device]]'s broker (step 5 of the merged plan).
+
+## Detailed design (v2.0.0 planning workflow, 2026-06-13)
+
+- **Server = raw BSD `AF_UNIX`** (the inverse of `DaemonBridge`'s pipe loop) — not FlyingFox,
+  not HTTP, not `NWListener`. `accept`/read-loop with `bytes.lines`; per-connection write
+  queue; `await MainActor.run` hop to call `DeviceManager.dispatch(udid:command:)` — the
+  *same* facade the GUI uses (AI is a command source, never a parallel state owner).
+- **`emit()` chokepoint preserved:** every AI command flows through `SimulationActor.emit()`
+  (`SimulationActor.swift:444`) exactly like GUI input, so noise + recording always apply.
+- **Acceptance subtlety to prove explicitly:** the *recorded* point is CLEAN (pre-noise), the
+  *wire* point is NOISY — prove the two separately, not as one assertion.
+- **Stale socket:** `SO_REUSEADDR` is a no-op for `AF_UNIX`; `unlink()` before `bind()` on
+  launch and on toggle-off/quit. Assert `sun_path < 104` bytes.
+- **`swift-argument-parser` is confined to the CLI target**, not the app.
+- Pure value types (`CommandProtocol.swift`, `SocketPath.swift`) are buildable before the
+  sessionize gate and integrate onto it.
 
 ## Decisions made along the way
 

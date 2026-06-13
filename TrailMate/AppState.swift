@@ -142,6 +142,10 @@ final class AppState {
 
     let discovery = DeviceDiscoveryService()
     var selectedDeviceUDID: String?
+    // App-global tunnel broker (epic 012): one privileged `tunneld` for all
+    // devices, one auth prompt per session. Sessions resolve their RSD endpoint
+    // through it on connect; torn down only at app quit.
+    let tunnelBroker = TunnelBroker()
     let recorder = RecorderService()
     let savedRoutes = SavedRoutesStore()
     var savedWaypoints: [SavedWaypoint] = []
@@ -299,6 +303,9 @@ final class AppState {
     func prepareForQuit() async {
         commandServer.stop()
         await disconnect()
+        // Tear down the broker last — disconnect()'s daemon QUIT/CLEAR needs the
+        // tunnel still alive.
+        tunnelBroker.stop()
     }
     func teleport(to coordinate: CLLocationCoordinate2D) { session.teleport(to: coordinate) }
     func clearLocation() async { await session.clearLocation() }

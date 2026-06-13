@@ -17,7 +17,7 @@ final class DeviceSession {
 
     // Connection
     var connectionStatus: ConnectionStatus = .disconnected
-    // RSD address/port are populated by TunnelSupervisor on connect; not
+    // RSD address/port are resolved from the shared TunnelBroker on connect; not
     // user-facing inputs.
     private var rsdAddress: String = ""
     private var rsdPort: String = ""
@@ -41,7 +41,6 @@ final class DeviceSession {
 
     private var daemonBridge: (any SimulationBackend)?
     private var eventsTask: Task<Void, Never>?
-    private let tunnelSupervisor = TunnelSupervisor()
 
     init(manager: AppState) {
         self.manager = manager
@@ -90,9 +89,13 @@ final class DeviceSession {
         manager.sweepStaleDaemonsIfNeeded()
 
         connectionStatus = .connecting
-        manager.addLog("Authenticating to start tunnel for device …\(udid.suffix(8))")
+        manager.addLog("Authenticating tunnel broker for device …\(udid.suffix(8))")
         do {
-            let info = try await tunnelSupervisor.start(udid: udid)
+            // Shared broker: ensureRunning() prompts once per session (idempotent
+            // thereafter); the RSD endpoint is resolved fresh because tunneld
+            // reassigns address+port on every (re)establishment (epic 012 spike).
+            try await manager.tunnelBroker.ensureRunning()
+            let info = try await manager.tunnelBroker.rsdEndpoint(udid: udid)
             rsdAddress = info.address
             rsdPort = String(info.port)
             manager.addLog("Tunnel up: [\(info.address)]:\(info.port)")
@@ -144,9 +147,8 @@ final class DeviceSession {
             eventsTask?.cancel()
             eventsTask = nil
             self.daemonBridge = nil
-            // The bridge failed but the tunnel may be up — tear it down so a
-            // retry gets a fresh tunnel.
-            await tunnelSupervisor.stop()
+            // Leave the broker running — it's shared; a retry just re-queries the
+            // (possibly refreshed) endpoint.
         }
     }
 
@@ -158,10 +160,10 @@ final class DeviceSession {
             await bridge.stop()
         }
         daemonBridge = nil
-        // Tear the tunnel down *after* the daemon — the daemon's QUIT path
-        // calls location.clear() over the DVT session, which requires the
-        // tunnel to still be alive.
-        await tunnelSupervisor.stop()
+        // Don't stop the broker — it's app-global (other devices may use it, and
+        // keeping it up makes reconnect promptless). It's torn down at app quit
+        // (AppState.prepareForQuit). The daemon's QUIT/CLEAR ran above over the
+        // still-live tunnel.
         connectionStatus = .disconnected
         manager.addLog("Disconnected.")
     }
@@ -610,11 +612,9 @@ final class DeviceSession {
     private func teardownLiveState(statusMessage: String) {
         eventsTask?.cancel(); eventsTask = nil
         daemonBridge = nil
-        // Fire-and-forget — the sim detach + tunnel stop are independent.
-        Task {
-            await sim.detach()
-            await tunnelSupervisor.stop()
-        }
+        // Detach this device's sim; leave the shared broker up (tunneld may
+        // re-establish the tunnel, and other devices still need it).
+        Task { await sim.detach() }
         connectionStatus = .error(statusMessage)
     }
 

@@ -10,11 +10,18 @@ TrailMate/
 ├── .gitignore
 │
 ├── TrailMate/                         # Swift sources (flat layout)
-│   ├── TrailMateApp.swift             # @main entry point; WindowGroup + Settings scenes
-│   ├── AppState.swift                 # root @Observable — connection, route/recorder/waypoint state
-│   ├── ContentView.swift              # NavigationSplitView with sidebar + map
-│   ├── DaemonBridge.swift             # Process wrapper, stdin/stdout IPC with daemon
+│   ├── TrailMateApp.swift             # @main entry point; Window + Settings + MenuBarExtra scenes, AppDelegate
+│   ├── AppState.swift                 # device MANAGER (@Observable): owns N DeviceSessions + selected one, app-global tuning/libraries, AI dispatch
+│   ├── DeviceSession.swift            # per-device unit: connection lifecycle, its SimulationActor + bridge + DaemonBridge, route/playback state
+│   ├── ContentView.swift             # NavigationSplitView: device switcher sidebar + shared N-up map
+│   ├── DaemonBridge.swift             # Process wrapper, stdin/stdout IPC with one daemon (event-driven stdout reader)
 │   ├── DeviceDiscoveryService.swift   # USB/Wi-Fi device enumeration via tm_list_devices.py
+│   ├── CommandProtocol.swift          # AI command layer: verb parser + JSON response envelope (pure value types)
+│   ├── CommandServer.swift            # AF_UNIX command socket (off by default; inverse of DaemonBridge)
+│   ├── SocketPath.swift               # ai.sock path + permission/length guards
+│   ├── AISettingsSection.swift        # Settings "AI control" toggle subview
+│   ├── MenuBarStatusView.swift        # MenuBarExtra content: live status + quick actions
+│   ├── RoutingService.swift           # routing kernel protocol + MapKitRoutingService (D4 seam)
 │   ├── GPXService.swift               # GPX import (XMLParser) and export
 │   ├── JoystickEngine.swift           # 20 Hz control loop (controller/virtual stick/WASD)
 │   ├── LocationNoise.swift            # Box-Muller Gaussian jitter on every emission
@@ -28,14 +35,14 @@ TrailMate/
 │   ├── SavedRoutesStore.swift         # per-route JSON persistence under Application Support
 │   ├── SettingsView.swift             # Settings window (⌘,): set-and-forget preferences
 │   ├── SimulatedPositionPersistence.swift  # red-dot persistence + launch-restore preference
-│   ├── SimulationActor.swift          # off-MainActor core: 20 Hz aggregator, engines, snapshot push
-│   ├── SimulationBackend.swift        # backend protocol + events (DaemonBridge implements it)
+│   ├── SimulationActor.swift          # off-MainActor core: 20 Hz aggregator, engines, snapshot push (one per session)
+│   ├── SimulationBackend.swift        # backend protocol + events (DaemonBridge / MockSimulationBackend implement it)
 │   ├── StrokeGeometry.swift           # hand-drawn stroke smoothing + uniform resampling
-│   ├── TunnelSupervisor.swift         # privileged tunnel bring-up via osascript, control file
+│   ├── TunnelBroker.swift             # one privileged `remote tunneld` for all devices; resolves per-UDID RSD endpoint
 │   ├── VirtualJoystickView.swift      # on-screen circular pad with DragGesture
 │   ├── WanderPresetPersistence.swift  # wander sheet radius/duration recall
 │   ├── WanderRouteBuilder.swift       # chained MKDirections hops for Wander nearby
-│   └── Assets.xcassets
+│   └── Assets.xcassets                # (also: LanguagePreference, MockSimulationBackend, UITestSupport)
 │
 ├── TrailMate.xcodeproj                # Xcode project (hand-managed, no XcodeGen)
 ├── TrailMate.entitlements
@@ -44,9 +51,9 @@ TrailMate/
 ├── TrailMateUITests/
 │
 ├── PythonDaemon/
-│   ├── tm_daemon.py                   # persistent daemon: SET/SETQ/CLEAR/HEARTBEAT/QUIT
+│   ├── tm_daemon.py                   # persistent daemon: SET/SETQ/CLEAR/HEARTBEAT/QUIT (one per device)
 │   ├── tm_list_devices.py             # one-shot USB + Wi-Fi device lister
-│   └── tm_tunnel.sh                   # root-only tunnel starter (parent-watches the host)
+│   └── tm_tunneld.sh                  # root-only `remote tunneld` launcher (parent-watches the host, N tunnels)
 │
 ├── PythonResources/                   # bundled CPython runtime (gitignored; built by packaging/build.sh)
 ├── packaging/                         # build.sh (Python runtime), release.sh (DMG)
@@ -119,10 +126,10 @@ TrailMate/
 │  is nonisolated (cached FileHandle + serial queue) so    │
 │  the actor's hot path doesn't cross executors.           │
 ├──────────────────────────────────────────────────────────┤
-│  TunnelSupervisor + tm_tunnel.sh                         │  Privilege
+│  TunnelBroker + tm_tunneld.sh                            │  Privilege
 │  Sudo escalation via osascript-with-admin-privileges to  │
-│  run pymobiledevice3 lockdown start-tunnel. Status       │
-│  shared with the host via a control file.                │
+│  run one pymobiledevice3 remote tunneld (N tunnels, one  │
+│  prompt). Per-UDID RSD endpoint queried over its HTTP API.│
 ├──────────────────────────────────────────────────────────┤
 │  tm_daemon.py (long-lived Python process)                │  Transport
 │  ├── pymobiledevice3 tunnel client                       │
@@ -135,15 +142,15 @@ TrailMate/
 
 ## Process Topology
 
-Three OS processes cooperate at runtime:
+Processes cooperating at runtime (multi-device: one tunneld, N daemons):
 
 |Process        |Privilege         |Lifetime  |Responsibility                                                                       |
 |---------------|------------------|----------|-------------------------------------------------------------------------------------|
 |`TrailMate.app`|user              |session   |UI, state, all simulation logic                                                      |
-|`tm_tunnel.sh` |root (via sudo)   |per-tunnel|Open the RSD TUN tunnel via `pymobiledevice3 lockdown start-tunnel`; nothing else    |
-|`tm_daemon.py` |user              |session   |Persistent pymobiledevice3 + DVT connection                                          |
+|`tm_tunneld.sh`|root (via sudo)   |session   |Run one `pymobiledevice3 remote tunneld` opening every device's RSD TUN tunnel; nothing else|
+|`tm_daemon.py` |user              |per device|Persistent pymobiledevice3 + DVT connection — **one per connected device**           |
 
-`tm_tunnel.sh` exists *only* because creating a TUN interface requires root. It does the absolute minimum: starts the tunnel, writes the RSD address+port to a control file the host polls, and parent-watches the host PID so a host crash can't leak the tunnel. It's brought up by `TunnelSupervisor.swift` via `osascript … with administrator privileges`, which gives one auth dialog per session. All location logic stays in the unprivileged app.
+`tm_tunneld.sh` exists *only* because creating TUN interfaces requires root. It does the absolute minimum: launches one `pymobiledevice3 remote tunneld` (which auto-tunnels all connected devices, with hot-plug), and parent-watches the host PID so a host crash can't leak it. It's brought up by `TunnelBroker.swift` via `osascript … with administrator privileges` — **one auth dialog per session for all devices**. The broker resolves each device's *current* RSD endpoint by querying tunneld's HTTP API at connect time, because the RSD address+port are **ephemeral** — tunneld reassigns them on every (re)establishment, so nothing caches them; the UDID is the only stable key. All location logic stays in the unprivileged app.
 
 The Python daemon is a *long-lived* subprocess. Spawning `pymobiledevice3` per command costs ~500ms–1s in interpreter cold-start, which would kill the joystick experience. Instead, we spawn it once, keep the DVT connection open, and stream `SETQ lat lon\n` lines into its stdin at 20 Hz from the simulation actor.
 
@@ -188,6 +195,31 @@ EXIT                             # graceful shutdown ack
 ```
 
 No JSON, no length prefixes. If it ever grows, swap to length-prefixed JSON.
+
+## Command Protocol (AI integration)
+
+A second, *separate* line protocol — the AI command socket (epic 019). `CommandServer` listens on an `AF_UNIX` socket (`ai.sock`, off by default; the inverse of `DaemonBridge`), parses one command per line via `CommandProtocol`, hops to MainActor, and calls `AppState.dispatch(_:)` — the *same* facade the GUI buttons use, so every move still passes the `SimulationActor.emit()` chokepoint (noise + recording). Dispatch is a command *source*, never a parallel state owner.
+
+**Mac → socket (requests):** one verb per line.
+
+```
+DEVICES                          # list discovered devices
+STATUS                           # all-devices state document
+CONNECT <udid>                   # find-or-make a session, connect (async; poll STATUS)
+DISCONNECT <udid>
+TELEPORT <udid> <lat> <lon>
+ROUTE <udid> <lat0> <lon0> <lat1> <lon1> …
+PLAY <udid> | PAUSE <udid> | STOP <udid> | SEEK <udid> <0…1> | CLEAR <udid>
+```
+
+**socket → Mac (responses):** one JSON line per command, optionals omitted.
+
+```
+{"ok":true,"data":{…}}
+{"ok":false,"code":"not_connected","error":"device … is not connected"}
+```
+
+`ok` means *accepted*, not completed (most moves are fire-and-forget; read `STATUS` for realized state). Device-scoped verbs carry the target UDID; dispatch resolves the connected session by `connectedUDID` and **never** reads the GUI's `selectedSessionID`, so a command for device A can never reach device B. A greeting line on connect advertises the protocol version. Adding a verb means updating `CommandProtocol.swift`, the `trailmate` CLI, and this section together (see CLAUDE.md).
 
 ## Coordinate Math
 

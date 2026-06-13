@@ -47,6 +47,8 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 | `NavigationEngineSeekTests` | Scrubber/seek interpolation math. |
 | `SimulationActorReplayTests` | Integrator reset on re-play through the actor seam. |
 | `StrokeGeometryTests` | Hand-drawn stroke smoothing (Chaikin) + resampling. |
+| `CommandProtocolTests` | AI command-layer value types: verb parsing (case, whitespace, missing/invalid args), JSON response encoding (optionals omitted), greeting line. |
+| `CommandDispatchTests` | Multi-device routing (epic 012): `TELEPORT <A>` moves only A's integrator (A-never-moves-B), unknown vs not-connected UDIDs return the right codes, STATUS reports per-device state. Uses ≥2 sessions via a DEBUG `bindConnectedForTesting` seam (no tunnel/daemon). |
 
 ## UI Tests (implemented)
 

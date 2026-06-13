@@ -135,6 +135,17 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
 - Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick arming.
 
+### AI control (command socket + CLI) (epic 019)
+
+- An off-by-default AF_UNIX command socket (`ai.sock` under Application Support) lets an external agent (`trailmate` CLI / Claude Code) drive the app through the *same* facade the GUI uses, so every command still passes the `emit()` chokepoint (noise + recording). Enabled via a Settings toggle ("AI control"); no socket exists until opted in.
+- Line protocol modeled on the daemon's (one verb per line, JSON `{ok,code,data?,error?}` response). Verbs: `DEVICES`, `STATUS`, `CONNECT`, `DISCONNECT`, `TELEPORT`, `ROUTE`, `PLAY`, `PAUSE`, `STOP`, `SEEK`, `CLEAR`. A greeting line advertises a protocol version on connect.
+- **Device-addressed:** every device-scoped verb carries the target UDID; dispatch resolves the connected session by `connectedUDID` (never the GUI selection), so a command for device A can never reach device B. Unknown vs not-connected devices return distinct machine-readable error codes.
+
+### Menu bar & background mode (epic 021)
+
+- A `MenuBarExtra` shows a live status summary (connection + playback/recording) and quick actions (Pause/Resume/Stop, Disconnect, Open TrailMate, Quit), so the app stays controllable with the main window closed.
+- Closing the main window keeps the app — and the simulation + AI socket — alive: `applicationShouldTerminateAfterLastWindowClosed = false`, a single reopenable `Window(id:"main")`, and a dynamic activation policy (`.regular` with a window, `.accessory` when closed, configurable via a Dock toggle, with a guard so the app can never be left both icon-less and window-less). The App Nap activity token is connection-scoped, so a windowless app keeps simulating.
+
 ### Localization
 
 - UI ships in English and Traditional Chinese (繁體中文). By default the app follows the system language; a **Language** picker in the Settings window (⌘,) overrides it — System Default / English / 繁體中文. "System Default" falls back to English when no system language matches.

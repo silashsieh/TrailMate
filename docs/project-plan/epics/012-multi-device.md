@@ -100,15 +100,31 @@ the selected session only (switch = stop old engine + start new). `RoutingServic
 nothing); route *output* is per-session. Stale-daemon `pkill -f tm_daemon.py` is **cold-start
 orphan cleanup only** — per-device reconnect kills only that session's `Process`.
 
-**Tunnel broker — `remote tunneld` hybrid (gated on the spike below).** Generalize
+**Tunnel broker — `remote tunneld`. SPIKE PASSED (2026-06-13) → GO.** Generalize
 `TunnelSupervisor` → `TunnelBroker`: reuse the existing `osascript` elevation + parent-PID
 watch + `.stop` sentinel, but launch `pymobiledevice3 remote tunneld` instead of one
 `lockdown start-tunnel`; the app queries `GET /` for the per-UDID RSD map. One prompt, N
-tunnels, hot-plug. **Fallback** if the spike fails: one root process managing N
-`start-tunnel` sessions (no hot-plug), behind the same two-method `TunnelBroker` interface so
-callers don't change. Do **not** assert sleep/wake recovery as fact until verified.
+tunnels, hot-plug. The fallback (N `start-tunnel` sessions) is **not needed** — see result.
 
-### BLOCKING spike (run before the broker story — step 5)
+#### Spike result (2026-06-13, macOS 26.5 / 3 Wi-Fi-paired devices)
+- ✅ One `sudo … remote tunneld` launch tunneled **all three** devices; `GET /` returned the
+  per-UDID map (`tunnel-address`, `tunnel-port`, `interface: usbmux-<UDID>-Network`).
+- ✅ **Sleep → wake recovered every tunnel with NO new auth prompt** (the decisive test).
+- ✅ A tunneld `(address,port)` drove a real device via `tm_daemon.py` + `SETQ` (DVT-usable).
+- ⚠️ **Load-bearing constraint: the RSD endpoint is EPHEMERAL.** Every address *and* port
+  **changed** on wake (e.g. `…0005…` `fd15:…:65106` → `fd6c:…:65107`). So:
+  - The broker resolves **UDID → current `(address,port)` by querying `tunneld GET /` at
+    connect time, every time**. Never cache/persist the RSD endpoint.
+  - `DeviceSession` keys on the **UDID** (stable); it holds no fixed address. Connect = look up
+    the live address, then spawn the daemon against it.
+  - Sleep drops the DVT session anyway (existing disconnect-on-sleep flow); reconnect just
+    re-queries `tunneld`. The current flow is compatible — the only change is "don't reuse the
+    old address."
+  - `tunneld` returns a **list per UDID**; pick the `usbmux-<UDID>-Network` entry.
+- `TunnelBroker` surface becomes: `ensureRunning()` (launch tunneld once, the one prompt) +
+  `rsdEndpoint(udid:) async -> (address, port)?` (query `GET /`). Port `49151` configurable.
+
+### Spike commands (run 2026-06-13 — kept for reference)
 Against the bundled interpreter, same env `tm_tunnel.sh` exports:
 ```
 PR=/Users/harry/Documents/pikmin/TrailMate/PythonResources
@@ -126,7 +142,7 @@ the usbmux/USB TCP entry); make the port configurable (49151 may collide).
 ### Open-question answers
 - **Restore seeding before connect** → use the last-selected UDID's slot.
 - **Log lines** → one app-wide store, device-tagged prefix per line.
-- **Multi-transport pick** → prefer usbmux/USB TCP (confirm in spike).
+- **Multi-transport pick** → the `usbmux-<UDID>-Network` entry (confirmed in the 2026-06-13 spike).
 
 ## Notes
 The issue flags this as a **large architectural change** to the connection layer. When this is

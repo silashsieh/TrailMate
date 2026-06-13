@@ -2,7 +2,7 @@
 type: epic
 id: 019
 title: AI tool integration — command layer, CLI, MCP
-status: open
+status: in-progress
 milestone: v2.0.0
 issue:
 opened: 2026-06-10
@@ -61,9 +61,16 @@ without bypassing the simulation core. Off by default; zero attack surface when 
 
 ## Open questions — answered at planning (2026-06-13)
 
-- **Command granularity** → v1 = `DEVICES`, `TELEPORT <udid>`, `ROUTE <udid>`,
-  `PLAY`/`PAUSE`/`STOP`/`SEEK <udid>`, `STATUS`, `CLEAR`. Defer `WANDER` and saved/hand-drawn
-  playback-by-name to a follow-up.
+- **Command granularity** → v1 = `DEVICES`, `CONNECT <udid>`, `DISCONNECT <udid>`,
+  `TELEPORT <udid>`, `ROUTE <udid>`, `PLAY`/`PAUSE`/`STOP`/`SEEK <udid>`, `STATUS`, `CLEAR`.
+  Defer `WANDER` and saved/hand-drawn playback-by-name to a follow-up.
+- **`CONNECT` is async-ack (human-gated until B1).** Connecting triggers the sudo admin
+  prompt + tunnel + daemon — slower than the socket's dispatch timeout and not something an
+  agent can authorize — so `CONNECT` resolves the UDID against discovery, kicks off the
+  connect, and returns `{state:"connecting"}` immediately; the agent polls `STATUS` →
+  `connection.state` (`connecting`→`connected`/`error`). `DISCONNECT` is awaited (fast). Once
+  [[012-multi-device]]'s `tunneld` broker lands, the prompt disappears and `CONNECT` becomes
+  fully autonomous — no change to the verb, just the tunnel layer beneath `connect()`.
 - **`status` shape** → one all-devices document with explicit per-device state (so
   "running-but-device-not-connected" is unambiguous and machine-readable).
 - **Protocol versioning** → a `VERSION` integer + greeting line on connect (not versioned
@@ -110,6 +117,33 @@ Pre-seeded from the design discussion (2026-06), so the rationale survives:
   (the [[012-multi-device]] two-writers rule).
 
 ## Bugs / follow-ups found while building
+
+Adversarial review (2026-06-13, ultracode workflow) found and **fixed before merge**:
+SIGPIPE crash on socket write, unbounded read-buffer DoS, fd close/shutdown race,
+unbounded `semaphore.wait()` on a wedged tunnel, EINTR write truncation, 0700 socket
+perms, quit-time `stop()`/unlink, single-`Window` Dock-reopen (`applicationShouldHandleReopen`),
+GUI-only discovery (now scanned from `dispatch`), DEVICES/STATUS shape parity. (See the
+review synthesis in the run transcript.)
+
+**Tracked, not yet done (medium/low — none blocking the off-by-default single-device path):**
+- [ ] `start()`/`stop()` epoch guard — a fast toggle off→on could spawn an accept loop on a
+      reused listen fd; capture an epoch under the lock and bail if stale. Also `continue` on
+      `accept()` EINTR vs treating it as fatal.
+- [ ] `willClose` activation-policy check is timing-dependent (one main-actor hop may not have
+      cleared the closing window's `isVisible`); capture the specific closing `NSWindow` and
+      exclude it when counting remaining main windows.
+- [ ] `showMenuBarItem` runtime toggle doesn't re-run `applyActivationPolicy` (safe today only
+      because you can't be windowless while flipping it). Add `.onChange`.
+- [ ] `openMainWindow` raise targets `NSApp.keyWindow`, which may not exist yet — defer one
+      runloop or match by identifier.
+- [ ] **Multi-device dispatch test** — "device A never moves device B" holds today only because
+      there's one `session`; at [[012-multi-device]] add an integration test asserting a
+      foreign/not-connected UDID returns the error code and mutates no session.
+- [ ] **Docs owed before merge** — add the command-protocol section to `architecture.md` and the
+      AI-control entry to `features.md` (CLAUDE.md same-change rule; deferred only because the
+      feature isn't merged yet).
+- [ ] **`trailmate` CLI (step 12) + MCP shim** still deferred — every "via the CLI" acceptance
+      criterion is currently exercisable only over the raw socket (`nc -U`).
 
 ## Acceptance criteria
 

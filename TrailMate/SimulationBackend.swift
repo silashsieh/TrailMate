@@ -40,6 +40,8 @@ enum ExitReason: Sendable {
 @Observable
 @MainActor
 final class SimulationStateBridge {
+    private let defaults: UserDefaults
+
     var simulatedCoordinate: CLLocationCoordinate2D?
     var navigationPlaybackState: NavigationEngine.PlaybackState = .idle
     var navigationProgress: Double = 0
@@ -57,11 +59,20 @@ final class SimulationStateBridge {
     // position at quit is saved unconditionally by the AppDelegate.
     @ObservationIgnored private var lastPositionSave: ContinuousClock.Instant?
 
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
     func persistPositionThrottled() {
         guard let coord = simulatedCoordinate else { return }
         let now = ContinuousClock.now
         if let last = lastPositionSave, now - last < .seconds(1) { return }
         lastPositionSave = now
-        SimulatedPositionPersistence.save(coord)
+        SimulatedPositionPersistence.save(coord, to: defaults)
+    }
+
+    func persistPositionNow() {
+        guard let coord = simulatedCoordinate else { return }
+        SimulatedPositionPersistence.save(coord, to: defaults)
     }
 }

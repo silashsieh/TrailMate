@@ -185,9 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             // The bridge's 1 s save throttle can lag the red dot at quit;
             // capture the exact final position before disconnect clears it.
-            if let coord = self.appState?.simState.simulatedCoordinate {
-                SimulatedPositionPersistence.save(coord)
-            }
+            self.appState?.persistSelectedSimulatedPositionNow()
             // prepareForQuit stops the AI socket (unlinks ai.sock) before the
             // device disconnect, so quit honors epic 019's unlink contract.
             await self.appState?.prepareForQuit()

@@ -69,6 +69,8 @@ struct SavedWaypoint: Codable, Identifiable {
 @Observable
 @MainActor
 final class AppState {
+    let defaults: UserDefaults
+
     // The device sessions — one per connectable slot. Always ≥ 1: launch creates
     // a single unbound session (it holds the restored red dot + pre-connect route
     // planning, like the old eager `session`), and removeSession() never empties
@@ -130,18 +132,18 @@ final class AppState {
 
     // Launch behavior (epic 005). The position is always saved; this only
     // gates whether the next launch restores it or starts empty.
-    var restoreLastSimulatedLocation: Bool = SimulatedPositionPersistence.restoreOnLaunch {
-        didSet { SimulatedPositionPersistence.restoreOnLaunch = restoreLastSimulatedLocation }
+    var restoreLastSimulatedLocation: Bool {
+        didSet { SimulatedPositionPersistence.setRestoreOnLaunch(restoreLastSimulatedLocation, in: defaults) }
     }
 
     // AI control (epic 019). Off by default — gates the Unix-socket command
     // server entirely, so there's no attack surface until the user opts in.
     // Persisted so the choice survives relaunch; the didSet starts/stops the
     // server live when toggled in Settings.
-    var aiControlEnabled: Bool = UserDefaults.standard.bool(forKey: "aiControlEnabled") {
+    var aiControlEnabled: Bool {
         didSet {
             guard aiControlEnabled != oldValue else { return }
-            UserDefaults.standard.set(aiControlEnabled, forKey: "aiControlEnabled")
+            defaults.set(aiControlEnabled, forKey: "aiControlEnabled")
             if aiControlEnabled {
                 commandServer.start()
                 addLog("AI control enabled.")
@@ -190,7 +192,11 @@ final class AppState {
         return transportMode.directionsTransportType
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.restoreLastSimulatedLocation = SimulatedPositionPersistence.restoreOnLaunch(in: defaults)
+        self.aiControlEnabled = defaults.bool(forKey: "aiControlEnabled")
+
         // Build the first (unbound) session before anything reads selectedSession
         // or the tuning didSets fan out. selectedSessionID isn't Optional, so it
         // must be seeded here from the session we just made.
@@ -199,14 +205,14 @@ final class AppState {
         self.selectedSessionID = first.id
         self.commandServer = CommandServer(appState: self)
 
-        let storedCustom = UserDefaults.standard.double(forKey: "customSpeedKmh")
+        let storedCustom = defaults.double(forKey: "customSpeedKmh")
         self.customSpeedKmh = storedCustom > 0 ? storedCustom : 15.0
 
-        if UserDefaults.standard.object(forKey: "noiseSigmaMeters") != nil {
-            self.noiseSigmaMeters = UserDefaults.standard.double(forKey: "noiseSigmaMeters")
+        if defaults.object(forKey: "noiseSigmaMeters") != nil {
+            self.noiseSigmaMeters = defaults.double(forKey: "noiseSigmaMeters")
         }
 
-        if let raw = UserDefaults.standard.string(forKey: "transportMode"),
+        if let raw = defaults.string(forKey: "transportMode"),
            let mode = TransportMode(rawValue: raw) {
             self.transportMode = mode
         }
@@ -246,7 +252,7 @@ final class AppState {
         // reaches no backend until connect; attach() broadcasts it then).
         // Bypasses the UI teleport's isConnected guard deliberately.
         if restoreLastSimulatedLocation {
-            let restored = SimulatedPositionPersistence.load()
+            let restored = SimulatedPositionPersistence.load(from: defaults)
                 ?? SimulatedPositionPersistence.defaultCoordinate
             Task { await first.sim.teleport(to: restored) }
         }
@@ -262,9 +268,13 @@ final class AppState {
     // MARK: - Tuning relays
 
     func persistTuning() {
-        UserDefaults.standard.set(customSpeedKmh, forKey: "customSpeedKmh")
-        UserDefaults.standard.set(noiseSigmaMeters, forKey: "noiseSigmaMeters")
-        UserDefaults.standard.set(transportMode.rawValue, forKey: "transportMode")
+        defaults.set(customSpeedKmh, forKey: "customSpeedKmh")
+        defaults.set(noiseSigmaMeters, forKey: "noiseSigmaMeters")
+        defaults.set(transportMode.rawValue, forKey: "transportMode")
+    }
+
+    func persistSelectedSimulatedPositionNow() {
+        selectedSession.simState.persistPositionNow()
     }
 
     // App-global tuning fans out to every session's engine — the $-bound controls
@@ -923,14 +933,14 @@ final class AppState {
     // MARK: - Private
 
     private func loadWaypoints() {
-        guard let data = UserDefaults.standard.data(forKey: "savedWaypoints"),
+        guard let data = defaults.data(forKey: "savedWaypoints"),
               let waypoints = try? JSONDecoder().decode([SavedWaypoint].self, from: data) else { return }
         savedWaypoints = waypoints
     }
 
     private func persistWaypoints() {
         guard let data = try? JSONEncoder().encode(savedWaypoints) else { return }
-        UserDefaults.standard.set(data, forKey: "savedWaypoints")
+        defaults.set(data, forKey: "savedWaypoints")
     }
 
     // MARK: - Internal

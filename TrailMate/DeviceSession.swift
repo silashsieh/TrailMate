@@ -48,7 +48,7 @@ final class DeviceSession: Identifiable {
     private var rsdPort: String = ""
 
     // MainActor projection of simulation state for SwiftUI to observe.
-    let simState = SimulationStateBridge()
+    let simState: SimulationStateBridge
 
     // Off-MainActor simulation core: aggregator loop, engines, integrator,
     // noise, idle jitter, deviation check.
@@ -69,6 +69,7 @@ final class DeviceSession: Identifiable {
 
     init(manager: AppState) {
         self.manager = manager
+        self.simState = SimulationStateBridge(defaults: manager.defaults)
         self.sim = SimulationActor(bridge: simState, recorder: manager.recorder)
 
         // Consume simulation events (route abort) for log writes.

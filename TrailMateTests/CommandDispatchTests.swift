@@ -1,4 +1,5 @@
 import CoreLocation
+import Foundation
 import Testing
 @testable import TrailMate
 
@@ -12,7 +13,12 @@ import Testing
 struct CommandDispatchTests {
     // Build a manager with two sessions bound (sans tunnel) to A and B.
     private func twoConnectedSessions() -> (AppState, DeviceSession, DeviceSession) {
-        let app = AppState()
+        let suiteName = "com.sh.TrailMateTests.CommandDispatch.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        SimulatedPositionPersistence.setRestoreOnLaunch(false, in: defaults)
+
+        let app = AppState(defaults: defaults)
         // Avoid dispatch's lazy discovery scan (it would shell out to the real
         // device lister); we don't rely on discovery for connected routing.
         app.discovery.hasScanned = true

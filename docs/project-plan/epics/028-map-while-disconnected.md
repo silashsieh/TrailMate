@@ -55,14 +55,16 @@ the actions that actually drive a device (teleport, play, joystick) require a co
 - **`JoystickSection` stays *hidden* (not disabled-with-hint) while disconnected.** It is a
   pure status row for a control that auto-arms on connect (no Start button — D10/features); an
   inert disabled row would be noise, not a useful affordance. The mission explicitly kept it gated.
-- **Map right-click / long-press destination menu stays connection-gated as a whole**, rather
-  than shown with every item disabled. Every action in it drives the device or needs a live
-  origin (Teleport, Go directly, Route here, Append, Wander), so a disconnected menu would be
-  entirely disabled — a HIG anti-pattern — and `.help` tooltips don't render inside a
-  `contextMenu` anyway. The map already shows a persistent, discoverable status pill, now reading
-  "Connect a device to drive it", which is the discoverable affordance for that surface. The
-  complex long-press gesture arbitration (draw mode, immediate-teleport-when-no-origin) is left
-  untouched to avoid regressions.
+- **Map right-click menu and long-press capsule open while disconnected too**, with each
+  device-driving action gated per-action rather than the whole menu suppressed. Initially these
+  were left connection-gated as a whole (an all-disabled menu is normally a HIG anti-pattern),
+  but Harry asked for them to stay reachable while disconnected so the coordinate and the
+  available actions remain discoverable — an explicit user preference overriding a
+  convention-derived default, which D9's amendment expressly allows. Each action carries
+  `.requiresConnection()`; the capsule shows the `.help` hover hint, and since `.help` doesn't
+  render inside a `contextMenu`, the right-click menu appends a "Connect a device to drive it"
+  hint row while disconnected. The long-press immediate-teleport shortcut (no origin yet) stays
+  connected-only; disconnected, long-press opens the capsule instead of silently doing nothing.
 - **"Save a location" already worked offline.** `SavedLocationsSection` renders on a *present
   position* (`simulatedCoordinate != nil`, e.g. the restored launch position), never on a
   connection, so saving the current location offline already worked and is preserved. The real

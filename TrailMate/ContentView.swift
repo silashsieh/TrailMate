@@ -1319,6 +1319,7 @@ private struct DestinationActionBar: View {
                 Label("Teleport", systemImage: "bolt.fill")
             }
             .buttonStyle(.borderless)
+            .requiresConnection()
 
             Button {
                 onAction(.direct)
@@ -1326,6 +1327,7 @@ private struct DestinationActionBar: View {
                 Label("Go directly", systemImage: "arrow.up.right.circle")
             }
             .buttonStyle(.borderless)
+            .requiresConnection()
 
             Button {
                 onAction(.route)
@@ -1341,6 +1343,7 @@ private struct DestinationActionBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
+            .requiresConnection()
 
             if !appState.routeCoordinates.isEmpty {
                 Divider().frame(height: 14)
@@ -1351,6 +1354,7 @@ private struct DestinationActionBar: View {
                     Label("Append direct", systemImage: "arrow.forward.to.line")
                 }
                 .buttonStyle(.borderless)
+                .requiresConnection()
 
                 Button {
                     onAction(.appendRoute)
@@ -1359,6 +1363,7 @@ private struct DestinationActionBar: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(appState.isCalculatingRoute)
+                .requiresConnection()
             }
 
             Divider().frame(height: 14)
@@ -1370,6 +1375,7 @@ private struct DestinationActionBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
+            .requiresConnection()
 
             Button {
                 onAction(.cancel)
@@ -1500,12 +1506,14 @@ private struct MapArea: View {
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
                     .onEnded { value in
                         guard case .second(true, let drag) = value, let drag else { return }
-                        guard appState.connectionStatus.isConnected else { return }
                         guard let coordinate = proxy.convert(drag.location, from: .local) else { return }
 
-                        // First press: there's no origin yet, so a popover offering "Go directly"
-                        // or "Route here" would have nothing to anchor from. Teleport instead.
-                        if appState.simState.simulatedCoordinate == nil {
+                        // Immediate-teleport is a connected-only shortcut for the first press
+                        // (no origin yet, so "Go directly"/"Route here" would have nothing to
+                        // anchor from). Otherwise — including any time we're disconnected —
+                        // present the action bar so its device-driving buttons show the disabled
+                        // "connect" affordance rather than the gesture silently doing nothing.
+                        if appState.connectionStatus.isConnected, appState.simState.simulatedCoordinate == nil {
                             appState.teleport(to: coordinate)
                         } else {
                             pendingDestination = coordinate
@@ -1723,12 +1731,14 @@ private struct MapArea: View {
 
     // Right-click destination menu: same actions as DestinationActionBar (the long-press
     // capsule), presented as a native context menu at the pointer — macOS convention, and
-    // consistent with the sidebar rows' .contextMenu. Empty content while disconnected
-    // suppresses the menu entirely, mirroring the long-press guard.
+    // consistent with the sidebar rows' .contextMenu. The menu opens whether or not a device
+    // is connected (so the coordinate and the available travel actions stay discoverable);
+    // every action drives the device, so each is gated with .requiresConnection() and a
+    // disconnected hint row explains why they're dimmed — context menus don't surface the
+    // .help tooltip the way the capsule does.
     @ViewBuilder
     private func destinationMenu(proxy: MapProxy) -> some View {
         if !isDrawingRoute,
-           appState.connectionStatus.isConnected,
            let point = lastHoverPoint,
            let coordinate = proxy.convert(point, from: .local) {
             Section(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)) {
@@ -1737,6 +1747,7 @@ private struct MapArea: View {
                 } label: {
                     Label("Teleport", systemImage: "bolt.fill")
                 }
+                .requiresConnection()
 
                 // Unlike long-press (which teleports instantly when there's no origin), a
                 // context menu always opens; origin-dependent actions just disable instead.
@@ -1746,6 +1757,7 @@ private struct MapArea: View {
                     Label("Go directly", systemImage: "arrow.up.right.circle")
                 }
                 .disabled(appState.simState.simulatedCoordinate == nil)
+                .requiresConnection()
 
                 Button {
                     Task { await appState.routeFromCurrent(to: coordinate) }
@@ -1753,6 +1765,7 @@ private struct MapArea: View {
                     Label("Route here", systemImage: "map.fill")
                 }
                 .disabled(appState.simState.simulatedCoordinate == nil || appState.isCalculatingRoute)
+                .requiresConnection()
             }
 
             if !appState.routeCoordinates.isEmpty {
@@ -1762,6 +1775,7 @@ private struct MapArea: View {
                     } label: {
                         Label("Append direct", systemImage: "arrow.forward.to.line")
                     }
+                    .requiresConnection()
 
                     Button {
                         Task { await appState.appendRoute(to: coordinate) }
@@ -1769,6 +1783,7 @@ private struct MapArea: View {
                         Label("Append route", systemImage: "arrow.triangle.branch")
                     }
                     .disabled(appState.isCalculatingRoute)
+                    .requiresConnection()
                 }
             }
 
@@ -1780,6 +1795,13 @@ private struct MapArea: View {
                     Label("Wander nearby…", systemImage: "shuffle.circle")
                 }
                 .disabled(appState.isCalculatingRoute)
+                .requiresConnection()
+            }
+
+            if !appState.connectionStatus.isConnected {
+                Section {
+                    Text(connectToDriveHint)
+                }
             }
         }
     }

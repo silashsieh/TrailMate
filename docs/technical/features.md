@@ -48,8 +48,8 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Map-driven travel
 
-- Right-click anywhere on the map to open a native context menu at the pointer (its header shows the clicked coordinate); a 0.5 s long-press opens the same actions as a capsule action bar instead — kept as a fallback trigger. Both require a connected device. Actions:
-  - **Teleport** — instant. Trigger nuance when no simulated position exists yet: long-press teleports immediately (nothing to route from), while right-click still opens the menu with the origin-dependent actions disabled.
+- Right-click anywhere on the map to open a native context menu at the pointer (its header shows the clicked coordinate); a 0.5 s long-press opens the same actions as a capsule action bar instead — kept as a fallback trigger. Both open whether or not a device is connected: every action drives the device, so while disconnected each is disabled (the capsule shows the "Connect a device to drive it" hover hint; the context menu shows it as a trailing row) rather than the menu being suppressed (epic 028). Actions:
+  - **Teleport** — instant. Trigger nuance when no simulated position exists yet: long-press teleports immediately (nothing to route from) *when connected*, and otherwise — including any time disconnected — opens the capsule with the device-driving actions disabled; right-click always opens the menu with the origin-dependent actions disabled.
   - **Go directly** — straight-line travel at `transportMode.baseSpeed`, served by `NavigationEngine`'s two-point case.
   - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
   - **Append direct / Append route** — extend the loaded route from its end to the chosen point (straight line / `MKDirections`); offered only while a route is loaded.

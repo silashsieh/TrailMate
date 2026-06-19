@@ -32,6 +32,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Route playback
 
+- The planner is offline work: search, stops, transport, Calculate Route, GPX import/export, and Save Route all function with no device connected — only the device-*driving* control inside the section, Play, gates on a live connection (it's disabled with a discreet "Connect a device to drive it" hover hint until one connects, not hidden). The Joystick status row stays hidden until connected, since the joystick only arms on connect. (epic 028)
 - From/To via search or by promoting a destination picked on the map. A location-arrow button beside From fills it with the current simulated position (disabled until a position exists).
 - Optional intermediate stops between From and To, visited in order. Each stop has its own search field; "Add Stop" appears once both endpoints are set. Soft notice above 10 stops (Apple Maps throttling risk); no hard cap.
 - Transport mode: Walk (5 km/h), Cycle (15 km/h), Drive (50 km/h), or Custom km/h (`TransportMode.custom`).

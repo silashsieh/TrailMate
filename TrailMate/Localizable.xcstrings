@@ -205,12 +205,12 @@
         }
       }
     },
-    "Connect to a device to start": {
+    "Connect a device to drive it": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "連線裝置以開始"
+            "value": "連線裝置後才能操控"
           }
         }
       }

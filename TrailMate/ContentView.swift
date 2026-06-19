@@ -22,6 +22,35 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Connection gating
+
+// Copy shared by every gated control and the map's disconnected status pill, so
+// the "you need a device" message reads identically wherever it surfaces.
+private let connectToDriveHint = String(localized: "Connect a device to drive it")
+
+// Gates a single device-*driving* control (play, teleport, …) on a live
+// connection. Planning controls are never wrapped — they work offline. While
+// disconnected the control is disabled and carries a discreet hover hint rather
+// than vanishing, so the affordance stays discoverable without nagging
+// (decisions.md D9). `connectionStatus.isConnected` is the one source of truth;
+// this modifier never introduces a parallel flag.
+private struct RequiresConnection: ViewModifier {
+    @Environment(AppState.self) private var appState
+
+    func body(content: Content) -> some View {
+        let connected = appState.connectionStatus.isConnected
+        content
+            .disabled(!connected)
+            .help(connected ? "" : connectToDriveHint)
+    }
+}
+
+extension View {
+    func requiresConnection() -> some View {
+        modifier(RequiresConnection())
+    }
+}
+
 // MARK: - Sidebar
 
 private struct SidebarView: View {
@@ -54,8 +83,13 @@ private struct SidebarView: View {
                 }
             }
 
+            // Route planning — search, stops, calculate, save, import/export —
+            // is offline work; only the device-driving controls inside it gate
+            // on a connection (see RequiresConnection). The Joystick surface is
+            // pure status for a control that only arms once connected, so it
+            // stays hidden until then rather than showing an inert row.
+            RouteSection()
             if appState.connectionStatus.isConnected {
-                RouteSection()
                 JoystickSection()
             }
 
@@ -378,7 +412,7 @@ private struct PlaybackControls: View {
                     Label("Play", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .disabled(!appState.connectionStatus.isConnected)
+                .requiresConnection()
             case .playing:
                 Button {
                     appState.pausePlayback()
@@ -1756,7 +1790,10 @@ private struct MapArea: View {
         }
         switch appState.connectionStatus {
         case .disconnected:
-            return String(localized: "Connect to a device to start")
+            // Planning works offline now; the map's own travel actions
+            // (right-click / long-press) are what need a device, so the pill
+            // shares the gated-control copy instead of implying nothing works.
+            return connectToDriveHint
         case .connecting:
             return String(localized: "Connecting…")
         case .connected:

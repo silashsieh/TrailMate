@@ -25,6 +25,17 @@ for deep inspection.)
 The sidebar log section is collapsed by default and expandable on demand; the choice persists
 across launches.
 
+## Using it
+
+- **To see the log:** in the sidebar, click the **Log** section header — its disclosure
+  control (the chevron/triangle next to the title; macOS also shows a "Show/Hide" affordance
+  on hover) toggles the section open. Expanding it reveals the last 20 entries and the
+  **View Full Log** button.
+- **For the full log:** once expanded, click **View Full Log** to open the monospaced sheet
+  (Copy All / Clear) — unchanged by this epic.
+- The open/closed choice is remembered across launches, so once expanded it stays expanded
+  until collapsed again.
+
 ## Out of scope
 
 - Changing what the log captures or the "View Full Log" sheet.

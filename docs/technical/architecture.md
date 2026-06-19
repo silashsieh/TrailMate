@@ -219,7 +219,7 @@ PLAY <udid> | PAUSE <udid> | STOP <udid> | SEEK <udid> <0…1> | CLEAR <udid>
 {"ok":false,"code":"not_connected","error":"device … is not connected"}
 ```
 
-`ok` means *accepted*, not completed (most moves are fire-and-forget; read `STATUS` for realized state). Device-scoped verbs carry the target UDID; dispatch resolves the connected session by `connectedUDID` and **never** reads the GUI's `selectedSessionID`, so a command for device A can never reach device B. A greeting line on connect advertises the protocol version. Adding a verb means updating `CommandProtocol.swift`, the `trailmate` CLI, and this section together (see CLAUDE.md).
+`ok` means *accepted*, not completed (most moves are fire-and-forget; read `STATUS` for realized state). Device-scoped verbs carry the target UDID; dispatch resolves the connected session by `connectedUDID` and **never** reads the GUI's `selectedSessionID`, so a command for device A can never reach device B. A greeting line on connect advertises the protocol version. Adding a verb means updating `CommandProtocol.swift`, `AppState.dispatch(_:)`, and this section together (see CLAUDE.md); the planned `trailmate` CLI is not yet built (see [features.md](features.md#deferred--dropped)), but will need the same treatment once it ships.
 
 ## Coordinate Math
 

@@ -89,7 +89,7 @@ recipes (triage, ship, drop, scope-change ripple checklist) in
 ## Always do
 
 - When adding a new daemon command, update the Swift `DaemonBridge`, `tm_daemon.py`, and the Daemon Protocol section in [docs/technical/architecture.md](docs/technical/architecture.md) in the same change.
-- When adding a new AI command verb, update `CommandProtocol.swift` (parser + response), the `trailmate` CLI, and the Command Protocol section in [docs/technical/architecture.md](docs/technical/architecture.md) in the same change. Device-scoped verbs resolve their target by the UDID they carry — `dispatch` must never read the GUI's selected session.
+- When adding a new AI command verb, update `CommandProtocol.swift` (parser + response), `AppState.dispatch(_:)`, and the Command Protocol section in [docs/technical/architecture.md](docs/technical/architecture.md) in the same change (and the `trailmate` CLI too, once it exists — it's deferred, not yet built). Device-scoped verbs resolve their target by the UDID they carry — `dispatch` must never read the GUI's selected session.
 - When changing a privileged-helper protocol (once one exists), bump the protocol version constant and handle backwards compat.
 - When touching coordinate math, add a unit test with a known-good reference value.
 - Before any "this should work on iOS 26.4" claim, point to a verified source (pymobiledevice3 release notes, LocWarp tested-on note, or a personal test against the real device).

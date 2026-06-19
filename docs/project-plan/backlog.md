@@ -18,3 +18,5 @@ SORT status ASC, id ASC
 
 - **Ideas (carried over from [phases.md](phases.md) Phase 5):**
   [014 — README screenshots & GIF](epics/014-readme-screenshots.md).
+- **Accepted, unscheduled:**
+  [023 — trailmate CLI + stdio MCP shim](epics/023-cli-mcp-shim.md) (AI-integration follow-up; issue #54).

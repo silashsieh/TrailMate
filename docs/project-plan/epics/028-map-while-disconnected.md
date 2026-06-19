@@ -3,7 +3,7 @@ type: epic
 id: 028
 title: Map operations usable while no device is connected
 status: open
-milestone: v2.2.0
+milestone: v2.1.0
 issue: 45
 opened: 2026-06-19
 shipped:

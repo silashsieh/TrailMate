@@ -38,8 +38,7 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v2.1.0 — Auth ergonomics & polish:**
-  [020 — Enter the admin password once](epics/020-single-auth-prompt.md),
+- **v2.1.0 — UI polish:**
   [024 — Fix joystick/map-control overlap](epics/024-joystick-map-control-overlap.md),
   [025 — Collapse the sidebar log by default](epics/025-collapse-log-default.md),
   [026 — Connected device name in the status bar](epics/026-device-name-status-bar.md).
@@ -52,6 +51,7 @@ sync at release cuts; the epic files remain authoritative.
 - **Shipped (v2.0.0 — 2026-06-14) — Multi-device & AI control:**
   [012 — Simultaneous multi-device](epics/012-multi-device.md),
   [019 — AI tool integration (command socket layer; CLI & MCP deferred)](epics/019-ai-integration.md),
+  [020 — Single admin prompt per session (once-ever declined; satisfied by 012's broker)](epics/020-single-auth-prompt.md),
   [021 — Menu bar presence & background mode](epics/021-menu-bar-background.md).
   Cross-epic build plan: [v2.0.0-design.md](v2.0.0-design.md).
 - **Shipped (v1.6.0 — 2026-06-11) — Localization, testing & Wi-Fi fix:**

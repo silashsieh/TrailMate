@@ -3,7 +3,7 @@ type: epic
 id: 030
 title: Area serpentine coverage routing
 status: open
-milestone: v2.3.0
+milestone: v2.2.0
 issue: 47
 opened: 2026-06-19
 shipped:

@@ -132,7 +132,8 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Status & diagnostics
 
 - Connection status pill in the sidebar (Connecting / Connected / Disconnected / Error).
-- "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
+- A live log section in the sidebar (last 20 entries), a `DisclosureGroup` collapsed by default with the expand/collapse choice persisted across launches (`@AppStorage`). Expand it by clicking the **Log** row's disclosure triangle in the sidebar.
+- "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr — opened from the **View Full Log** button inside the expanded Log section.
 - Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick arming.
 
 ### AI control (command socket) (epic 019)

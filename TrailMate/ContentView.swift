@@ -1493,7 +1493,13 @@ private struct MapArea: View {
             .contextMenu {
                 destinationMenu(proxy: proxy)
             }
-            .overlay(alignment: .bottomTrailing) {
+            // Placed as a bottom-trailing safe-area inset rather than a plain overlay so
+            // MapKit reflows its built-in zoom/compass controls (which it positions within
+            // the map's safe area) up and clear of the joystick instead of letting the
+            // joystick occlude them. The Map still draws full-bleed behind the inset, so the
+            // joystick keeps floating over the map; when it's idle the inset collapses to
+            // zero and the controls return to the corner.
+            .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
                 if appState.simState.joystickIsActive {
                     VirtualJoystickView { x, y in
                         appState.updateStickInput(x: x, y: y)

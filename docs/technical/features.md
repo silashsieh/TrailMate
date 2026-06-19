@@ -75,7 +75,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 - Arms on connect — no Start button — and only on the **selected** device, so the one physical controller / WASD / virtual stick drives one device at a time (switching the selected device re-homes the joystick). The engine stays inert (no SETQ, no marker) until a position seeds the integrator — the restored launch position (broadcast at attach) or, with restore off, the first teleport; from then on, stick input drives the simulated location at the configured base speed.
 - Hardware game controller via `GameController.framework` (MFi / DualShock / Xbox / Joy-Con; hot-pluggable).
-- On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback.
+- On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback. It floats in the map's bottom-trailing corner as a safe-area inset, so MapKit's built-in zoom and compass controls reflow above it and stay reachable instead of being occluded; the inset collapses when the stick is idle, returning the controls to the corner.
 - WASD + arrow-key input on the focused map view.
 - 20 Hz control tick, 10% dead zone.
 - Speed cap reuses the same `TransportMode` (including Custom km/h); the picker lives in the Route section and drives both engines.

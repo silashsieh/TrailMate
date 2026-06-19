@@ -74,7 +74,11 @@ private struct SidebarView: View {
                 RecordingsSection()
             }
 
-            Section("Log", isExpanded: $logExpanded) {
+            // Live log, collapsed by default (epic 025). A DisclosureGroup keeps
+            // an always-visible disclosure triangle next to the "Log" label, so
+            // it's obvious the section opens (a collapsed `Section` only reveals
+            // its control on hover). The @AppStorage binding persists the choice.
+            DisclosureGroup("Log", isExpanded: $logExpanded) {
                 if appState.logMessages.isEmpty {
                     Text("No activity yet.")
                         .foregroundStyle(.secondary)

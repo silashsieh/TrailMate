@@ -27,10 +27,9 @@ across launches.
 
 ## Using it
 
-- **To see the log:** in the sidebar, click the **Log** section header — its disclosure
-  control (the chevron/triangle next to the title; macOS also shows a "Show/Hide" affordance
-  on hover) toggles the section open. Expanding it reveals the last 20 entries and the
-  **View Full Log** button.
+- **To see the log:** in the sidebar, click the **Log** row's disclosure triangle (the
+  chevron to the left of the label — always visible) to toggle it open. Expanding it reveals
+  the last 20 entries and the **View Full Log** button.
 - **For the full log:** once expanded, click **View Full Log** to open the monospaced sheet
   (Copy All / Clear) — unchanged by this epic.
 - The open/closed choice is remembered across launches, so once expanded it stays expanded
@@ -49,12 +48,14 @@ across launches.
 
 ## Decisions made along the way
 
-- Used the native collapsible `Section("Log", isExpanded:)` rather than wrapping the
-  contents in a `DisclosureGroup`. The sidebar is a `.sidebar`-style `List` where every
-  other entry is a `Section`; keeping Log a section makes its header the disclosure
-  control and stays visually consistent with the rest of the sidebar.
+- First used the native collapsible `Section("Log", isExpanded:)`, then switched to a
+  `DisclosureGroup("Log", isExpanded:)` for discoverability: a collapsed macOS sidebar
+  `Section` only reveals its show/hide control on hover, so it wasn't obvious the log
+  could be opened. `DisclosureGroup` keeps an always-visible disclosure triangle next to
+  the label, making the affordance explicit.
 - State persists via `@AppStorage("sidebarLogExpanded")` (Bool, default `false`) on
-  `SidebarView`, matching the existing menu-bar `@AppStorage` preferences.
+  `SidebarView`, matching the existing menu-bar `@AppStorage` preferences. The binding is
+  the same regardless of the wrapping control, so the switch didn't affect persistence.
 
 ## Bugs / follow-ups found while building
 

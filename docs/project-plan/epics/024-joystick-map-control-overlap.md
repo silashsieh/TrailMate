@@ -2,11 +2,11 @@
 type: epic
 id: 024
 title: Fix joystick overlapping the map zoom/compass controls
-status: open
+status: done
 milestone: v2.1.0
 issue: 43
 opened: 2026-06-19
-shipped:
+shipped: 2026-06-19
 tags: [bug, ui, map]
 ---
 
@@ -34,20 +34,32 @@ occluded by the joystick at any window size.
 
 ## Stories
 
-- [ ] Inset/reposition the MapKit controls (or the joystick) so neither occludes the other,
+- [x] Inset/reposition the MapKit controls (or the joystick) so neither occludes the other,
       following Apple's `MapControls` placement conventions (HIG, not Google Maps — [[decisions]] D9).
-- [ ] Verify at minimum window size and with the joystick armed vs idle.
+- [x] Verify at minimum window size and with the joystick armed vs idle.
 
 ## Open questions
 
 - Move the joystick, move the map controls, or add a safe-area inset? Prefer the
-  least-surprising HIG-aligned option.
+  least-surprising HIG-aligned option. → **Resolved: safe-area inset** (see below).
 
 ## Decisions made along the way
 
+- The on-screen joystick moved from a plain `.overlay(alignment: .bottomTrailing)` to a
+  `.safeAreaInset(edge: .bottom, alignment: .trailing)` on the `Map`. MapKit positions its
+  built-in controls within the map's safe area, so reserving the joystick's footprint as a
+  bottom inset makes the zoom stepper and compass reflow *above* the joystick rather than
+  being occluded. This is the HIG-aligned option (D9): it uses MapKit's own placement
+  mechanism instead of hand-positioning the controls, and it neither redesigns the joystick
+  (the `Map` still draws full-bleed behind the inset, so the stick keeps floating in the same
+  corner) nor moves the record/status overlays. The inset collapses to zero when the joystick
+  is idle, returning the controls to the corner.
+
 ## Bugs / follow-ups found while building
+
+- None.
 
 ## Acceptance criteria
 
-- [ ] With the joystick visible, the user can tap zoom +/- and the compass.
-- [ ] No regression to joystick reachability or the record/status overlays.
+- [x] With the joystick visible, the user can tap zoom +/- and the compass.
+- [x] No regression to joystick reachability or the record/status overlays.

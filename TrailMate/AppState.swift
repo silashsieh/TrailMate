@@ -381,6 +381,13 @@ final class AppState {
 
     var simState: SimulationStateBridge { selectedSession.simState }
     var connectionStatus: ConnectionStatus { selectedSession.connectionStatus }
+    // The selected session's friendly name, but only while it is actually
+    // connected — nil otherwise so status surfaces never show a stale name
+    // (epic 026). Single source of truth for the connected name shown in the
+    // menu bar and sidebar; tracks the active session under multi-device.
+    var connectedDeviceName: String? {
+        selectedSession.connectionStatus.isConnected ? selectedSession.deviceName : nil
+    }
     var isCalculatingRoute: Bool { selectedSession.isCalculatingRoute }
     var routeCoordinates: [CLLocationCoordinate2D] {
         get { selectedSession.routeCoordinates }

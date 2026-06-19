@@ -3,7 +3,7 @@ type: epic
 id: 027
 title: Direct location entry — search-to-go and coordinate field
 status: open
-milestone: v2.2.0
+milestone: v2.1.0
 issue: 42
 opened: 2026-06-19
 shipped:

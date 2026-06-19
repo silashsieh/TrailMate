@@ -2,11 +2,11 @@
 type: epic
 id: 025
 title: Collapse the sidebar live log by default
-status: open
+status: done
 milestone: v2.1.0
 issue: 44
 opened: 2026-06-19
-shipped:
+shipped: 2026-06-19
 tags: [ui]
 ---
 
@@ -31,16 +31,23 @@ across launches.
 
 ## Stories
 
-- [ ] Collapsible log section (disclosure), collapsed by default.
-- [ ] Persist the expand/collapse state across launches.
+- [x] Collapsible log section (disclosure), collapsed by default.
+- [x] Persist the expand/collapse state across launches.
 
 ## Open questions
 
 ## Decisions made along the way
 
+- Used the native collapsible `Section("Log", isExpanded:)` rather than wrapping the
+  contents in a `DisclosureGroup`. The sidebar is a `.sidebar`-style `List` where every
+  other entry is a `Section`; keeping Log a section makes its header the disclosure
+  control and stays visually consistent with the rest of the sidebar.
+- State persists via `@AppStorage("sidebarLogExpanded")` (Bool, default `false`) on
+  `SidebarView`, matching the existing menu-bar `@AppStorage` preferences.
+
 ## Bugs / follow-ups found while building
 
 ## Acceptance criteria
 
-- [ ] Fresh launch shows the log collapsed; expanding it and relaunching preserves the choice.
-- [ ] Log content and the full-log sheet are unchanged.
+- [x] Fresh launch shows the log collapsed; expanding it and relaunching preserves the choice.
+- [x] Log content and the full-log sheet are unchanged.

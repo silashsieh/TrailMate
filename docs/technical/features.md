@@ -132,6 +132,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Status & diagnostics
 
 - Connection status pill in the sidebar (Connecting / Connected / Disconnected / Error).
+- A live log section in the sidebar (last 20 entries), collapsed by default with the expand/collapse choice persisted across launches (`@AppStorage`).
 - "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
 - Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick arming.
 

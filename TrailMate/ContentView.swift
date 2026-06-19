@@ -26,6 +26,9 @@ struct ContentView: View {
 
 private struct SidebarView: View {
     @Environment(AppState.self) private var appState
+    // The live log occupies space it rarely earns; start collapsed and remember
+    // the user's choice across launches. (The full-log sheet stays the deep view.)
+    @AppStorage("sidebarLogExpanded") private var logExpanded = false
 
     var body: some View {
         List {
@@ -71,7 +74,7 @@ private struct SidebarView: View {
                 RecordingsSection()
             }
 
-            Section("Log") {
+            Section("Log", isExpanded: $logExpanded) {
                 if appState.logMessages.isEmpty {
                     Text("No activity yet.")
                         .foregroundStyle(.secondary)

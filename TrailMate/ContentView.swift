@@ -531,23 +531,45 @@ private struct SavedLocationsSection: View {
     @State private var waypointName = ""
 
     var body: some View {
-        Section("Saved Locations") {
-            ForEach(appState.savedWaypoints) { waypoint in
-                SavedLocationRow(waypoint: waypoint)
-            }
-
-            if appState.simState.simulatedCoordinate != nil {
-                Button("Save Current Location") {
-                    waypointName = ""
-                    showSaveAlert = true
+        // Ungrouped waypoints sit under the main header, next to Save Current
+        // Location; each user-defined folder gets its own section below. Drag
+        // reorders within a section (.onMove); the row context menu moves an
+        // item between folders. (epic 029)
+        let ungrouped = appState.savedWaypoints.filter { $0.category == nil }
+        let canSave = appState.simState.simulatedCoordinate != nil
+        if !ungrouped.isEmpty || canSave {
+            Section("Saved Locations") {
+                ForEach(ungrouped) { waypoint in
+                    SavedLocationRow(waypoint: waypoint)
                 }
-                .alert("Save Location", isPresented: $showSaveAlert) {
-                    TextField("Name", text: $waypointName)
-                    Button("Save") {
-                        guard !waypointName.isEmpty else { return }
-                        appState.saveCurrentLocation(name: waypointName)
+                .onMove { source, destination in
+                    appState.moveWaypoints(inCategory: nil, fromOffsets: source, toOffset: destination)
+                }
+
+                if canSave {
+                    Button("Save Current Location") {
+                        waypointName = ""
+                        showSaveAlert = true
                     }
-                    Button("Cancel", role: .cancel) {}
+                    .alert("Save Location", isPresented: $showSaveAlert) {
+                        TextField("Name", text: $waypointName)
+                        Button("Save") {
+                            guard !waypointName.isEmpty else { return }
+                            appState.saveCurrentLocation(name: waypointName)
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    }
+                }
+            }
+        }
+
+        ForEach(appState.savedLocationCategories, id: \.self) { category in
+            Section(category) {
+                ForEach(appState.savedWaypoints.filter { $0.category == category }) { waypoint in
+                    SavedLocationRow(waypoint: waypoint)
+                }
+                .onMove { source, destination in
+                    appState.moveWaypoints(inCategory: category, fromOffsets: source, toOffset: destination)
                 }
             }
         }
@@ -559,6 +581,8 @@ private struct SavedLocationRow: View {
     @Environment(AppState.self) private var appState
     @State private var isRenaming = false
     @State private var draftName = ""
+    @State private var showNewCategoryAlert = false
+    @State private var newCategoryName = ""
     @FocusState private var nameFieldIsFocused: Bool
 
     var body: some View {
@@ -599,9 +623,22 @@ private struct SavedLocationRow: View {
         }
         .contextMenu {
             Button("Rename") { beginRename() }
+            CategoryMenu(
+                categories: appState.savedLocationCategories,
+                current: waypoint.category,
+                assign: { appState.setWaypointCategory($0, for: waypoint) },
+                newCategory: { newCategoryName = ""; showNewCategoryAlert = true }
+            )
             Button("Delete", role: .destructive) {
                 appState.deleteWaypoint(waypoint)
             }
+        }
+        .alert("New Category", isPresented: $showNewCategoryAlert) {
+            TextField("Category", text: $newCategoryName)
+            Button("Create") {
+                appState.setWaypointCategory(newCategoryName, for: waypoint)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -623,15 +660,68 @@ private struct SavedLocationRow: View {
     }
 }
 
+// Shared "Category" submenu for saved-item context menus (epic 029): assign the
+// item to an existing folder (the current one checkmarked), spin up a new
+// folder, or clear the assignment.
+private struct CategoryMenu: View {
+    let categories: [String]
+    let current: String?
+    let assign: (String?) -> Void
+    let newCategory: () -> Void
+
+    var body: some View {
+        Menu("Category") {
+            ForEach(categories, id: \.self) { category in
+                Button {
+                    assign(category)
+                } label: {
+                    if category == current {
+                        Label(category, systemImage: "checkmark")
+                    } else {
+                        Text(category)
+                    }
+                }
+            }
+            if !categories.isEmpty {
+                Divider()
+            }
+            Button("New Category…") { newCategory() }
+            if current != nil {
+                Button("Remove from Category") { assign(nil) }
+            }
+        }
+    }
+}
+
 // MARK: - Saved Routes
 
 private struct SavedRoutesSection: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        Section("Saved Routes") {
-            ForEach(appState.savedRoutes.routes) { route in
-                SavedRouteRow(route: route)
+        // Ungrouped routes under the main header; one section per folder below.
+        // No Save button here (routes are saved from the Route section), so skip
+        // the header entirely when everything is filed away. (epic 029)
+        let ungrouped = appState.savedRoutes.routes.filter { $0.category == nil }
+        if !ungrouped.isEmpty {
+            Section("Saved Routes") {
+                ForEach(ungrouped) { route in
+                    SavedRouteRow(route: route)
+                }
+                .onMove { source, destination in
+                    appState.moveRoutes(inCategory: nil, fromOffsets: source, toOffset: destination)
+                }
+            }
+        }
+
+        ForEach(appState.savedRouteCategories, id: \.self) { category in
+            Section(category) {
+                ForEach(appState.savedRoutes.routes.filter { $0.category == category }) { route in
+                    SavedRouteRow(route: route)
+                }
+                .onMove { source, destination in
+                    appState.moveRoutes(inCategory: category, fromOffsets: source, toOffset: destination)
+                }
             }
         }
     }
@@ -642,6 +732,8 @@ private struct SavedRouteRow: View {
     @Environment(AppState.self) private var appState
     @State private var isRenaming = false
     @State private var draftName = ""
+    @State private var showNewCategoryAlert = false
+    @State private var newCategoryName = ""
     @FocusState private var nameFieldIsFocused: Bool
 
     var body: some View {
@@ -676,7 +768,20 @@ private struct SavedRouteRow: View {
             Button("Load") { appState.loadSavedRoute(route, autoPlay: false) }
             Button("Replay") { appState.loadSavedRoute(route, autoPlay: true) }
             Button("Rename") { beginRename() }
+            CategoryMenu(
+                categories: appState.savedRouteCategories,
+                current: route.category,
+                assign: { appState.setRouteCategory($0, for: route) },
+                newCategory: { newCategoryName = ""; showNewCategoryAlert = true }
+            )
             Button("Delete", role: .destructive) { appState.deleteSavedRoute(route) }
+        }
+        .alert("New Category", isPresented: $showNewCategoryAlert) {
+            TextField("Category", text: $newCategoryName)
+            Button("Create") {
+                appState.setRouteCategory(newCategoryName, for: route)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -1456,6 +1561,16 @@ private struct MapArea: View {
                     return
                 }
                 recenter(on: coord)
+            }
+            // Selecting a saved location/route frames it on the map (#53). A fresh
+            // request id fires this even when the same item is picked twice. The
+            // selection takes camera control, so any active follow disengages.
+            .onChange(of: appState.mapFocus?.id) { _, newID in
+                guard newID != nil, let region = appState.mapFocus?.region else { return }
+                isFollowing = false
+                withAnimation {
+                    cameraPosition = .region(region)
+                }
             }
             // Long-press fallback for the right-click context menu below — kept so existing
             // muscle memory survives. Long-press, not tap: a plain tap would steal the Map's

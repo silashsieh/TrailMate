@@ -175,6 +175,16 @@
         }
       }
     },
+    "Category": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "類別"
+          }
+        }
+      }
+    },
     "Clear": {
       "localizations": {
         "zh-Hant": {
@@ -271,6 +281,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "全部複製"
+          }
+        }
+      }
+    },
+    "Create": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "建立"
           }
         }
       }
@@ -571,6 +591,26 @@
         }
       }
     },
+    "New Category": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增類別"
+          }
+        }
+      }
+    },
+    "New Category…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增類別…"
+          }
+        }
+      }
+    },
     "No activity yet.": {
       "localizations": {
         "zh-Hant": {
@@ -747,6 +787,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "回到路線"
+          }
+        }
+      }
+    },
+    "Remove from Category": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移出類別"
           }
         }
       }

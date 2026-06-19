@@ -91,7 +91,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Always-on GPS noise
 
 - `LocationNoise` adds Box-Muller Gaussian jitter (σ default 5 m, configurable 0–10 m in the Settings window) to every `SETQ` emission, including idle.
-- Single `AppState.emitSimulated()` chokepoint routes every coord through the noise filter.
+- Single `SimulationActor.emit()` chokepoint routes every coord through the noise filter.
 - 1 Hz idle re-emission keeps a "stationary" location wiggling like a real GPS fix.
 - The map marker shows the clean intent, not the jittered emission, so the on-screen position stays steady visually.
 
@@ -119,7 +119,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Session recording
 
-- Record button on the map overlay; captures the clean (pre-noise) coordinate on every `emitSimulated` call.
+- Record button on the map overlay; captures the clean (pre-noise) coordinate on every `SimulationActor.emit()` call.
 - Sessions persist as GPX with per-point timestamps under `~/Library/Application Support/TrailMate/recordings/YYYY-MM-DD/`.
 - Recordings sidebar lists sessions newest-first; per-row Replay, Export, Delete, and "Save as Route…". (On disk they're grouped into per-date folders, per the path above.)
 - Replay plays the recorded coordinates at the current transport speed and multiplier (constant-speed); the per-point timestamps in the GPX are not used to pace playback.
@@ -135,9 +135,9 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr.
 - Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick arming.
 
-### AI control (command socket + CLI) (epic 019)
+### AI control (command socket) (epic 019)
 
-- An off-by-default AF_UNIX command socket (`ai.sock` under Application Support) lets an external agent (`trailmate` CLI / Claude Code) drive the app through the *same* facade the GUI uses, so every command still passes the `emit()` chokepoint (noise + recording). Enabled via a Settings toggle ("AI control"); no socket exists until opted in.
+- An off-by-default AF_UNIX command socket (`ai.sock` under Application Support) lets an external agent (e.g. Claude Code, connecting with `nc -U`) drive the app through the *same* facade the GUI uses, so every command still passes the `emit()` chokepoint (noise + recording). Enabled via a Settings toggle ("AI control"); no socket exists until opted in. (A wrapping `trailmate` CLI and an installable MCP shim are planned but not yet shipped — see [Deferred / dropped](#deferred--dropped).)
 - Line protocol modeled on the daemon's (one verb per line, JSON `{ok,code,data?,error?}` response). Verbs: `DEVICES`, `STATUS`, `CONNECT`, `DISCONNECT`, `TELEPORT`, `ROUTE`, `PLAY`, `PAUSE`, `STOP`, `SEEK`, `CLEAR`. A greeting line advertises a protocol version on connect.
 - **Device-addressed:** every device-scoped verb carries the target UDID; dispatch resolves the connected session by `connectedUDID` (never the GUI selection), so a command for device A can never reach device B. Unknown vs not-connected devices return distinct machine-readable error codes.
 
@@ -149,7 +149,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Localization
 
 - UI ships in English and Traditional Chinese (繁體中文). By default the app follows the system language; a **Language** picker in the Settings window (⌘,) overrides it — System Default / English / 繁體中文. "System Default" falls back to English when no system language matches.
-- The override writes the standard `AppleLanguages` UserDefaults key (`LanguagePreference`), which Foundation binds at process launch, so a change takes effect on the next launch — the picker notes this. (Not live: several strings resolve through `String(localized:)` against the launch-time bundle, and relaunching mid-session would also drop a live device connection.)
+- The override is stored under an `AppLanguageOverride` default and mirrored into Foundation's standard `AppleLanguages` UserDefaults key, which Foundation binds at process launch, so a change takes effect on the next launch — the picker notes this. (Not live: several strings resolve through `String(localized:)` against the launch-time bundle, and relaunching mid-session would also drop a live device connection.)
 - Strings live in a String Catalog (`TrailMate/Localizable.xcstrings`) — keys are the English source text, extracted by the compiler (`SWIFT_EMIT_LOC_STRINGS`) and synced via `xcstringstool`. The brand name and bare numeric/symbol tokens are marked do-not-translate.
 - Log and diagnostic messages (the Log sheet, `addLog` entries) stay English by design — they're for debugging. Device-supplied text (device names) and system error descriptions render verbatim. Language endonyms in the picker ("English", "繁體中文") show in their own script.
 
@@ -157,7 +157,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 - TrailMate ships a self-contained CPython interpreter + `pymobiledevice3` inside the `.app` bundle (`Contents/Resources/PythonResources/`). End users do not install Python, pip, or pymobiledevice3.
 - Built via `packaging/build.sh` from [python-build-standalone](https://github.com/indygreg/python-build-standalone); the tarball is cached under `packaging/.cache/` so subsequent builds are fast.
-- `PythonBundle.swift` resolves the interpreter and script paths at runtime so `tm_daemon.py`, `tm_tunnel.sh`, and `tm_list_devices.py` all run from the bundle in release builds (and from the same paths during `xcodebuild` debug builds).
+- `PythonBundle.swift` resolves the interpreter and script paths at runtime so `tm_daemon.py`, `tm_tunneld.sh`, and `tm_list_devices.py` all run from the bundle in release builds (and from the same paths during `xcodebuild` debug builds). (`tm_tunnel.sh`, the pre-multi-device single-tunnel wrapper, is still bundled but no longer on the live path.)
 - Embedded binaries are re-signed by a `Re-sign embedded Python binaries` Run Script phase under the same identity as the host app (ad-hoc when no Developer ID is configured), with `--options runtime` so the Hardened Runtime accepts them.
 - Pin point is the Python interpreter version (default 3.13.x) and the pymobiledevice3 release that `build.sh` installs into the bundle's site-packages; bumping either is a deliberate change with a smoke pass.
 
@@ -165,6 +165,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 Items considered during planning that were dropped, deferred, or superseded.
 
+- **`trailmate` CLI and installable MCP shim (epic 019).** v2.0.0 shipped only the AF_UNIX command socket; agents drive it directly over `nc -U`. The planned `trailmate` CLI wrapper (swift-argument-parser, embedded in `Contents/Helpers/`) and the stdio MCP shim that would register into Claude Desktop / other MCP clients are not yet built. Tracked as epic 023 (GitHub issue #54).
 - **SMAppService privileged helper.** Still using `osascript … with administrator privileges`. One auth dialog per session is acceptable for personal use; a packaged helper is the right path but needs a paid Apple ID for signing.
 - **DDI auto-mounting.** User mounts via Xcode or `pymobiledevice3 mounter auto-mount` once per OS update.
 - **Reconnect button.** Replaced by automatic teardown on tunnel/daemon exit; user re-runs Connect manually.

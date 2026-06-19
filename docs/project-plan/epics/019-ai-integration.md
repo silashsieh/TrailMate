@@ -1,7 +1,7 @@
 ---
 type: epic
 id: 019
-title: AI tool integration — command layer, CLI, MCP
+title: AI tool integration — command socket layer (CLI & MCP deferred)
 status: done
 milestone: v2.0.0
 issue:
@@ -10,12 +10,18 @@ shipped: 2026-06-14
 tags: [architecture, ai]
 ---
 
-# Epic 019: AI tool integration — command layer, CLI, MCP
+# Epic 019: AI tool integration — command socket layer (CLI & MCP deferred)
 
 > Owner-initiated (no inbox issue): from the AI-integration design discussion, 2026-06.
 > A full technical survey (MCP vs HTTP vs CLI, IPC mechanisms, localhost-server security,
 > Figma/JetBrains precedents) backs the decisions below; ask Claude Code for the survey if
 > the rationale needs re-deriving.
+
+**Shipped (v2.0.0):** the in-app `AF_UNIX` command socket + the "AI control" Settings toggle,
+the command-protocol docs, and the AI-control feature entry. **Deferred:** the `trailmate` CLI
+and the stdio MCP shim — every acceptance criterion below is currently exercised over the raw
+socket (`nc -U`), not a CLI. The deferred CLI + MCP work is now tracked in
+[[023-cli-mcp-shim]] (GitHub issue #54).
 
 ## Why
 
@@ -44,18 +50,18 @@ without bypassing the simulation core. Off by default; zero attack surface when 
 
 ## Stories
 
-- [ ] In-app command layer: Unix-domain-socket server inside TrailMate; line-delimited
+- [x] In-app command layer: Unix-domain-socket server inside TrailMate; line-delimited
       protocol in the `tm_daemon.py` style; every command carries `device_id` (UDID);
       dispatch through the same `AppState`/`SimulationActor` API the GUI uses.
-- [ ] Settings toggle "Enable AI control" — off by default; socket created/unlinked on toggle;
+- [x] Settings toggle "Enable AI control" — off by default; socket created/unlinked on toggle;
       stale-socket cleanup on launch.
-- [ ] `trailmate` CLI: embedded in `Contents/Helpers/`, PATH symlink installer (VS Code
+- [ ] **(deferred → [[023-cli-mcp-shim]])** `trailmate` CLI: embedded in `Contents/Helpers/`, PATH symlink installer (VS Code
       pattern), `--json` to stdout / human messages to stderr, distinct exit codes,
       agent-quality `--help` (built on swift-argument-parser).
-- [ ] Agent-facing docs: command reference in README/docs + a CLAUDE.md note so Claude Code
-      discovers the CLI.
-- [ ] Command protocol section in [[architecture]] (same treatment as the daemon protocol).
-- [ ] *(optional — when Claude Desktop matters)* stdio MCP shim: hand-rolled JSON-RPC 2.0
+- [x] Agent-facing docs: command reference in README/docs + a CLAUDE.md note. (Documents the
+      command socket; the CLI it originally also described is deferred.)
+- [x] Command protocol section in [[architecture]] (same treatment as the daemon protocol).
+- [ ] **(deferred → [[023-cli-mcp-shim]], GitHub #54)** *(optional — when Claude Desktop matters)* stdio MCP shim: hand-rolled JSON-RPC 2.0
       (initialize / tools-list / tools-call, < 500 lines, zero deps), spawned by the AI client,
       relaying to the same socket; registered via a stable symlink, not a bundle path.
 
@@ -112,7 +118,7 @@ Pre-seeded from the design discussion (2026-06), so the rationale survives:
   not a second stateful client; `SimulationActor` is already the headless core, and
   `SimulationBackend` remains the extraction seam if GUI-closed operation ever becomes a goal
   (see scope.md long-term goals).
-- **Every command routes through `emitSimulated`.** Noise + recording must apply to AI-driven
+- **Every command routes through `SimulationActor.emit()`.** Noise + recording must apply to AI-driven
   movement; nothing outside a session's `DaemonBridge` ever talks to a `tm_daemon.py`
   (the [[012-multi-device]] two-writers rule).
 
@@ -142,18 +148,22 @@ review synthesis in the run transcript.)
 - [ ] **Docs owed before merge** — add the command-protocol section to `architecture.md` and the
       AI-control entry to `features.md` (CLAUDE.md same-change rule; deferred only because the
       feature isn't merged yet).
-- [ ] **`trailmate` CLI (step 12) + MCP shim** still deferred — every "via the CLI" acceptance
-      criterion is currently exercisable only over the raw socket (`nc -U`).
+- [ ] **`trailmate` CLI (step 12) + MCP shim** still deferred (now tracked in
+      [[023-cli-mcp-shim]]) — every "via the CLI" acceptance criterion is currently exercisable
+      only over the raw socket (`nc -U`).
 
 ## Acceptance criteria
 
-- [ ] With AI control enabled, Claude Code can (via the CLI): list devices, teleport a chosen
-      device, plan+play a route on it, seek/pause/stop, and read status — GUI untouched.
-- [ ] AI-driven movement shows Gaussian noise and is captured by session recording (proof the
-      `emitSimulated` chokepoint is respected).
-- [ ] Toggle off → no socket file exists; CLI fails with a clear "AI control disabled" message.
-- [ ] App not running → CLI errors cleanly (no hang, no second pymobiledevice3 stack, no sudo
-      prompt).
-- [ ] Device not connected → commands for it fail with an actionable message; `status` makes
+- [x] With AI control enabled, an agent can (over the command socket, `nc -U`): list devices,
+      teleport a chosen device, plan+play a route on it, seek/pause/stop, and read status —
+      GUI untouched.
+- [x] AI-driven movement shows Gaussian noise and is captured by session recording (proof the
+      `SimulationActor.emit()` chokepoint is respected).
+- [x] Toggle off → no socket file exists; a connecting client fails with a clear "AI control
+      disabled" message.
+- [x] App not running → a connecting client errors cleanly (no hang, no second pymobiledevice3
+      stack, no sudo prompt).
+- [x] Device not connected → commands for it fail with an actionable message; `status` makes
       the state machine-readable.
-- [ ] Two devices: command for device A demonstrably never moves device B.
+- [ ] Two devices: command for device A demonstrably never moves device B. *(Structurally
+      guaranteed by per-UDID dispatch; the integration test is the tracked follow-up above.)*

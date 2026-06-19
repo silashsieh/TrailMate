@@ -1179,6 +1179,10 @@ private struct DeviceSwitcherRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(session.deviceName ?? String(localized: "No device"))
                         .font(.callout)
+                        // Emphasize the active session's name (epic 026): the
+                        // switcher already lists every device's name; weight marks
+                        // which one the control surface and status currently track.
+                        .fontWeight(isSelected ? .semibold : .regular)
                     Text(statusText)
                         .font(.caption2)
                         .foregroundStyle(statusColor)

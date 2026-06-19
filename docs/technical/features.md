@@ -132,6 +132,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Status & diagnostics
 
 - Connection status pill in the sidebar (Connecting / Connected / Disconnected / Error).
+- The connected device's friendly name surfaces in the status surfaces (epic 026): in the menu bar status summary, and emphasized for the active session in the sidebar device switcher. It clears on disconnect, so no stale name lingers (`AppState.connectedDeviceName` is the single source of truth).
 - A live log section in the sidebar (last 20 entries), a `DisclosureGroup` collapsed by default with the expand/collapse choice persisted across launches (`@AppStorage`). Expand it by clicking the **Log** row's disclosure triangle in the sidebar.
 - "View Full Log" sheet (monospaced, Copy All, Clear) showing daemon stdout/stderr — opened from the **View Full Log** button inside the expanded Log section.
 - Log entries for tunnel start, daemon exit, sleep, recording milestones, route deviation, joystick arming.
@@ -144,7 +145,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Menu bar & background mode (epic 021)
 
-- A `MenuBarExtra` shows a live status summary (connection + playback/recording) and quick actions (Pause/Resume/Stop, Disconnect, Open TrailMate, Quit), so the app stays controllable with the main window closed.
+- A `MenuBarExtra` shows a live status summary (connected device name + connection + playback/recording) and quick actions (Pause/Resume/Stop, Disconnect, Open TrailMate, Quit), so the app stays controllable with the main window closed. The name is truncated to keep the summary compact and tracks the active session under multi-device.
 - Closing the main window keeps the app — and the simulation + AI socket — alive: `applicationShouldTerminateAfterLastWindowClosed = false`, a single reopenable `Window(id:"main")`, and a dynamic activation policy (`.regular` with a window, `.accessory` when closed, configurable via a Dock toggle, with a guard so the app can never be left both icon-less and window-less). The App Nap activity token is connection-scoped, so a windowless app keeps simulating.
 
 ### Localization

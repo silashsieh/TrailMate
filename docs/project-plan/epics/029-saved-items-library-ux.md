@@ -2,11 +2,11 @@
 type: epic
 id: 029
 title: Saved-items library UX — reorder, categorize, auto-pan on select
-status: in-progress
+status: done
 milestone: v2.1.0
 issue: 46
 opened: 2026-06-19
-shipped:
+shipped: 2026-06-20
 tags: [ui, library]
 ---
 

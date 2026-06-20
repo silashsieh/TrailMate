@@ -6,7 +6,7 @@ status: done
 milestone: v2.1.0
 issue: 43
 opened: 2026-06-19
-shipped: 2026-06-19
+shipped: 2026-06-20
 tags: [bug, ui, map]
 ---
 

@@ -2,11 +2,11 @@
 type: epic
 id: 028
 title: Use the map and simulate a position while no device is connected
-status: in-progress
+status: done
 milestone: v2.1.0
 issue: 45
 opened: 2026-06-19
-shipped:
+shipped: 2026-06-20
 tags: [ui, map, simulation]
 ---
 

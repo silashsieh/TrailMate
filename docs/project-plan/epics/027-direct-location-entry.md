@@ -65,5 +65,5 @@ coordinates back out. Both are "direct location entry" gaps.
 
 ## Acceptance criteria
 
-- [ ] Searching a place and choosing "Go" teleports the device there; the route fields are untouched.
-- [ ] Typing lat/lon teleports; copy yields a paste-able coordinate string.
+- [x] Searching a place and choosing "Go" teleports the device there; the route fields are untouched.
+- [x] Typing lat/lon teleports; copy yields a paste-able coordinate string.

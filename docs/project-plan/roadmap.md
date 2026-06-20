@@ -46,7 +46,8 @@ sync at release cuts; the epic files remain authoritative.
   [026 — Connected device name in the status bar](epics/026-device-name-status-bar.md),
   [027 — Direct location entry (search-to-go + coordinates)](epics/027-direct-location-entry.md),
   [028 — Map & simulated position usable while disconnected](epics/028-map-while-disconnected.md),
-  [029 — Saved-items library UX (reorder, categorize, auto-pan)](epics/029-saved-items-library-ux.md).
+  [029 — Saved-items library UX (reorder, categorize, auto-pan)](epics/029-saved-items-library-ux.md),
+  [031 — Reclaim a stale tunneld before launching](epics/031-reclaim-stale-tunneld.md).
 - **Shipped (v2.0.0 — 2026-06-14) — Multi-device & AI control:**
   [012 — Simultaneous multi-device](epics/012-multi-device.md),
   [019 — AI tool integration (command socket layer; CLI & MCP deferred)](epics/019-ai-integration.md),

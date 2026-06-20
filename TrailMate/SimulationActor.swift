@@ -39,6 +39,7 @@ actor SimulationActor {
     private let noise = LocationNoise()
 
     private var backend: (any SimulationBackend)?
+    private var engineRunning = false
     private var aggregatorTask: Task<Void, Never>?
     private var idleJitterTask: Task<Void, Never>?
     private var controllerObservers: [NSObjectProtocol] = []
@@ -76,36 +77,26 @@ actor SimulationActor {
 
     // MARK: - Lifecycle
 
-    func attach(backend: any SimulationBackend) async {
-        self.backend = backend
-
-        // A restored (pre-connect) position has been display-only until now —
-        // detach() nils lastEmittedCoordinate, so this only fires for a launch
-        // restore. Broadcasting it here, before startJoystick anchors to it,
-        // is what turns "display default" into the device's actual location.
-        if let restored = lastEmittedCoordinate {
-            emit(restored)
-        }
-
-        // App Nap mitigation — keep the simulation loop ticking when TrailMate
-        // is backgrounded. Released in detach().
-        if activityToken == nil {
-            activityToken = ProcessInfo.processInfo.beginActivity(
-                options: .userInitiated,
-                reason: "TrailMate simulation loop"
-            )
-        }
-
+    // Starts the local simulation engine: the GCController observers and the
+    // aggregator + idle-jitter loops. The simulated position is a live local
+    // state that exists with or without a device — these loops run for the
+    // session's whole lifetime so teleport / route playback / joystick drive the
+    // red dot even while disconnected. A backend, once attached, just mirrors it.
+    // Idempotent; torn down by stopEngine() (session removal / quit), not detach().
+    func startEngine() async {
+        guard !engineRunning else { return }
+        engineRunning = true
         // GCController observers — when a hardware controller (dis)connects we
-        // update joy.connectedControllerName on the actor and refresh the
-        // bridge. Posted on the main queue; we hop into the actor.
+        // update joy.connectedControllerName on the actor and refresh the bridge.
         await setupControllerObservers()
-
         startAggregator()
         startIdleJitter()
     }
 
-    func detach() async {
+    // Full teardown for session removal / app quit. Unlike detach(), which only
+    // drops the device mirror, this stops the loops and clears the local position.
+    func stopEngine() async {
+        engineRunning = false
         aggregatorTask?.cancel(); aggregatorTask = nil
         idleJitterTask?.cancel(); idleJitterTask = nil
         for obs in controllerObservers {
@@ -119,6 +110,38 @@ actor SimulationActor {
         lastDisplayPush = nil
         deviationStartedAt = nil
         isScrubbing = false
+        backend = nil
+        if let token = activityToken {
+            ProcessInfo.processInfo.endActivity(token as! NSObjectProtocol)
+            activityToken = nil
+        }
+        await pushSnapshotNow()
+    }
+
+    // Attach a device backend — the output sink the loops mirror to. Snaps the
+    // device to the current red dot immediately: this is "the device follows the
+    // red dot on connect", whether that dot came from a launch restore or from
+    // offline control. Takes the App Nap token so the mirror keeps streaming when
+    // TrailMate is backgrounded (released in detach()). The loops are already
+    // running (startEngine), so connecting never restarts the simulation.
+    func attach(backend: any SimulationBackend) async {
+        self.backend = backend
+        if let current = lastEmittedCoordinate {
+            emit(current)
+        }
+        if activityToken == nil {
+            activityToken = ProcessInfo.processInfo.beginActivity(
+                options: .userInitiated,
+                reason: "TrailMate simulation loop"
+            )
+        }
+        await pushSnapshotNow()
+    }
+
+    // Drop the device mirror but keep simulating locally — the red dot stays put
+    // and controllable, so reconnecting re-syncs the device to wherever it ended
+    // up. Releases the App Nap token (no device to keep alive while disconnected).
+    func detach() async {
         backend = nil
         if let token = activityToken {
             ProcessInfo.processInfo.endActivity(token as! NSObjectProtocol)
@@ -357,7 +380,12 @@ actor SimulationActor {
     }
 
     private func idleJitterTick() {
-        guard nav.playbackState != .playing,
+        // Only jitter while mirroring a real device — the 1 Hz re-emit exists to
+        // keep fresh noisy points flowing to the device while idle. With no
+        // backend it would just drift the displayed (and persisted) red dot for
+        // no one, so the offline preview stays perfectly still until driven.
+        guard backend != nil,
+              nav.playbackState != .playing,
               !joy.isActive,
               let coord = lastEmittedCoordinate else { return }
         emit(coord)

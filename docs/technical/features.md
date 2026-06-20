@@ -20,18 +20,19 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Simulated position rendered as a distinct marker.
 - Right-click opens the destination menu at the pointer; a 0.5 s long-press is kept as a fallback trigger (see "Map-driven travel" below).
 - Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
-- The simulated position (red dot) persists too and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (Settings window, ⌘,) opts out back to a start-empty launch — the position is recorded either way. A restored position is display-only until connect: the device receives it when the session attaches.
+- The simulated position (red dot) is a live local state that exists with or without a device connected — teleport, route playback, and the joystick all move it offline, and a connected device mirrors it, snapping to its current spot the moment the session attaches (epic 028). It persists across launches and is restored on launch by default; first launch starts at the same Taipei landmark. "Restore last location on launch" (Settings window, ⌘,) opts out back to a start-empty launch — the position is recorded either way.
 - Follow control on the map overlay (next to Record) recenters on and tracks the simulated position, keeping the current zoom. Any manual camera gesture hands control back (MapKit user-tracking semantics); disabled until a simulated position exists; session-only, not persisted.
 - Pencil control beside them toggles freehand route drawing (see "Hand-drawn routes" below).
 
 ### Teleport
 
-- Right-click (or long-press) → "Teleport" sets the device location instantly.
-- Works at any time while connected. Doubles as the way to set the starting location for joystick input when launch restore is off.
-- Disconnecting reverts the device to its real GPS — the daemon clears the DVT `simulate-location` handle on shutdown. (There is no separate user-facing "Clear" control.)
+- Right-click (or long-press) → "Teleport" sets the simulated position instantly.
+- Works any time, connected or not — it moves the local red dot; a connected device follows immediately, a disconnected one snaps to it on the next connect. Doubles as the way to set the starting location for joystick input when launch restore is off.
+- Disconnecting reverts the *device* to its real GPS — the daemon clears the DVT `simulate-location` handle on shutdown — but the local red dot stays put and controllable, so reconnecting re-syncs the device to wherever it ended up. (There is no separate user-facing "Clear" control.)
 
 ### Route playback
 
+- The whole section works with no device connected: search, stops, transport, Calculate Route, GPX import/export, Save Route, and Play all function offline. Play animates the local red dot; a connected device mirrors it. Nothing here is gated on a connection (epic 028).
 - From/To via search or by promoting a destination picked on the map. A location-arrow button beside From fills it with the current simulated position (disabled until a position exists).
 - Optional intermediate stops between From and To, visited in order. Each stop has its own search field; "Add Stop" appears once both endpoints are set. Soft notice above 10 stops (Apple Maps throttling risk); no hard cap.
 - Transport mode: Walk (5 km/h), Cycle (15 km/h), Drive (50 km/h), or Custom km/h (`TransportMode.custom`).
@@ -47,7 +48,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Map-driven travel
 
-- Right-click anywhere on the map to open a native context menu at the pointer (its header shows the clicked coordinate); a 0.5 s long-press opens the same actions as a capsule action bar instead — kept as a fallback trigger. Both require a connected device. Actions:
+- Right-click anywhere on the map to open a native context menu at the pointer (its header shows the clicked coordinate); a 0.5 s long-press opens the same actions as a capsule action bar instead — kept as a fallback trigger. Every action drives the local red dot, so all of them work with or without a device connected (a connected device mirrors the result); only origin-dependent actions disable until a position exists (epic 028). Actions:
   - **Teleport** — instant. Trigger nuance when no simulated position exists yet: long-press teleports immediately (nothing to route from), while right-click still opens the menu with the origin-dependent actions disabled.
   - **Go directly** — straight-line travel at `transportMode.baseSpeed`, served by `NavigationEngine`'s two-point case.
   - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
@@ -73,7 +74,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Joystick
 
-- Arms on connect — no Start button — and only on the **selected** device, so the one physical controller / WASD / virtual stick drives one device at a time (switching the selected device re-homes the joystick). The engine stays inert (no SETQ, no marker) until a position seeds the integrator — the restored launch position (broadcast at attach) or, with restore off, the first teleport; from then on, stick input drives the simulated location at the configured base speed.
+- Armed on the **selected** device — no Start button, and regardless of connection, so the one physical controller / WASD / virtual stick drives one red dot at a time (switching the selected device re-homes the joystick). It steers the local position whether or not a device is attached; a connected device mirrors the motion (epic 028). The engine stays inert (no marker, and offline nothing to mirror) until a position seeds the integrator — the restored launch position or the first teleport; from then on, stick input drives the simulated location at the configured base speed.
 - Hardware game controller via `GameController.framework` (MFi / DualShock / Xbox / Joy-Con; hot-pluggable).
 - On-screen virtual stick (SwiftUI `DragGesture` inside a circular pad) as fallback. It floats in the map's bottom-trailing corner as a safe-area inset, so MapKit's built-in zoom and compass controls reflow above it and stay reachable instead of being occluded; the inset collapses when the stick is idle, returning the controls to the corner.
 - WASD + arrow-key input on the focused map view.
@@ -119,7 +120,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Session recording
 
-- Record button on the map overlay; captures the clean (pre-noise) coordinate on every `SimulationActor.emit()` call.
+- Record button on the map overlay (shown whether or not a device is connected); captures the clean (pre-noise) coordinate on every `SimulationActor.emit()` call, so it records the local red-dot path even with no device attached.
 - Sessions persist as GPX with per-point timestamps under `~/Library/Application Support/TrailMate/recordings/YYYY-MM-DD/`.
 - Recordings sidebar lists sessions newest-first; per-row Replay, Export, Delete, and "Save as Route…". (On disk they're grouped into per-date folders, per the path above.)
 - Replay plays the recorded coordinates at the current transport speed and multiplier (constant-speed); the per-point timestamps in the GPX are not used to pace playback.

@@ -257,6 +257,12 @@ final class AppState {
             Task { await first.sim.teleport(to: restored) }
         }
 
+        // Arm the selected session's joystick now (the selectedSessionID didSet
+        // doesn't fire for the in-init assignment above). Joystick steers the
+        // local red dot whether or not a device is connected, so it's armed from
+        // launch rather than waiting for the first connect.
+        syncActiveJoystick()
+
         #if DEBUG
         if UITestSupport.openWander {
             pendingWanderCenter = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
@@ -337,7 +343,9 @@ final class AppState {
     // this was the last session, leave a fresh unbound one in its place. If the
     // removed session was selected, fall back to the first remaining session.
     func removeSession(_ session: DeviceSession) {
-        Task { await session.disconnect() }
+        // shutdown(), not disconnect(): the sim engine now runs for the session's
+        // whole life, so a removed slot must stop its loops or they leak.
+        Task { await session.shutdown() }
         sessions.removeAll { $0.id == session.id }
         if sessions.isEmpty {
             sessions = [DeviceSession(manager: self)]
@@ -348,14 +356,15 @@ final class AppState {
         syncActiveJoystick()
     }
 
-    // Keep exactly the selected, connected session's joystick armed, so the one
-    // physical controller / WASD / virtual stick drives one device. Called on
-    // selection change and after every connect/disconnect. A disarmed engine
-    // still reads the controller in its tick but contributes no velocity, so
-    // non-selected devices never move from joystick input.
+    // Keep exactly the selected session's joystick armed, so the one physical
+    // controller / WASD / virtual stick drives one red dot. Armed regardless of
+    // connection — the joystick steers the local position whether or not a device
+    // is mirroring it. Called on selection change and after every connect/disconnect.
+    // A disarmed engine still reads the controller in its tick but contributes no
+    // velocity, so non-selected devices never move from joystick input.
     func syncActiveJoystick() {
         for s in sessions {
-            s.setJoystickArmed(s.id == selectedSessionID && s.connectionStatus.isConnected)
+            s.setJoystickArmed(s.id == selectedSessionID)
         }
     }
 
@@ -409,7 +418,7 @@ final class AppState {
     func prepareForQuit() async {
         commandServer.stop()
         for s in sessions {
-            await s.disconnect()
+            await s.shutdown()
         }
         tunnelBroker.stop()
     }

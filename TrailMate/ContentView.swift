@@ -57,10 +57,11 @@ private struct SidebarView: View {
                 }
             }
 
-            if appState.connectionStatus.isConnected {
-                RouteSection()
-                JoystickSection()
-            }
+            // Both sections drive the local red dot, with or without a device
+            // attached (the device mirrors it once connected), so neither is
+            // gated on connection.
+            RouteSection()
+            JoystickSection()
 
             if !appState.savedWaypoints.isEmpty || appState.simState.simulatedCoordinate != nil {
                 SavedLocationsSection()
@@ -385,7 +386,6 @@ private struct PlaybackControls: View {
                     Label("Play", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .disabled(!appState.connectionStatus.isConnected)
             case .playing:
                 Button {
                     appState.pausePlayback()
@@ -1477,11 +1477,11 @@ private struct MapArea: View {
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
                     .onEnded { value in
                         guard case .second(true, let drag) = value, let drag else { return }
-                        guard appState.connectionStatus.isConnected else { return }
                         guard let coordinate = proxy.convert(drag.location, from: .local) else { return }
 
                         // First press: there's no origin yet, so a popover offering "Go directly"
-                        // or "Route here" would have nothing to anchor from. Teleport instead.
+                        // or "Route here" would have nothing to anchor from. Teleport instead
+                        // (works whether or not a device is connected — it moves the red dot).
                         if appState.simState.simulatedCoordinate == nil {
                             appState.teleport(to: coordinate)
                         } else {
@@ -1565,12 +1565,12 @@ private struct MapArea: View {
                         .padding(.vertical, 8)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
 
-                        if appState.connectionStatus.isConnected {
-                            RecordButton()
-                            followButton
-                        }
-                        // Unlike Record/Follow, drawing is route *construction* and
-                        // needs no device — same as the sidebar planner.
+                        // Record, Follow, and Draw all act on the local red dot or
+                        // route, not the device — Record captures the simulated path
+                        // (offline too), Follow tracks the dot's camera, Draw builds a
+                        // route — so all three show whether or not a device is connected.
+                        RecordButton()
+                        followButton
                         drawButton
                     }
 
@@ -1700,12 +1700,12 @@ private struct MapArea: View {
 
     // Right-click destination menu: same actions as DestinationActionBar (the long-press
     // capsule), presented as a native context menu at the pointer — macOS convention, and
-    // consistent with the sidebar rows' .contextMenu. Empty content while disconnected
-    // suppresses the menu entirely, mirroring the long-press guard.
+    // consistent with the sidebar rows' .contextMenu. Every action drives the local red dot
+    // (the device mirrors it when connected), so none gate on connection; only origin-
+    // dependent actions disable until a position exists.
     @ViewBuilder
     private func destinationMenu(proxy: MapProxy) -> some View {
         if !isDrawingRoute,
-           appState.connectionStatus.isConnected,
            let point = lastHoverPoint,
            let coordinate = proxy.convert(point, from: .local) {
             Section(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)) {
@@ -1766,22 +1766,27 @@ private struct MapArea: View {
             return String(localized: "Drag to draw a route — Esc to cancel")
         }
         switch appState.connectionStatus {
-        case .disconnected:
-            return String(localized: "Connect to a device to start")
         case .connecting:
             return String(localized: "Connecting…")
-        case .connected:
+        case .error:
+            return String(localized: "Connection error — check sidebar")
+        case .connected, .disconnected:
+            // The map drives the local red dot whether or not a device is
+            // attached; the status dot beside this text already shows the
+            // connection. So the copy is about the simulation, only
+            // distinguishing "mirrored to a device" (Simulating) from
+            // "local only" (Local position).
             if appState.simState.navigationPlaybackState == .playing {
                 let pct = Int(appState.simState.navigationProgress * 100)
                 // Explicit format string keeps the lone % escaped as %%.
                 return String(format: String(localized: "Playing route — %d%%"), pct)
             }
             if let coord = appState.simState.simulatedCoordinate {
-                return String(format: String(localized: "Simulating: %.4f, %.4f"), coord.latitude, coord.longitude)
+                return appState.connectionStatus.isConnected
+                    ? String(format: String(localized: "Simulating: %.4f, %.4f"), coord.latitude, coord.longitude)
+                    : String(format: String(localized: "Local position: %.4f, %.4f"), coord.latitude, coord.longitude)
             }
             return String(localized: "Right-click the map to set a starting location")
-        case .error:
-            return String(localized: "Connection error — check sidebar")
         }
     }
 }

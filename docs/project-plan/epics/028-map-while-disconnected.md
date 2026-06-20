@@ -80,9 +80,10 @@ disconnecting reverts the device to real GPS but leaves the red dot put and cont
 - Saved-location rows (`SavedLocationRow`, owned by epic 029) call `teleportToWaypoint`, which now
   works offline too (it moves the red dot) — no change needed, and the affordance is consistent
   with the rest of the map. 029 can treat these as ordinary offline-capable controls.
-- Record / Follow on the map overlay are still shown only while connected. They're observe/capture
-  controls, not red-dot *control*, so they were left as-is in this epic; making them available
-  offline (Follow especially, now that the dot moves offline) is a reasonable follow-up.
+- Record / Follow on the map overlay now show whether or not a device is connected, like the
+  rest of the map controls: Record captures the local red-dot path (the recorder appends on every
+  `emit()`, device or not) and Follow tracks the dot's camera. Both already worked at the model
+  level — only the overlay had hidden them while disconnected.
 
 ## Acceptance criteria
 

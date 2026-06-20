@@ -1554,12 +1554,12 @@ private struct MapArea: View {
                         .padding(.vertical, 8)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
 
-                        if appState.connectionStatus.isConnected {
-                            RecordButton()
-                            followButton
-                        }
-                        // Unlike Record/Follow, drawing is route *construction* and
-                        // needs no device — same as the sidebar planner.
+                        // Record, Follow, and Draw all act on the local red dot or
+                        // route, not the device — Record captures the simulated path
+                        // (offline too), Follow tracks the dot's camera, Draw builds a
+                        // route — so all three show whether or not a device is connected.
+                        RecordButton()
+                        followButton
                         drawButton
                     }
 

@@ -120,7 +120,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Session recording
 
-- Record button on the map overlay; captures the clean (pre-noise) coordinate on every `SimulationActor.emit()` call.
+- Record button on the map overlay (shown whether or not a device is connected); captures the clean (pre-noise) coordinate on every `SimulationActor.emit()` call, so it records the local red-dot path even with no device attached.
 - Sessions persist as GPX with per-point timestamps under `~/Library/Application Support/TrailMate/recordings/YYYY-MM-DD/`.
 - Recordings sidebar lists sessions newest-first; per-row Replay, Export, Delete, and "Save as Route…". (On disk they're grouped into per-date folders, per the path above.)
 - Replay plays the recorded coordinates at the current transport speed and multiplier (constant-speed); the per-point timestamps in the GPX are not used to pace playback.

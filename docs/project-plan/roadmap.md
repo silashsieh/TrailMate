@@ -38,8 +38,9 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v2.2.0 — Coverage routing:**
-  [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md).
+- **v2.2.0 — Coverage routing & test refresh:**
+  [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md),
+  [033 — Refresh test & UI coverage for features shipped since v2.0.0](epics/033-refresh-test-coverage.md).
 - **Shipped (v2.1.0 — 2026-06-20) — UI polish, offline use & direct location entry:**
   [024 — Fix joystick/map-control overlap](epics/024-joystick-map-control-overlap.md),
   [025 — Collapse the sidebar log by default](epics/025-collapse-log-default.md),

@@ -2,11 +2,11 @@
 type: epic
 id: 027
 title: Direct location entry — search-to-go and coordinate field
-status: in-progress
+status: done
 milestone: v2.1.0
 issue: 42
 opened: 2026-06-19
-shipped:
+shipped: 2026-06-20
 tags: [ui, map, positioning]
 ---
 

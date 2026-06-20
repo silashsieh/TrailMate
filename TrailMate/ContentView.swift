@@ -22,35 +22,6 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Connection gating
-
-// Copy shared by every gated control and the map's disconnected status pill, so
-// the "you need a device" message reads identically wherever it surfaces.
-private let connectToDriveHint = String(localized: "Connect a device to drive it")
-
-// Gates a single device-*driving* control (play, teleport, …) on a live
-// connection. Planning controls are never wrapped — they work offline. While
-// disconnected the control is disabled and carries a discreet hover hint rather
-// than vanishing, so the affordance stays discoverable without nagging
-// (decisions.md D9). `connectionStatus.isConnected` is the one source of truth;
-// this modifier never introduces a parallel flag.
-private struct RequiresConnection: ViewModifier {
-    @Environment(AppState.self) private var appState
-
-    func body(content: Content) -> some View {
-        let connected = appState.connectionStatus.isConnected
-        content
-            .disabled(!connected)
-            .help(connected ? "" : connectToDriveHint)
-    }
-}
-
-extension View {
-    func requiresConnection() -> some View {
-        modifier(RequiresConnection())
-    }
-}
-
 // MARK: - Sidebar
 
 private struct SidebarView: View {
@@ -83,15 +54,11 @@ private struct SidebarView: View {
                 }
             }
 
-            // Route planning — search, stops, calculate, save, import/export —
-            // is offline work; only the device-driving controls inside it gate
-            // on a connection (see RequiresConnection). The Joystick surface is
-            // pure status for a control that only arms once connected, so it
-            // stays hidden until then rather than showing an inert row.
+            // Both sections drive the local red dot, with or without a device
+            // attached (the device mirrors it once connected), so neither is
+            // gated on connection.
             RouteSection()
-            if appState.connectionStatus.isConnected {
-                JoystickSection()
-            }
+            JoystickSection()
 
             if !appState.savedWaypoints.isEmpty || appState.simState.simulatedCoordinate != nil {
                 SavedLocationsSection()
@@ -412,7 +379,6 @@ private struct PlaybackControls: View {
                     Label("Play", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .requiresConnection()
             case .playing:
                 Button {
                     appState.pausePlayback()
@@ -1319,7 +1285,6 @@ private struct DestinationActionBar: View {
                 Label("Teleport", systemImage: "bolt.fill")
             }
             .buttonStyle(.borderless)
-            .requiresConnection()
 
             Button {
                 onAction(.direct)
@@ -1327,7 +1292,6 @@ private struct DestinationActionBar: View {
                 Label("Go directly", systemImage: "arrow.up.right.circle")
             }
             .buttonStyle(.borderless)
-            .requiresConnection()
 
             Button {
                 onAction(.route)
@@ -1343,7 +1307,6 @@ private struct DestinationActionBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
-            .requiresConnection()
 
             if !appState.routeCoordinates.isEmpty {
                 Divider().frame(height: 14)
@@ -1354,7 +1317,6 @@ private struct DestinationActionBar: View {
                     Label("Append direct", systemImage: "arrow.forward.to.line")
                 }
                 .buttonStyle(.borderless)
-                .requiresConnection()
 
                 Button {
                     onAction(.appendRoute)
@@ -1363,7 +1325,6 @@ private struct DestinationActionBar: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(appState.isCalculatingRoute)
-                .requiresConnection()
             }
 
             Divider().frame(height: 14)
@@ -1375,7 +1336,6 @@ private struct DestinationActionBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
-            .requiresConnection()
 
             Button {
                 onAction(.cancel)
@@ -1508,12 +1468,10 @@ private struct MapArea: View {
                         guard case .second(true, let drag) = value, let drag else { return }
                         guard let coordinate = proxy.convert(drag.location, from: .local) else { return }
 
-                        // Immediate-teleport is a connected-only shortcut for the first press
-                        // (no origin yet, so "Go directly"/"Route here" would have nothing to
-                        // anchor from). Otherwise — including any time we're disconnected —
-                        // present the action bar so its device-driving buttons show the disabled
-                        // "connect" affordance rather than the gesture silently doing nothing.
-                        if appState.connectionStatus.isConnected, appState.simState.simulatedCoordinate == nil {
+                        // First press: there's no origin yet, so a popover offering "Go directly"
+                        // or "Route here" would have nothing to anchor from. Teleport instead
+                        // (works whether or not a device is connected — it moves the red dot).
+                        if appState.simState.simulatedCoordinate == nil {
                             appState.teleport(to: coordinate)
                         } else {
                             pendingDestination = coordinate
@@ -1731,11 +1689,9 @@ private struct MapArea: View {
 
     // Right-click destination menu: same actions as DestinationActionBar (the long-press
     // capsule), presented as a native context menu at the pointer — macOS convention, and
-    // consistent with the sidebar rows' .contextMenu. The menu opens whether or not a device
-    // is connected (so the coordinate and the available travel actions stay discoverable);
-    // every action drives the device, so each is gated with .requiresConnection() and a
-    // disconnected hint row explains why they're dimmed — context menus don't surface the
-    // .help tooltip the way the capsule does.
+    // consistent with the sidebar rows' .contextMenu. Every action drives the local red dot
+    // (the device mirrors it when connected), so none gate on connection; only origin-
+    // dependent actions disable until a position exists.
     @ViewBuilder
     private func destinationMenu(proxy: MapProxy) -> some View {
         if !isDrawingRoute,
@@ -1747,7 +1703,6 @@ private struct MapArea: View {
                 } label: {
                     Label("Teleport", systemImage: "bolt.fill")
                 }
-                .requiresConnection()
 
                 // Unlike long-press (which teleports instantly when there's no origin), a
                 // context menu always opens; origin-dependent actions just disable instead.
@@ -1757,7 +1712,6 @@ private struct MapArea: View {
                     Label("Go directly", systemImage: "arrow.up.right.circle")
                 }
                 .disabled(appState.simState.simulatedCoordinate == nil)
-                .requiresConnection()
 
                 Button {
                     Task { await appState.routeFromCurrent(to: coordinate) }
@@ -1765,7 +1719,6 @@ private struct MapArea: View {
                     Label("Route here", systemImage: "map.fill")
                 }
                 .disabled(appState.simState.simulatedCoordinate == nil || appState.isCalculatingRoute)
-                .requiresConnection()
             }
 
             if !appState.routeCoordinates.isEmpty {
@@ -1775,7 +1728,6 @@ private struct MapArea: View {
                     } label: {
                         Label("Append direct", systemImage: "arrow.forward.to.line")
                     }
-                    .requiresConnection()
 
                     Button {
                         Task { await appState.appendRoute(to: coordinate) }
@@ -1783,7 +1735,6 @@ private struct MapArea: View {
                         Label("Append route", systemImage: "arrow.triangle.branch")
                     }
                     .disabled(appState.isCalculatingRoute)
-                    .requiresConnection()
                 }
             }
 
@@ -1795,13 +1746,6 @@ private struct MapArea: View {
                     Label("Wander nearby…", systemImage: "shuffle.circle")
                 }
                 .disabled(appState.isCalculatingRoute)
-                .requiresConnection()
-            }
-
-            if !appState.connectionStatus.isConnected {
-                Section {
-                    Text(connectToDriveHint)
-                }
             }
         }
     }
@@ -1811,25 +1755,27 @@ private struct MapArea: View {
             return String(localized: "Drag to draw a route — Esc to cancel")
         }
         switch appState.connectionStatus {
-        case .disconnected:
-            // Planning works offline now; the map's own travel actions
-            // (right-click / long-press) are what need a device, so the pill
-            // shares the gated-control copy instead of implying nothing works.
-            return connectToDriveHint
         case .connecting:
             return String(localized: "Connecting…")
-        case .connected:
+        case .error:
+            return String(localized: "Connection error — check sidebar")
+        case .connected, .disconnected:
+            // The map drives the local red dot whether or not a device is
+            // attached; the status dot beside this text already shows the
+            // connection. So the copy is about the simulation, only
+            // distinguishing "mirrored to a device" (Simulating) from
+            // "local only" (Local position).
             if appState.simState.navigationPlaybackState == .playing {
                 let pct = Int(appState.simState.navigationProgress * 100)
                 // Explicit format string keeps the lone % escaped as %%.
                 return String(format: String(localized: "Playing route — %d%%"), pct)
             }
             if let coord = appState.simState.simulatedCoordinate {
-                return String(format: String(localized: "Simulating: %.4f, %.4f"), coord.latitude, coord.longitude)
+                return appState.connectionStatus.isConnected
+                    ? String(format: String(localized: "Simulating: %.4f, %.4f"), coord.latitude, coord.longitude)
+                    : String(format: String(localized: "Local position: %.4f, %.4f"), coord.latitude, coord.longitude)
             }
             return String(localized: "Right-click the map to set a starting location")
-        case .error:
-            return String(localized: "Connection error — check sidebar")
         }
     }
 }

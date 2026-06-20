@@ -205,16 +205,6 @@
         }
       }
     },
-    "Connect a device to drive it": {
-      "localizations": {
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "連線裝置後才能操控"
-          }
-        }
-      }
-    },
     "Connect will request admin access to open the RSD tunnel.": {
       "localizations": {
         "zh-Hant": {
@@ -521,6 +511,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "載入"
+          }
+        }
+      }
+    },
+    "Local position: %.4f, %.4f": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地位置：%1$.4f, %2$.4f"
           }
         }
       }

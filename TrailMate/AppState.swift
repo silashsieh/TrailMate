@@ -183,6 +183,12 @@ final class AppState {
     // and frame the map on it (#53). See MapFocusRequest.
     var mapFocus: MapFocusRequest?
 
+    // Standalone place search for direct location entry (epic 027, #42),
+    // independent of the route From/To searches. Selecting a result teleports
+    // the red dot rather than filling a route slot. App-global because it
+    // targets the selected session's position, like teleport.
+    let placeSearch = LocationSearch()
+
     // Routing kernel (D4). Swappable behind the protocol; MapKit today. Stateless
     // and shared across sessions (the MapKit throttle is per-process, not
     // per-route).
@@ -442,6 +448,38 @@ final class AppState {
     }
     func teleport(to coordinate: CLLocationCoordinate2D) { selectedSession.teleport(to: coordinate) }
     func clearLocation() async { await selectedSession.clearLocation() }
+
+    // MARK: - Direct location entry (epic 027)
+
+    // Resolve a searched place and teleport the red dot there (#42), framing it
+    // on the map like a selected saved location. Independent of the route From/To
+    // fields — it consumes no route slot. Not connection-gated: teleport moves
+    // the local dot and a connected device mirrors it (epic 028).
+    func goToSearchResult(_ completion: MKLocalSearchCompletion) async {
+        placeSearch.select(completion)
+        guard let coord = await placeSearch.resolve(completion) else {
+            addLog("Couldn't resolve “\(completion.title)”.")
+            return
+        }
+        mapFocus = MapFocusRequest(region: MapRegionMath.region(around: coord))
+        selectedSession.teleport(to: coord)
+    }
+
+    // Teleport the red dot to a typed decimal-degree coordinate (#52); frames it
+    // on the map. The caller parses via CoordinateFormat, so this takes a
+    // resolved coordinate.
+    func goToCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        mapFocus = MapFocusRequest(region: MapRegionMath.region(around: coordinate))
+        selectedSession.teleport(to: coordinate)
+    }
+
+    // Copy a coordinate to the clipboard as a paste-able "lat, lon" string (#52).
+    func copyCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        let text = CoordinateFormat.string(from: coordinate)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        addLog("Copied coordinate: \(text)")
+    }
     func selectFrom(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectFrom(completion) }
     func useCurrentLocationAsFrom() { selectedSession.useCurrentLocationAsFrom() }
     func selectTo(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectTo(completion) }

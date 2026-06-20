@@ -57,6 +57,10 @@ private struct SidebarView: View {
                 }
             }
 
+            // Direct location entry (epic 027): search a place or type a
+            // coordinate to teleport the red dot, independent of route endpoints.
+            DirectLocationSection()
+
             // Both sections drive the local red dot, with or without a device
             // attached (the device mirrors it once connected), so neither is
             // gated on connection.
@@ -293,6 +297,80 @@ private struct SearchField: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Direct location entry (epic 027)
+
+// Search a place or type a coordinate to teleport the red dot, independent of
+// the route From/To fields (#42, #52). Selecting a search result or submitting
+// a coordinate teleports directly — it consumes no route slot — and a copy
+// affordance puts the current position on the clipboard. Nothing here gates on
+// a connection: teleport drives the local dot, mirrored by a device when one is
+// attached (epic 028).
+private struct DirectLocationSection: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        Section("Go to Location") {
+            // Tapping a result goes straight there (it is the "Go here"
+            // affordance), unlike the route fields where selection just fills
+            // the slot.
+            SearchField(
+                label: "Search for a place",
+                search: appState.placeSearch,
+                onSelect: { completion in
+                    Task { await appState.goToSearchResult(completion) }
+                }
+            )
+
+            CoordinateEntryField()
+
+            if let coord = appState.simState.simulatedCoordinate {
+                Button {
+                    appState.copyCoordinate(coord)
+                } label: {
+                    Label("Copy Current Coordinate", systemImage: "doc.on.doc")
+                }
+            }
+        }
+    }
+}
+
+// Decimal-degree "lat, lon" entry that teleports on submit (#52). The Go button
+// and Return both commit; the button disables until the text parses, and a
+// short hint appears after a failed parse.
+private struct CoordinateEntryField: View {
+    @Environment(AppState.self) private var appState
+    @State private var text = ""
+    @State private var showHint = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                TextField("lat, lon", text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { go() }
+
+                Button("Go") { go() }
+                    .disabled(CoordinateFormat.parse(text) == nil)
+            }
+
+            if showHint {
+                Text("Enter decimal degrees, e.g. 25.0330, 121.5654")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func go() {
+        guard let coord = CoordinateFormat.parse(text) else {
+            showHint = true
+            return
+        }
+        showHint = false
+        appState.goToCoordinate(coord)
     }
 }
 
@@ -1379,7 +1457,7 @@ private struct RecordButton: View {
 // MARK: - Destination action bar
 
 private struct DestinationActionBar: View {
-    enum Action { case teleport, direct, route, wander, appendDirect, appendRoute, cancel }
+    enum Action { case teleport, direct, route, wander, appendDirect, appendRoute, copy, cancel }
 
     let coord: CLLocationCoordinate2D
     let onAction: (Action) -> Void
@@ -1452,6 +1530,15 @@ private struct DestinationActionBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
+
+            Divider().frame(height: 14)
+
+            Button {
+                onAction(.copy)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
 
             Button {
                 onAction(.cancel)
@@ -1705,6 +1792,11 @@ private struct MapArea: View {
                                 Task { await appState.appendDirectly(to: dest) }
                             case .appendRoute:
                                 Task { await appState.appendRoute(to: dest) }
+                            case .copy:
+                                // Leave the bar up so copy can precede another
+                                // action on the same point.
+                                appState.copyCoordinate(dest)
+                                return
                             case .cancel:
                                 break
                             }
@@ -1872,6 +1964,12 @@ private struct MapArea: View {
                     Label("Wander nearby…", systemImage: "shuffle.circle")
                 }
                 .disabled(appState.isCalculatingRoute)
+
+                Button {
+                    appState.copyCoordinate(coordinate)
+                } label: {
+                    Label("Copy Coordinate", systemImage: "doc.on.doc")
+                }
             }
         }
     }

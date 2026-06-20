@@ -265,12 +265,42 @@
         }
       }
     },
+    "Copy": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製"
+          }
+        }
+      }
+    },
     "Copy All": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "全部複製"
+          }
+        }
+      }
+    },
+    "Copy Coordinate": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製座標"
+          }
+        }
+      }
+    },
+    "Copy Current Coordinate": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製目前座標"
           }
         }
       }
@@ -415,6 +445,16 @@
         }
       }
     },
+    "Enter decimal degrees, e.g. 25.0330, 121.5654": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "輸入十進位度，例如 25.0330, 121.5654"
+          }
+        }
+      }
+    },
     "Export GPX": {
       "localizations": {
         "zh-Hant": {
@@ -475,12 +515,32 @@
         }
       }
     },
+    "Go": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前往"
+          }
+        }
+      }
+    },
     "Go directly": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "直接前往"
+          }
+        }
+      }
+    },
+    "Go to Location": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前往位置"
           }
         }
       }
@@ -1001,6 +1061,16 @@
         }
       }
     },
+    "Search for a place": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋地點"
+          }
+        }
+      }
+    },
     "Select…": {
       "localizations": {
         "zh-Hant": {
@@ -1206,6 +1276,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "公里/小時"
+          }
+        }
+      }
+    },
+    "lat, lon": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "緯度, 經度"
           }
         }
       }

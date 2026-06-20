@@ -16,7 +16,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 ### Map view
 
 - Full-pane MapKit view with pan / zoom.
-- Search bar with `MKLocalSearchCompleter` autocomplete (used in route From/To pickers).
+- Search bar with `MKLocalSearchCompleter` autocomplete (used in the route From/To pickers and the standalone "Go to Location" search — see "Direct location entry").
 - Simulated position rendered as a distinct marker.
 - Right-click opens the destination menu at the pointer; a 0.5 s long-press is kept as a fallback trigger (see "Map-driven travel" below).
 - Camera position (center + span) persists across launches via `UserDefaults`; first launch defaults to Taipei.
@@ -29,6 +29,14 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - Right-click (or long-press) → "Teleport" sets the simulated position instantly.
 - Works any time, connected or not — it moves the local red dot; a connected device follows immediately, a disconnected one snaps to it on the next connect. Doubles as the way to set the starting location for joystick input when launch restore is off.
 - Disconnecting reverts the *device* to its real GPS — the daemon clears the DVT `simulate-location` handle on shutdown — but the local red dot stays put and controllable, so reconnecting re-syncs the device to wherever it ended up. (There is no separate user-facing "Clear" control.)
+
+### Direct location entry (epic 027)
+
+- "Go to Location" sidebar section, independent of the route From/To fields — it consumes no route slot.
+- **Search a place → go there.** A standalone `MKLocalSearchCompleter` search field; tapping a result resolves it and teleports the red dot directly (the result row *is* the "go here" affordance, unlike the route fields where a pick just fills the slot), then frames it on the map (#42).
+- **Coordinate field.** Type a decimal-degree `lat, lon` and press Return or "Go" to teleport (#52). `CoordinateFormat.parse` accepts a comma or whitespace separator, tolerates surrounding whitespace and signed values, and range-checks lat ∈ [-90, 90] / lon ∈ [-180, 180]; the Go button stays disabled until the text parses, and a one-line hint appears after a failed parse. Decimal degrees only — DMS is out of scope.
+- **Copy a coordinate.** "Copy Current Coordinate" copies the red dot's position to the clipboard (`NSPasteboard`) as a paste-able `lat, lon` string (`CoordinateFormat.string(from:)`, 6 dp, round-trips back through the coordinate field). The map's right-click destination menu and long-press action bar also offer "Copy" for the clicked point (#52).
+- All of these reuse the existing teleport path, so none are gated on a connection: they move the local red dot and a connected device mirrors it (epic 028).
 
 ### Route playback
 
@@ -54,6 +62,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
   - **Route here** — `MKDirections` from the current simulated position to the chosen point; auto-plays.
   - **Append direct / Append route** — extend the loaded route from its end to the chosen point (straight line / `MKDirections`); offered only while a route is loaded.
   - **Wander nearby…** — opens a sheet to pick a radius (250 / 500 / 750 m or custom) and a duration (30 / 60 / 120 min or custom). The last selection — including custom values — persists across launches via `UserDefaults` (`WanderPresetPersistence`); first run defaults to 500 m / 60 min. `WanderRouteBuilder` chains `MKDirections` walking hops between random points around the chosen center until total walked distance ≈ `effectiveBaseSpeedMPS × duration`. The wander may leak slightly beyond the disc; result is loaded into `NavigationEngine` and auto-plays. The generated route itself is one-shot, not persisted.
+  - **Copy** — copies the clicked point's coordinate to the clipboard as a paste-able `lat, lon` string (epic 027, #52); in the action bar it leaves the bar open so it can precede another action on the same point.
 
 ### Hand-drawn routes
 

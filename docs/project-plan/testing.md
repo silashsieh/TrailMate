@@ -49,6 +49,9 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 | `StrokeGeometryTests` | Hand-drawn stroke smoothing (Chaikin) + resampling. |
 | `CommandProtocolTests` | AI command-layer value types: verb parsing (case, whitespace, missing/invalid args), JSON response encoding (optionals omitted), greeting line. |
 | `CommandDispatchTests` | Multi-device routing (epic 012): `TELEPORT <A>` moves only A's integrator (A-never-moves-B), unknown vs not-connected UDIDs return the right codes, STATUS reports per-device state. Uses ≥2 sessions via a DEBUG `bindConnectedForTesting` seam (no tunnel/daemon). |
+| `CoordinateFormatTests` | Direct location entry (epic 027): decimal-degrees `lat, lon` parsing (whitespace/signs accepted, out-of-range and garbage rejected) and the paste-able clipboard formatting round-trip. |
+| `SavedItemsLibraryTests` | Saved-items library (epic 029): `LibraryOrder` drag-reorder/sort + category-assignment persistence, and `MapRegionMath` auto-pan framing for a selected saved location/route. Pure, nonisolated helpers. |
+| `TunnelBrokerReclaimTests` | Stale-tunneld reclaim loop (epic 031) via an injected probe/shutdown: skips when nothing's listening, reclaims then confirms the port frees, and reports failure when a tunneld won't die. No networking. |
 
 ## UI Tests (implemented)
 

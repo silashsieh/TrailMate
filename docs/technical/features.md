@@ -107,15 +107,16 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Saved waypoints
 
-- Save current location with a name prompt; persists to `UserDefaults` as JSON.
-- Sidebar list with click-to-teleport, right-click rename (inline, Finder-style) / delete.
+- Save current location with a name prompt; persists to `UserDefaults` as JSON (name, coordinate, optional folder).
+- Sidebar list. Click a row to **select** it: the map pans and frames the location, and — when connected — the device teleports there. Right-click for rename (inline, Finder-style) / delete.
+- **Drag to reorder** within a section; the order persists (it's the stored array order). Right-click → **Category** files the item into a user-defined folder (pick an existing one or create a new one); each folder renders as its own sidebar section. Folders are derived from the items, so an emptied folder simply disappears.
 
 ### Saved routes
 
 - `SavedRoute` with name, transport mode, coordinates, and a `source` tag. Two values are written today: `recorded` (a recording promoted via "Save as Route…") and `calculated` (everything saved with the Route section's "Save Route…", which currently tags *all* loaded routes — planner, direct, imported, wander, and hand-drawn — as `calculated`).
-- Persisted as per-route JSON under `~/Library/Application Support/TrailMate/routes/`.
-- Per-row Load / Replay / Rename (inline, Finder-style) / Delete. To export a route as GPX,
-  load it and use the Route section's Export GPX.
+- Persisted as per-route JSON under `~/Library/Application Support/TrailMate/routes/`. The drag-reorder sequence lives in a sidecar `order.json` in the same folder (a reorder is one small write, not a rewrite of every route file); the folder assignment lives in each route's own JSON.
+- Per-row Load / Replay / Rename (inline, Finder-style) / Delete. Selecting a route (tap, Load, or Replay) frames the whole route on the map. To export a route as GPX, load it and use the Route section's Export GPX.
+- **Drag to reorder** and right-click → **Category** folder assignment, same model as saved locations (folders are derived from the items; reordering one folder leaves the others put).
 - "Save as Route…" promotes a recorded session into the route library.
 
 ### Session recording

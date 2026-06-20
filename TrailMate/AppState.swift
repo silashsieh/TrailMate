@@ -52,10 +52,24 @@ struct SavedWaypoint: Codable, Identifiable {
     var name: String
     var latitude: Double
     var longitude: Double
+    // User-defined folder this waypoint lives under (epic 029). nil = ungrouped,
+    // shown under the top-level "Saved Locations" header. decodeIfPresent makes
+    // it backward-compatible with waypoints saved before the field existed.
+    var category: String?
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
+}
+
+// A one-shot request for the map to pan/zoom so a selected library item is
+// framed (#53). MapArea observes `AppState.mapFocus` and applies `region`; a
+// fresh `id` per request means re-selecting the same item pans again. The
+// region is computed in AppState (it owns the coordinates) so MapArea just
+// applies it — keeping camera-math in one place.
+struct MapFocusRequest: Identifiable {
+    let id = UUID()
+    let region: MKCoordinateRegion
 }
 
 // The device manager. Owns app-global concerns — discovery, the device
@@ -164,6 +178,10 @@ final class AppState {
     let recorder = RecorderService()
     let savedRoutes = SavedRoutesStore()
     var savedWaypoints: [SavedWaypoint] = []
+
+    // Set when a saved location/route is selected; consumed by MapArea to pan
+    // and frame the map on it (#53). See MapFocusRequest.
+    var mapFocus: MapFocusRequest?
 
     // Routing kernel (D4). Swappable behind the protocol; MapKit today. Stateless
     // and shared across sessions (the MapKit throttle is per-process, not
@@ -771,8 +789,38 @@ final class AppState {
         persistWaypoints()
     }
 
+    // Selecting a saved location frames it on the map (#53) and, when connected,
+    // teleports the device to it — the pre-029 tap behavior, kept additive so the
+    // map also moves even while disconnected (saved sections render disconnected).
     func teleportToWaypoint(_ waypoint: SavedWaypoint) {
+        mapFocus = MapFocusRequest(region: MapRegionMath.region(around: waypoint.coordinate))
         selectedSession.teleport(to: waypoint.coordinate)
+    }
+
+    // MARK: - Saved-location grouping & ordering (epic 029)
+
+    // Folder names in use, alphabetized. Derived from the items themselves —
+    // an empty folder doesn't persist on its own (start-simple; see epic 029).
+    var savedLocationCategories: [String] {
+        Set(savedWaypoints.compactMap(\.category)).sorted()
+    }
+
+    func setWaypointCategory(_ category: String?, for waypoint: SavedWaypoint) {
+        guard let index = savedWaypoints.firstIndex(where: { $0.id == waypoint.id }) else { return }
+        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
+        savedWaypoints[index].category = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        persistWaypoints()
+    }
+
+    // Reorder within one folder. `.onMove` reports offsets relative to that
+    // folder's rows, so map them back onto the global array's matching slots,
+    // leaving every other folder untouched. Persisted as the array order.
+    func moveWaypoints(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+        let groupIDs = Set(savedWaypoints.filter { $0.category == category }.map(\.id))
+        savedWaypoints = LibraryOrder.moveWithinGroup(
+            savedWaypoints, groupIDs: groupIDs, fromOffsets: source, toOffset: destination
+        )
+        persistWaypoints()
     }
 
     // MARK: - Recording library
@@ -846,6 +894,11 @@ final class AppState {
         let coords = route.clCoordinates
         guard !coords.isEmpty else { return }
 
+        // Frame the whole route on the map when it's selected (#53).
+        if let region = MapRegionMath.boundingRegion(coords) {
+            mapFocus = MapFocusRequest(region: region)
+        }
+
         transportMode = route.transportMode
         if let custom = route.customSpeedKmh {
             customSpeedKmh = custom
@@ -891,6 +944,23 @@ final class AppState {
 
     func deleteSavedRoute(_ route: SavedRoute) {
         savedRoutes.delete(route)
+    }
+
+    // MARK: - Saved-route grouping & ordering (epic 029)
+
+    // Folder names in use across saved routes, alphabetized (see the
+    // savedLocationCategories note — folders are derived, not free-standing).
+    var savedRouteCategories: [String] {
+        Set(savedRoutes.routes.compactMap(\.category)).sorted()
+    }
+
+    func setRouteCategory(_ category: String?, for route: SavedRoute) {
+        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
+        savedRoutes.setCategory((trimmed?.isEmpty ?? true) ? nil : trimmed, for: route)
+    }
+
+    func moveRoutes(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+        savedRoutes.move(inCategory: category, fromOffsets: source, toOffset: destination)
     }
 
     func renameSavedRoute(_ route: SavedRoute, to newName: String) {

@@ -87,6 +87,10 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testSidebarShowsLogSection() throws {
+        // The log is collapsed by default (epic 025), so "View Full Log" only
+        // renders when the disclosure is open; --uitest-expand-log forces it
+        // open deterministically (without mutating the persisted preference).
+        app.launchArguments += ["--uitest-expand-log"]
         app.launch()
         let window = app.windows["TrailMate"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))

@@ -19,5 +19,11 @@ enum UITestSupport {
     // persistence test doesn't depend on the map long-press flow, which is
     // flaky under XCUITest's alert-interruption handling on CI.
     static let openWander = ProcessInfo.processInfo.arguments.contains("--uitest-open-wander")
+
+    // Forces the sidebar Log disclosure open at launch. The log is collapsed by
+    // default (epic 025) and the choice persists across launches, so the smoke
+    // test can't assume the section's contents are rendered; this hook makes
+    // them deterministically present without touching the persisted preference.
+    static let expandLog = ProcessInfo.processInfo.arguments.contains("--uitest-expand-log")
 }
 #endif

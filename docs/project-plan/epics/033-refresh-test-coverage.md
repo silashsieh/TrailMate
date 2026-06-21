@@ -67,6 +67,21 @@ suites describe today's behaviour, and the whole thing runs green under CI once 
       `TunnelBrokerReclaimTests`.
 - [x] Update [[testing]] (implemented vs TODO) and the manual smoke checklist to match.
 
+## Remaining (keeps this epic open)
+
+The deterministic, automatable coverage is in (PRs #66, #67). What's left before this epic closes —
+each is currently on the manual smoke checklist, and could be promoted to an automated test later:
+
+- **027 place search → Go** — automate once there's a deterministic local-search seam (inject canned
+  `MKLocalSearchCompletion` results behind a `--uitest` hook, the way the mock backend stands in for
+  the device).
+- **029 saved-items drag-reorder + context-menu category assignment** — UI-level. Needs a reliable
+  XCUITest drag and submenu-navigation approach (the row math is already unit-tested).
+- **026 menu-bar device name** — needs a way to drive/read `MenuBarExtra` content under XCUITest.
+- **024 map-control occlusion** — left visual; revisit only if an accessibility-frame assertion proves
+  worthwhile.
+- **Run the manual smoke checklist** against a real device before the next release tag.
+
 ## Open questions
 
 - ~~How much of 028's offline model is UI-testable headlessly vs. needs the mock backend extended?~~
@@ -108,8 +123,9 @@ suites describe today's behaviour, and the whole thing runs green under CI once 
 
 ## Acceptance criteria
 
-- [x] Every v2.1.0 feature (024–029, 031) has a current unit and/or UI test; none assert pre-v2.1.0
-      behaviour. (024 + the manual-checklist items above are covered by the smoke checklist by design.)
+- [~] Every v2.1.0 feature (024–029, 031) has current coverage and none assert pre-v2.1.0 behaviour:
+      done for 025/026/027/028/029/031 via automated tests; 024 and the "Remaining" items above are on
+      the manual checklist, not yet automated — so this stays partial and the epic stays open.
 - [x] `xcodebuild test` (unit + UI) passes on a clean checkout with no live session — full suite green
       locally; CI gates it on the PR.
 - [x] [[testing]] and the manual smoke checklist reflect the refreshed coverage.

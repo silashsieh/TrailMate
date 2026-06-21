@@ -30,6 +30,16 @@ private struct SidebarView: View {
     // the user's choice across launches. (The full-log sheet stays the deep view.)
     @AppStorage("sidebarLogExpanded") private var logExpanded = false
 
+    // Normally the persisted choice; under the --uitest-expand-log hook, forced
+    // open so the smoke suite can assert the section's contents without
+    // depending on the persisted (collapsed-by-default) state.
+    private var logExpansion: Binding<Bool> {
+        #if DEBUG
+        if UITestSupport.expandLog { return .constant(true) }
+        #endif
+        return $logExpanded
+    }
+
     var body: some View {
         List {
             Section("Devices") {
@@ -83,7 +93,7 @@ private struct SidebarView: View {
             // an always-visible disclosure triangle next to the "Log" label, so
             // it's obvious the section opens (a collapsed `Section` only reveals
             // its control on hover). The @AppStorage binding persists the choice.
-            DisclosureGroup("Log", isExpanded: $logExpanded) {
+            DisclosureGroup("Log", isExpanded: logExpansion) {
                 if appState.logMessages.isEmpty {
                     Text("No activity yet.")
                         .foregroundStyle(.secondary)

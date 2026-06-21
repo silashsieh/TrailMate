@@ -67,6 +67,14 @@ suites describe today's behaviour, and the whole thing runs green under CI once 
 
 ## Decisions made along the way
 
+- **025 stale assertion fixed first (the acute symptom).** `testSidebarShowsLogSection`
+  failed because epic 025 collapses the log by default, so "View Full Log" no longer
+  renders at launch. Re-baselined by forcing the disclosure open via a new
+  `--uitest-expand-log` hook (mirrors `--uitest-open-wander`) rather than driving a
+  disclosure click — deterministic and leaves the persisted `sidebarLogExpanded`
+  preference untouched. Story 2's fuller *collapsed-by-default + persisted round-trip*
+  coverage (à la the restore-on-launch test) is still open.
+
 ## Bugs / follow-ups found while building
 
 ## Acceptance criteria

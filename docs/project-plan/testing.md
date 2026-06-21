@@ -57,7 +57,8 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 
 `TrailMateUITests` is a smoke suite: launch shows the main window with the Connection
 section and (untouched against a real device — it raises an admin dialog) Connect button;
-the sidebar Log section and View Full Log button exist; ⌘, opens Settings with the
+the sidebar Log section exists and — forced open via `--uitest-expand-log`, since epic 025
+collapses it by default — shows the View Full Log button; ⌘, opens Settings with the
 GPS-noise and restore-on-launch controls, and ⌘W closes it; and settings persistence is
 real — the restore-on-launch toggle is flipped, the app fully relaunched, the value
 asserted, then flipped back so the suite leaves user preferences as it found them (UI
@@ -79,6 +80,10 @@ data-free otherwise, so it passes identically on a clean CI user and a dev Mac.
   preset-persistence test (epic 018's contract — selection saved on every change, not just
   Start) can verify a full relaunch round-trip without driving the map long-press, which
   trips XCUITest's alert-interruption handling on CI.
+- `--uitest-expand-log` forces the sidebar Log disclosure open at launch. Epic 025 made the
+  log collapsed by default and persists the choice, so "View Full Log" only renders when
+  expanded; the hook makes it deterministically present without mutating the persisted
+  `sidebarLogExpanded` preference.
 
 Query gotcha for future tests: SwiftUI exposes sidebar headers/buttons as accessibility
 *labels* but Form/row `Text`s as *values* — match the latter with a `value ==` predicate.

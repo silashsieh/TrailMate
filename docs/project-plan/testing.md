@@ -46,6 +46,7 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 | `NavigationEngineLoopTests` | Loop playback boundary math (restart / ping-pong / counts). |
 | `NavigationEngineSeekTests` | Scrubber/seek interpolation math. |
 | `SimulationActorReplayTests` | Integrator reset on re-play through the actor seam. |
+| `SimulationActorAttachTests` | Device-mirror-on-connect (epic 028): attaching a backend immediately pushes the current red dot, and re-attaching after an offline move mirrors the new position. Uses a recording backend at the actor seam — the UI mock backend swallows locations, so this is the only place the mirror is observable. |
 | `StrokeGeometryTests` | Hand-drawn stroke smoothing (Chaikin) + resampling. |
 | `CommandProtocolTests` | AI command-layer value types: verb parsing (case, whitespace, missing/invalid args), JSON response encoding (optionals omitted), greeting line. |
 | `CommandDispatchTests` | Multi-device routing (epic 012): `TELEPORT <A>` moves only A's integrator (A-never-moves-B), unknown vs not-connected UDIDs return the right codes, STATUS reports per-device state. Uses ≥2 sessions via a DEBUG `bindConnectedForTesting` seam (no tunnel/daemon). |
@@ -55,15 +56,37 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 
 ## UI Tests (implemented)
 
-`TrailMateUITests` is a smoke suite: launch shows the main window with the Connection
-section and (untouched against a real device — it raises an admin dialog) Connect button;
-the sidebar Log section exists and — forced open via `--uitest-expand-log`, since epic 025
-collapses it by default — shows the View Full Log button; ⌘, opens Settings with the
-GPS-noise and restore-on-launch controls, and ⌘W closes it; and settings persistence is
-real — the restore-on-launch toggle is flipped, the app fully relaunched, the value
-asserted, then flipped back so the suite leaves user preferences as it found them (UI
-tests run against the real `com.sh.TrailMate` defaults). Deliberately device-free and
-data-free otherwise, so it passes identically on a clean CI user and a dev Mac.
+`TrailMateUITests` is a smoke suite. Launch shows the main window with the Connection
+section and (untouched against a real device — it raises an admin dialog) Connect button.
+Coverage, current as of v2.1.0:
+
+- **Sidebar log (epic 025).** The Log section exists; forced open via `--uitest-expand-log`
+  it shows the View Full Log button. A separate test drives the real disclosure (the
+  sidebar's only disclosure triangle — the label text isn't the toggle) to expand/collapse
+  and asserts the choice survives a full relaunch, ending collapsed to restore the default.
+- **Offline control model (epic 028).** At a plain launch, before any Connect, the core
+  sections — Go to Location, Route, Joystick — and the coordinate field all render, and no
+  Disconnect is shown: the control surface is usable with no device. The device-mirrors-the-
+  red-dot-on-connect half is a unit test (`SimulationActorAttachTests`), not here, because
+  the mock backend swallows locations.
+- **Connected device identity (epic 026).** Connecting the mock device (`--uitest-mock-
+  connection`) shows Disconnect and a switcher row whose label carries the device name
+  ("Mock iPhone") and "Connected" status — the sidebar status pill. (The menu-bar device-name
+  mirror isn't UI-tested — MenuBarExtra content isn't reliably queryable; it's on the manual
+  checklist.)
+- **Direct location entry (epic 027).** The coordinate field keeps "Go" disabled until the
+  text parses; a valid `lat, lon` enables it, and committing reveals "Copy Current
+  Coordinate" — all with no device (also an offline-model assertion). Place search → Go isn't
+  UI-tested (MapKit local search needs network and returns nondeterministic results); the
+  `lat, lon` parser is covered by `CoordinateFormatTests`.
+- **Settings & preferences.** ⌘, opens Settings with the GPS-noise and restore-on-launch
+  controls, and ⌘W closes it; settings persistence is real — the restore-on-launch toggle is
+  flipped, the app fully relaunched, the value asserted, then flipped back; the language
+  picker and Wander presets get the same relaunch round-trip.
+
+Every test leaves user preferences as it found them (UI tests run against the real
+`com.sh.TrailMate` defaults). Deliberately device-free and data-free otherwise, so the suite
+passes identically on a clean CI user and a dev Mac.
 
 **Test-only launch hooks (DEBUG builds only; `UITestSupport.swift`).**
 
@@ -119,6 +142,13 @@ To live in `TrailMateTests/ManualSmokeTestPlan.md` once written.
 1. Pull USB mid-session — UI shows tunnel-down; reconnect cable; re-Connect recovers cleanly.
 1. Sleep the Mac mid-session — on wake, UI is in `.disconnected` state (DVT session cannot survive sleep).
 1. Quit the app — verify no orphaned processes (`ps aux | grep -E "tm_daemon|tm_tunnel|pymobiledevice3"`).
+
+Items the automated suites can't cover (UI-fragile or device-bound), so verify here:
+
+1. Menu-bar device name (epic 026): connect a device; the menu-bar item reads `<name> · Connected · <activity>` (MenuBarExtra content isn't UICTest-queryable).
+1. Place search → Go (epic 027): type a place name, pick a result; the red dot teleports there and the map pans to frame it (needs live MapKit local search).
+1. Saved-items library (epic 029): drag to reorder a saved location and a saved route; assign each to a category via the row context menu; relaunch and confirm both order and category stick. Selecting a saved item auto-pans the map to frame it. (Reorder/auto-pan *math* is unit-tested in `SavedItemsLibraryTests`; the drag/context-menu UI is checked here.)
+1. Map-control overlap (epic 024): with the joystick active mid-route, confirm the map controls and off-route indicator don't occlude each other (layout/occlusion, asserted visually).
 
 ## Implementation order for the remaining suites (suggested)
 

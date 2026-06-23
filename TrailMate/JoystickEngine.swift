@@ -20,6 +20,11 @@ nonisolated final class JoystickEngine {
     private var pressedDirections: Set<Direction> = []
     private var virtualStickX: Float = 0
     private var virtualStickY: Float = 0
+    private let controllerSample: () -> (x: Float, y: Float)?
+
+    init(controllerSample: @escaping () -> (x: Float, y: Float)? = JoystickEngine.defaultControllerSample) {
+        self.controllerSample = controllerSample
+    }
 
     func start(baseSpeed: Double) {
         baseSpeedMPS = baseSpeed
@@ -54,18 +59,17 @@ nonisolated final class JoystickEngine {
 
     // Called by AppState's aggregator. Reads whichever input source is most
     // engaged and returns its (vx, vy) velocity contribution in m/s. Returns
-    // (0,0) inside the dead zone, nil only when the engine is inactive — the
-    // aggregator may still want to sum a zero contribution alongside the
-    // route engine's tangent vector.
+    // nil when the engine is inactive or all inputs are inside the dead zone,
+    // so an armed-but-idle joystick does not make the aggregator emit no-op
+    // positions.
     func tick() -> (vx: Double, vy: Double)? {
         guard isActive else { return nil }
 
         // Priority: hardware controller wins outright. Otherwise pick whichever
         // of virtual stick or keyboard has greater magnitude.
-        if let controller = GCController.controllers().first,
-           let gamepad = controller.extendedGamepad {
-            stickX = gamepad.leftThumbstick.xAxis.value
-            stickY = gamepad.leftThumbstick.yAxis.value
+        if let sample = controllerSample() {
+            stickX = sample.x
+            stickY = sample.y
         } else {
             var kx: Float = 0, ky: Float = 0
             if pressedDirections.contains(.up) { ky += 1 }
@@ -86,7 +90,7 @@ nonisolated final class JoystickEngine {
         }
 
         let magnitude = Double((stickX * stickX + stickY * stickY).squareRoot())
-        guard magnitude > 0.1 else { return (0, 0) }
+        guard magnitude > 0.1 else { return nil }
 
         let cappedMag = min(magnitude, 1.0)
         let scale = cappedMag / magnitude
@@ -94,6 +98,16 @@ nonisolated final class JoystickEngine {
         let vx = Double(stickX) * scale * baseSpeedMPS
         let vy = Double(stickY) * scale * baseSpeedMPS
         return (vx, vy)
+    }
+
+    // Injected by tests so a hardware controller attached to the developer Mac
+    // cannot make dead-zone expectations depend on physical stick state.
+    private static func defaultControllerSample() -> (x: Float, y: Float)? {
+        guard let controller = GCController.controllers().first,
+              let gamepad = controller.extendedGamepad else {
+            return nil
+        }
+        return (gamepad.leftThumbstick.xAxis.value, gamepad.leftThumbstick.yAxis.value)
     }
 
 }

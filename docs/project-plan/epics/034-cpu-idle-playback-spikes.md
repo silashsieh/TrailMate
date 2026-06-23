@@ -2,11 +2,11 @@
 type: epic
 id: 034
 title: Eliminate idle and route-playback CPU spikes
-status: open
+status: done
 milestone: v2.2.0
 issue:
 opened: 2026-06-23
-shipped:
+shipped: 2026-06-23
 tags: [performance, joystick, playback]
 ---
 
@@ -51,18 +51,18 @@ allocation hotspot — with no change to joystick, route, or offline-preview beh
 
 ## Stories
 
-- [ ] `JoystickEngine.tick()` returns `nil` when there is no controller and no input above the dead
+- [x] `JoystickEngine.tick()` returns `nil` when there is no controller and no input above the dead
       zone (`JoystickEngine.swift:89`, `return (0, 0)` → `return nil`), so an idle armed joystick
       contributes no activity.
-- [ ] Confirm the aggregator's `anyContribution` guard (`SimulationActor.swift:412`) then
+- [x] Confirm the aggregator's `anyContribution` guard (`SimulationActor.swift:412`) then
       short-circuits disconnected-idle — no `emit`, no `pushSnapshot`.
-- [ ] Precompute a planar `(x, y)`-in-meters projection of each route vertex once in
+- [x] Precompute a planar `(x, y)`-in-meters projection of each route vertex once in
       `NavigationEngine.loadRoute` (`:48`).
-- [ ] Rewrite `distanceFromSegment` (`:298`) to use that projection with pure `Double` math — zero
+- [x] Rewrite `distanceFromSegment` (`:298`) to use that projection with pure `Double` math — zero
       `CLLocation` allocations per check.
 - [ ] (Optional) Restrict the deviation scan to segments near the current playhead
       (`segmentIndex`) instead of the full route.
-- [ ] Unit tests: dead-zone returns `nil`; deviation distance matches the current implementation
+- [x] Unit tests: dead-zone returns `nil`; deviation distance matches the current implementation
       within tolerance on a known route.
 
 ## Open questions
@@ -80,13 +80,17 @@ allocation hotspot — with no change to joystick, route, or offline-preview beh
 - **Fix at the engine (`tick → nil`), not only at the aggregator.** Equivalent to a "don't emit
   when summed velocity is zero" guard but simpler and at the right layer; summing `(0,0)` vs
   nothing is identical for the integrator.
+- **Keep the full deviation scan for this pass.** The allocation hotspot was the per-segment
+  `CLLocation` construction, not the loop bounds. A windowed scan could miss the nearest point
+  after a teleport or large joystick drift, so the projection cache preserves existing behavior
+  while removing the hot-path allocations.
 
 ## Bugs / follow-ups found while building
 
 ## Acceptance criteria
 
-- [ ] Disconnected + idle + restored red dot: the aggregator does no per-tick `emit`/`pushSnapshot`;
+- [x] Disconnected + idle + restored red dot: the aggregator does no per-tick `emit`/`pushSnapshot`;
       CPU sits at/near idle.
-- [ ] Joystick (gamepad and keyboard) still drives the red dot and the device exactly as before.
-- [ ] During playback, `distanceFromSegment` performs no `CLLocation` allocation; the off-route
+- [x] Joystick (gamepad and keyboard) still drives the red dot and the device exactly as before.
+- [x] During playback, `distanceFromSegment` performs no `CLLocation` allocation; the off-route
       indicator and the deviation-abort behavior are unchanged.

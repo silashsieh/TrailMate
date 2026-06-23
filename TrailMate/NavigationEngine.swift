@@ -39,6 +39,9 @@ nonisolated final class NavigationEngine {
 
     private(set) var coordinates: [CLLocationCoordinate2D] = []
     private var cumulativeDistances: [Double] = []
+    private var projectedRoutePoints: [(x: Double, y: Double)] = []
+    private var projectionOrigin: CLLocationCoordinate2D?
+    private var projectionMetersPerDegLon: Double = 111_320.0
     private var currentDistanceAlongRoute: Double = 0
     private var baseSpeedMPS: Double = 1.4
     private var speedMultiplier: Double = 1.0
@@ -49,6 +52,7 @@ nonisolated final class NavigationEngine {
         stop()
         self.coordinates = coordinates
         self.baseSpeedMPS = baseSpeed
+        cacheProjectedRoutePoints(for: coordinates)
 
         var cumulative: [Double] = [0]
         for i in 1..<coordinates.count {
@@ -251,12 +255,16 @@ nonisolated final class NavigationEngine {
     // Min distance from `coord` to the loaded polyline, in meters. Used for
     // off-route indicator and the abort-on-sustained-deviation rule.
     func distanceFromRoute(_ coord: CLLocationCoordinate2D) -> Double {
-        guard coordinates.count >= 2 else { return 0 }
-        let probe = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        guard projectedRoutePoints.count >= 2,
+              let probe = projectedPoint(for: coord) else { return 0 }
 
         var minDist = Double.greatestFiniteMagnitude
-        for i in 0..<(coordinates.count - 1) {
-            let dist = distanceFromSegment(probe: probe, a: coordinates[i], b: coordinates[i + 1])
+        for i in 0..<(projectedRoutePoints.count - 1) {
+            let dist = distanceFromSegment(
+                probe: probe,
+                a: projectedRoutePoints[i],
+                b: projectedRoutePoints[i + 1]
+            )
             minDist = min(minDist, dist)
         }
         return minDist
@@ -292,23 +300,51 @@ nonisolated final class NavigationEngine {
         )
     }
 
-    // Perpendicular distance from `probe` to segment a-b. Uses planar law-of-
-    // cosines on geodesic side lengths — accurate to well under 1% for the
-    // short segments MKDirections produces (<100 m typically).
-    private func distanceFromSegment(probe: CLLocation, a: CLLocationCoordinate2D, b: CLLocationCoordinate2D) -> Double {
-        let aLoc = CLLocation(latitude: a.latitude, longitude: a.longitude)
-        let bLoc = CLLocation(latitude: b.latitude, longitude: b.longitude)
-        let ab = aLoc.distance(from: bLoc)
-        let ap = aLoc.distance(from: probe)
-        let bp = bLoc.distance(from: probe)
+    // Route deviation runs at playback cadence, so the route vertices are
+    // projected once at load time. A route-wide local frame keeps the full scan
+    // safe after teleports or large joystick drift while avoiding per-segment
+    // CoreLocation allocation in the hot path.
+    private func cacheProjectedRoutePoints(for coordinates: [CLLocationCoordinate2D]) {
+        guard let first = coordinates.first else {
+            projectionOrigin = nil
+            projectedRoutePoints = []
+            return
+        }
 
-        if ab == 0 { return ap }
+        projectionOrigin = first
+        let averageLatitude = coordinates.reduce(0.0) { $0 + $1.latitude } / Double(coordinates.count)
+        projectionMetersPerDegLon = Self.metersPerDegLat * cos(averageLatitude * .pi / 180)
+        projectedRoutePoints = coordinates.compactMap { projectedPoint(for: $0) }
+    }
 
-        let t = (ap * ap + ab * ab - bp * bp) / (2 * ab)
-        if t <= 0 { return ap }
-        if t >= ab { return bp }
+    private func projectedPoint(for coord: CLLocationCoordinate2D) -> (x: Double, y: Double)? {
+        guard let origin = projectionOrigin else { return nil }
+        return (
+            x: (coord.longitude - origin.longitude) * projectionMetersPerDegLon,
+            y: (coord.latitude - origin.latitude) * Self.metersPerDegLat
+        )
+    }
 
-        let perpSq = ap * ap - t * t
-        return perpSq > 0 ? perpSq.squareRoot() : 0
+    private func distanceFromSegment(
+        probe: (x: Double, y: Double),
+        a: (x: Double, y: Double),
+        b: (x: Double, y: Double)
+    ) -> Double {
+        let abx = b.x - a.x
+        let aby = b.y - a.y
+        let apx = probe.x - a.x
+        let apy = probe.y - a.y
+        let abSq = abx * abx + aby * aby
+
+        if abSq == 0 {
+            return (apx * apx + apy * apy).squareRoot()
+        }
+
+        let t = max(0, min(1, (apx * abx + apy * aby) / abSq))
+        let closestX = a.x + abx * t
+        let closestY = a.y + aby * t
+        let dx = probe.x - closestX
+        let dy = probe.y - closestY
+        return (dx * dx + dy * dy).squareRoot()
     }
 }

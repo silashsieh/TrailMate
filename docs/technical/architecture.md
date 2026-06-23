@@ -234,6 +234,13 @@ meters_per_deg_lon = 111_320 * cos(lat_in_radians)
 
 This is accurate to <0.1% over distances <10km, which covers every realistic single-tick movement. For long routes (>50km), MKDirections gives us a polyline of fine-grained coordinates, so we never need to integrate over long stretches.
 
+Route-deviation checks use the same local-flat assumption but cache the route vertices as
+route-local `(x, y)` meters once in `NavigationEngine.loadRoute`. Each 5 Hz off-route scan
+projects only the current probe point and then uses pure `Double` segment-distance math over
+the cached vertices. The scan still covers the whole route, rather than only the current
+playhead neighborhood, because teleport and joystick drift can move the local position far
+from the active segment and the nearest-route distance must remain behaviorally unchanged.
+
 Hand-drawn strokes pass through `StrokeGeometry` before reaching the engine: Chaikin corner-cutting (two passes) takes hand jitter out of the path shape, then uniform arc-length resampling emits one vertex per `clamp(baseSpeed × 1 s, 2 m, 15 m)`. The resampler's contract is what `NavigationEngine` relies on — at least two distinct vertices and no near-zero segments (its velocity tangent normalizes by segment length); click-sized strokes and jitter blobs resample to nil and never load. Chaikin's linear blends run on raw degrees (local-flat error at stroke scale is far below GPS noise), while all spacing decisions are meters-based via `CLLocation.distance`, the same rationale as `joinSegments`.
 
 For multi-stop routes, the planner issues one `MKDirections.calculate()` call per `[From, …stops, To]` pair sequentially (Apple Maps throttles parallel requests). Each segment's polyline is appended via `RouteMath.joinSegments`, which drops a duplicate vertex at the join when `CLLocation.distance` between the last point of the prior segment and the first point of the next is under 2 m. The threshold is meters-based, not degree-based, because MKDirections returns endpoints quantized at meter scale and a degree-based comparison would over-dedupe near the equator and under-dedupe near the poles. On any segment failure the whole route is aborted with a labeled log line (e.g. `Route failed: Stop 1 → Stop 2: …`); no partial polyline is rendered.

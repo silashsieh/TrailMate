@@ -86,4 +86,84 @@ struct SimulationActorAttachTests {
             #expect(abs(received.lon - moved.longitude) < 1e-9)
         }
     }
+
+    @Test func productionTimingUsesTenHzActiveCadence() {
+        #expect(SimulationTiming.production.aggregatorDeltaTime == 0.1)
+        #expect(SimulationTiming.production.aggregatorInterval == .milliseconds(100))
+        #expect(SimulationTiming.production.scrubEmitInterval == .milliseconds(100))
+        #expect(SimulationTiming.production.activeSnapshotInterval == .milliseconds(100))
+        #expect(SimulationTiming.production.playbackSnapshotInterval == .milliseconds(500))
+    }
+
+    @MainActor
+    @Test func nonPlayingSnapshotThrottleDoesNotThrottleDeviceEmits() async throws {
+        let bridge = SimulationStateBridge()
+        let timing = SimulationTiming(
+            aggregatorDeltaTime: 0.02,
+            aggregatorInterval: .milliseconds(20),
+            scrubEmitInterval: .milliseconds(20),
+            playbackSnapshotInterval: .milliseconds(500),
+            activeSnapshotInterval: .milliseconds(250)
+        )
+        let sim = SimulationActor(bridge: bridge, recorder: RecorderService(), timing: timing)
+        let backend = RecordingBackend()
+        await sim.updateNoiseSigma(0)
+
+        let start = CLLocationCoordinate2D(latitude: 25.0330, longitude: 121.5654)
+        await sim.teleport(to: start)
+        await sim.attach(backend: backend)
+        await sim.startEngine()
+        await sim.startJoystick(baseSpeed: 50)
+
+        let initialApplied = await waitUntil {
+            Self.distanceMeters(bridge.simulatedCoordinate, from: start) < 0.01
+        }
+        #expect(initialApplied)
+
+        await sim.updateStickInput(x: 1, y: 0)
+
+        let deviceMovedBeforeUIPush = await waitUntil(timeout: .milliseconds(120)) {
+            Self.distanceMeters(backend.lastLocation, from: start) > 0.5
+        }
+        #expect(deviceMovedBeforeUIPush)
+        #expect(Self.distanceMeters(bridge.simulatedCoordinate, from: start) < 0.01)
+
+        let uiEventuallyMoved = await waitUntil(timeout: .milliseconds(500)) {
+            Self.distanceMeters(bridge.simulatedCoordinate, from: start) > 0.5
+        }
+        #expect(uiEventuallyMoved)
+
+        await sim.stopEngine()
+    }
+
+    @MainActor
+    private func waitUntil(
+        timeout: Duration = .milliseconds(500),
+        _ predicate: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if predicate() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return predicate()
+    }
+
+    private static func distanceMeters(
+        _ coordinate: CLLocationCoordinate2D?,
+        from origin: CLLocationCoordinate2D
+    ) -> Double {
+        guard let coordinate else { return .infinity }
+        return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            .distance(from: CLLocation(latitude: origin.latitude, longitude: origin.longitude))
+    }
+
+    private static func distanceMeters(
+        _ coordinate: (lat: Double, lon: Double)?,
+        from origin: CLLocationCoordinate2D
+    ) -> Double {
+        guard let coordinate else { return .infinity }
+        return CLLocation(latitude: coordinate.lat, longitude: coordinate.lon)
+            .distance(from: CLLocation(latitude: origin.latitude, longitude: origin.longitude))
+    }
 }

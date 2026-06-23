@@ -23,10 +23,10 @@ TrailMate/
 │   ├── MenuBarStatusView.swift        # MenuBarExtra content: live status + quick actions
 │   ├── RoutingService.swift           # routing kernel protocol + MapKitRoutingService (D4 seam)
 │   ├── GPXService.swift               # GPX import (XMLParser) and export
-│   ├── JoystickEngine.swift           # 20 Hz control loop (controller/virtual stick/WASD)
+│   ├── JoystickEngine.swift           # 10 Hz control loop (controller/virtual stick/WASD)
 │   ├── LocationNoise.swift            # Box-Muller Gaussian jitter on every emission
 │   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper
-│   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (20 Hz tick)
+│   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (10 Hz tick)
 │   ├── PositionIntegrator.swift       # sums engine velocity vectors; owns authoritative position
 │   ├── PythonBundle.swift             # resolves bundled interpreter + script paths
 │   ├── RecorderService.swift          # session recording: GPX files + index
@@ -35,7 +35,7 @@ TrailMate/
 │   ├── SavedRoutesStore.swift         # per-route JSON persistence under Application Support
 │   ├── SettingsView.swift             # Settings window (⌘,): set-and-forget preferences
 │   ├── SimulatedPositionPersistence.swift  # red-dot persistence + launch-restore preference
-│   ├── SimulationActor.swift          # off-MainActor core: 20 Hz aggregator, engines, snapshot push (one per session)
+│   ├── SimulationActor.swift          # off-MainActor core: 10 Hz aggregator, engines, snapshot push (one per session)
 │   ├── SimulationBackend.swift        # backend protocol + events (DaemonBridge / MockSimulationBackend implement it)
 │   ├── StrokeGeometry.swift           # hand-drawn stroke smoothing + uniform resampling
 │   ├── TunnelBroker.swift             # one privileged `remote tunneld` for all devices; resolves per-UDID RSD endpoint
@@ -105,8 +105,8 @@ TrailMate/
 ├──────────────────────────────────────────────────────────┤
 │  SimulationActor                                         │  Simulation core
 │  • Owns the engines as nonisolated stored properties.    │  (off MainActor)
-│  • 20 Hz aggregator loop, 1 Hz idle jitter, 5 Hz         │
-│    deviation check, 2 Hz UI snapshot push.               │
+│  • 10 Hz aggregator loop, 1 Hz idle jitter, 5 Hz         │
+│    deviation check, throttled UI snapshot push.          │
 │  • Holds the active SimulationBackend; calls             │
 │    setLocationQuiet synchronously on the hot path.       │
 │  • Owns the App Nap activity token while attached.       │
@@ -152,7 +152,7 @@ Processes cooperating at runtime (multi-device: one tunneld, N daemons):
 
 `tm_tunneld.sh` exists *only* because creating TUN interfaces requires root. It does the absolute minimum: launches one `pymobiledevice3 remote tunneld` (which auto-tunnels all connected devices, with hot-plug), and parent-watches the host PID. On quit or host-death its `cleanup` tears the tunnel down by escalating SIGTERM → short grace → SIGKILL, so even a tunneld wedged on an active TUN tunnel (which acks but ignores SIGINT/SIGTERM) can't leak on the port (epic 032). It's brought up by `TunnelBroker.swift` via `osascript … with administrator privileges` — **one auth dialog per session for all devices**. Before launching, the broker probes tunneld's localhost HTTP `/hello`; if a stale tunneld from a dead prior run is still squatting on the port (the watchdog can leak one on a hard kill), it reclaims it via that tunneld's own `/shutdown` — unprivileged, so no extra prompt (epic 031). That reclaim is best-effort (a tunneld wedged on an active tunnel won't honour `/shutdown`); the durable guarantee is the force-killed teardown above. The broker resolves each device's *current* RSD endpoint by querying tunneld's HTTP API at connect time, because the RSD address+port are **ephemeral** — tunneld reassigns them on every (re)establishment, so nothing caches them; the UDID is the only stable key. All location logic stays in the unprivileged app.
 
-The Python daemon is a *long-lived* subprocess. Spawning `pymobiledevice3` per command costs ~500ms–1s in interpreter cold-start, which would kill the joystick experience. Instead, we spawn it once, keep the DVT connection open, and stream `SETQ lat lon\n` lines into its stdin at 20 Hz from the simulation actor.
+The Python daemon is a *long-lived* subprocess. Spawning `pymobiledevice3` per command costs ~500ms–1s in interpreter cold-start, which would kill the joystick experience. Instead, we spawn it once, keep the DVT connection open, and stream `SETQ lat lon\n` lines into its stdin at 10 Hz from the simulation actor.
 
 ## Concurrency Topology
 
@@ -170,7 +170,7 @@ The simulated position is a live *local* state, not a device side effect (epic 0
 
 `DaemonBridge` reads its daemon's stdout with an event-driven `readabilityHandler` (feeding an ordered `AsyncStream` drained by one Task into the actor), **not** `FileHandle.bytes.lines`. This is load-bearing for multi-device: `bytes.lines` does a blocking read that holds Foundation's shared file-handle async-read queue, so once one device connects and its daemon goes idle, that bridge's blocked reader starves every *other* bridge's reader — a second device's daemon connects and prints `READY` but the bridge never reads it, hanging on "Connecting…" forever. The readabilityHandler never blocks, so concurrent bridges read independently. (Connecting one device at a time always worked, which is what made this look like a stack/tunnel limit rather than a reader bug.)
 
-The engines are marked `nonisolated final class` so the simulation actor can call them synchronously inside a tick — no per-tick `await` hop. The 2 Hz UI throttle lives in the actor's snapshot-push path; the backend still receives every SETQ tick at 20 Hz because `setLocationQuiet` is `nonisolated` on `DaemonBridge` (cached pipe handle + serial queue). A `Thread.sleep(forTimeInterval:)` on MainActor will *not* delay SETQ delivery — that was the failure mode the actor split eliminated.
+The engines are marked `nonisolated final class` so the simulation actor can call them synchronously inside a tick — no per-tick `await` hop. The UI throttle lives in the actor's snapshot-push path: route playback snapshots stay capped at 2 Hz, and active non-playing motion is capped at 10 Hz so joystick steering does not rebuild MapKit faster than the loop cadence. The backend still receives every SETQ tick at 10 Hz because `setLocationQuiet` is `nonisolated` on `DaemonBridge` (cached pipe handle + serial queue). A `Thread.sleep(forTimeInterval:)` on MainActor will *not* delay SETQ delivery — that was the failure mode the actor split eliminated.
 
 ## Daemon Protocol
 

@@ -6,7 +6,7 @@ import Foundation
 // but the protocol is shaped to admit future backends — ADB on Android,
 // SSH-to-jailbroken-iOS, a record-only mock for tests, etc.
 //
-// setLocationQuiet is the hot-path call (20 Hz during playback) and is
+// setLocationQuiet is the hot-path call (10 Hz during playback) and is
 // nonisolated so the simulation loop never has to await crossing into the
 // backend's isolation domain. Conforming types must guarantee it's safe to
 // call from any task — single-sender invariant from SimulationActor is what
@@ -54,7 +54,7 @@ final class SimulationStateBridge {
     var recordingPointCount: Int = 0
     var isRecording: Bool = false
 
-    // Joystick-only snapshots arrive at 20 Hz; persisting the position needs
+    // Joystick-only snapshots arrive at 10 Hz; persisting the position needs
     // none of that resolution, so writes are throttled here. The final
     // position at quit is saved unconditionally by the AppDelegate.
     @ObservationIgnored private var lastPositionSave: ContinuousClock.Instant?

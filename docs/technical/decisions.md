@@ -6,7 +6,7 @@ The iOS 17+ RSD tunnel uses RemoteXPC, personalized DDI mounting, and TUN-based 
 
 ## D2: Why a persistent daemon instead of CLI invocation per command?
 
-Each `pymobiledevice3` CLI invocation pays Python interpreter startup (~500ms-1s) plus tunnel setup (~1-3s on first call). For joystick mode at 20Hz, that's a non-starter. Keeping one daemon alive with the tunnel and DVT handle pre-opened reduces per-command latency to <10ms.
+Each `pymobiledevice3` CLI invocation pays Python interpreter startup (~500ms-1s) plus tunnel setup (~1-3s on first call). For joystick mode at the 10 Hz control cadence, that's a non-starter. Keeping one daemon alive with the tunnel and DVT handle pre-opened reduces per-command latency to <10ms.
 
 ## D3: Why a separate privileged helper instead of running the whole app as root?
 
@@ -16,9 +16,9 @@ Two reasons. First, only the TUN interface creation needs root; everything else 
 
 Free, no API key, no account, no quota, native SwiftUI integration, MKDirections for routing in one line. The only argument against is map data density — Apple's data for Taipei walking routes is decent but not as detailed as OSM in some neighborhoods. If that becomes a real problem, OSRM can be slotted in as the routing backend behind a `RoutingService` protocol while keeping MapKit for visualization.
 
-## D5: Why 20 Hz for the simulation loop?
+## D5: Why 10 Hz for the simulation loop?
 
-CoreLocation typically delivers updates to apps at ~1 Hz by default, and rapid updates get coalesced, so wire rate is never the bottleneck for the apps under test. Route playback and joystick share a single 20 Hz aggregator in `SimulationActor` rather than running at separate rates: the joystick wants the tighter loop for perceived responsiveness during direction changes, and interpolating route playback at the same 20 Hz costs negligible CPU while keeping one tick path instead of two. SwiftUI redraws are decoupled by a 2 Hz snapshot-push throttle (see D7), so the backend still receives every 20 Hz tick.
+CoreLocation typically delivers updates to apps at ~1 Hz by default, and rapid updates get coalesced, so wire rate is never the bottleneck for the apps under test. Route playback and joystick share a single 10 Hz aggregator in `SimulationActor`: 100 ms is the invisible floor for app-visible wire freshness, while 4 Hz / 250 ms sits too close to the ~300 ms threshold a human can feel when steering the joystick. SwiftUI redraws are decoupled by snapshot-push throttles (see D7), so the backend still receives every 10 Hz tick.
 
 ## D6: Why local-flat coordinate math instead of geodesic (Haversine)?
 
@@ -26,11 +26,11 @@ For per-tick movement at human-scale speeds (1-25 m/s) and one-tick distances (5
 
 ## D7: Why a SimulationActor instead of keeping everything on MainActor?
 
-Before the actor split, the 20 Hz aggregator and the engines all ran on MainActor inside AppState. Any SwiftUI hitch — map gesture, layout pass, sheet animation — could stall the loop and delay `SETQ` delivery to the device, manifesting as visible jitter on the iPhone side. A `Thread.sleep(forTimeInterval: 0.3)` on MainActor would pause the device's simulated motion for the full 300 ms.
+Before the actor split, the aggregator and the engines all ran on MainActor inside AppState. Any SwiftUI hitch — map gesture, layout pass, sheet animation — could stall the loop and delay `SETQ` delivery to the device, manifesting as visible jitter on the iPhone side. A `Thread.sleep(forTimeInterval: 0.3)` on MainActor would pause the device's simulated motion for the full 300 ms.
 
 The fix is to move the simulation core (aggregator, idle jitter, deviation check, the four engines) onto its own actor's executor. Engines are kept as `nonisolated final class` so the tick is still a synchronous sequence of plain method calls — no per-tick `await` hops between isolation domains, which would reintroduce the same stall problem on a different thread. `DaemonBridge.setLocationQuiet` is `nonisolated` on a serial dispatch queue so the actor's hot path can call it without crossing into the bridge's isolation either.
 
-The 2 Hz UI throttle (introduced as a perf hotfix when the MapPolyline rebuild at 20 Hz was the dominant CPU cost) is folded into the actor's snapshot push, so there's exactly one place that decides when SwiftUI sees a new coordinate. The backend still receives every tick at 20 Hz.
+The UI throttles are folded into the actor's snapshot push, so there's exactly one place that decides when SwiftUI sees a new coordinate. Route playback snapshots stay at 2 Hz because the MapPolyline rebuild is relatively expensive; active non-playing snapshots are capped at 10 Hz so joystick steering does not rebuild MapKit faster than the loop cadence. The backend still receives every tick at 10 Hz.
 
 A `SimulationBackend` protocol abstracts the device-control side: `DaemonBridge` (pymobiledevice3 over a privileged tunnel) is one implementation; future implementations — ADB for Android, SSH to a jailbroken iPhone, a record-only mock for tests — slot in without touching the engines. This is the smallest forward-looking abstraction that pays off no matter which long-term direction the project takes. The full XPC service split (separate binary, codable proto) was considered and explicitly deferred: it costs ~weeks of plumbing and isn't justified until there's a concrete second client.
 
@@ -61,8 +61,8 @@ Scope cut for v2.0.0: position restore stays a single global last-position (rest
 
 Epic 028 (#45) started as "make map/planning usable while disconnected" and grew, at the owner's request, into decoupling the *simulation* from the connection: the red dot must be controllable with no device attached, and a device must snap to it on connect. We chose to make the **simulated position the authoritative local state** and treat a device connection as a *mirror* of it, rather than gating the driving controls.
 
-Mechanically this is a lifecycle split in `SimulationActor`. The engine loops (20 Hz aggregator, idle jitter, controller observers) now run for the session's whole lifetime — `startEngine()` at `DeviceSession` init, `stopEngine()` at removal/quit — instead of only between connect and disconnect. `attach()`/`detach()` shrank to swapping the device backend: attach injects it, re-emits the current coordinate so the device jumps to the red dot, and takes the App Nap token; detach drops the backend and token but leaves the loops running and the position intact (disconnecting no longer wipes the dot). `emit()` already wrote the bridge unconditionally and the device only via `backend?`, so a disconnected session simulates locally and sends nothing to any device; idle jitter is gated on a live backend so the offline preview doesn't drift.
+Mechanically this is a lifecycle split in `SimulationActor`. The engine loops (10 Hz aggregator, idle jitter, controller observers) now run for the session's whole lifetime — `startEngine()` at `DeviceSession` init, `stopEngine()` at removal/quit — instead of only between connect and disconnect. `attach()`/`detach()` shrank to swapping the device backend: attach injects it, re-emits the current coordinate so the device jumps to the red dot, and takes the App Nap token; detach drops the backend and token but leaves the loops running and the position intact (disconnecting no longer wipes the dot). `emit()` already wrote the bridge unconditionally and the device only via `backend?`, so a disconnected session simulates locally and sends nothing to any device; idle jitter is gated on a live backend so the offline preview doesn't drift.
 
 This **superseded epic 028's first approach** (a `.requiresConnection()` modifier that disabled teleport/play/joystick with a hint while disconnected). With the local-state model those controls simply work offline, so the gating modifier and its hint copy were removed; the only connection-conditional UI left is informational (the map status pill reads "Local position" vs "Simulating", reinforced by the existing green/grey connection dot). The AI command socket is unchanged — it stays device-addressed by `connectedUDID` and still rejects commands to a not-connected device; offline control is a GUI affordance, not a remote one.
 
-Trade-off accepted: every session runs its loops for its whole life (N cheap 20 Hz no-op ticks for N slots), versus the prior "loops only while connected." The aggregator early-returns when no engine contributes, and TrailMate targets a few devices, so the cost is negligible. Per-session leaks are avoided by routing removal/quit through `DeviceSession.shutdown()` (disconnect + `stopEngine`), since `disconnect()` alone now leaves the engine running.
+Trade-off accepted: every session runs its loops for its whole life (N cheap 10 Hz no-op ticks for N slots), versus the prior "loops only while connected." The aggregator early-returns when no engine contributes, and TrailMate targets a few devices, so the cost is negligible. Per-session leaks are avoided by routing removal/quit through `DeviceSession.shutdown()` (disconnect + `stopEngine`), since `disconnect()` alone now leaves the engine running.

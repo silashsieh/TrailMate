@@ -24,14 +24,31 @@ enum SimulationEvent: Sendable {
     case routeAborted(distanceMeters: Double, durationSeconds: Double)
 }
 
-// Owns the simulation engines, the 20 Hz aggregator loop, the idle-jitter
-// task, the deviation check, the 2 Hz UI throttle, and the App Nap activity
+nonisolated struct SimulationTiming: Sendable {
+    let aggregatorDeltaTime: TimeInterval
+    let aggregatorInterval: Duration
+    let scrubEmitInterval: Duration
+    let playbackSnapshotInterval: Duration
+    let activeSnapshotInterval: Duration
+
+    static let production = SimulationTiming(
+        aggregatorDeltaTime: 0.1,
+        aggregatorInterval: .milliseconds(100),
+        scrubEmitInterval: .milliseconds(100),
+        playbackSnapshotInterval: .milliseconds(500),
+        activeSnapshotInterval: .milliseconds(100)
+    )
+}
+
+// Owns the simulation engines, the 10 Hz aggregator loop, the idle-jitter
+// task, the deviation check, the UI throttles, and the App Nap activity
 // token. Decoupled from MainActor so SwiftUI hitches don't stall SETQ
 // delivery. Engines are nonisolated stored properties — no per-tick await
 // hop into separate isolation domains.
 actor SimulationActor {
     private let bridge: SimulationStateBridge
     private let recorderRef: RecorderService
+    private let timing: SimulationTiming
 
     private let nav = NavigationEngine()
     private let joy = JoystickEngine()
@@ -63,9 +80,10 @@ actor SimulationActor {
     nonisolated let events: AsyncStream<SimulationEvent>
     nonisolated private let eventsContinuation: AsyncStream<SimulationEvent>.Continuation
 
-    init(bridge: SimulationStateBridge, recorder: RecorderService) {
+    init(bridge: SimulationStateBridge, recorder: RecorderService, timing: SimulationTiming = .production) {
         self.bridge = bridge
         self.recorderRef = recorder
+        self.timing = timing
         var continuation: AsyncStream<SimulationEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
         self.eventsContinuation = continuation
@@ -236,7 +254,7 @@ actor SimulationActor {
 
     // Live-follow scrub (epic 011 decision): the device receives scrub
     // positions as the user drags, not just the release point. Drag events
-    // arrive at display rate, so emits + UI pushes are throttled to the 20 Hz
+    // arrive at display rate, so emits + UI pushes are throttled to the 10 Hz
     // hot-path cadence; the playhead itself moves on every call. The
     // release-time seek(toProgress:) is authoritative, so dropping a stale
     // in-flight scrub here is harmless.
@@ -244,7 +262,7 @@ actor SimulationActor {
         guard isScrubbing else { return }   // stale task landing after release
         guard let coord = applySeek(progress: progress) else { return }
         let now = ContinuousClock.now
-        if let last = lastScrubEmit, now - last < .milliseconds(50) { return }
+        if let last = lastScrubEmit, now - last < timing.scrubEmitInterval { return }
         lastScrubEmit = now
         emit(coord)
         await pushSnapshotNow(routeDeviationMeters: 0)
@@ -358,11 +376,13 @@ actor SimulationActor {
 
     private func startAggregator() {
         aggregatorTask?.cancel()
-        aggregatorTask = Task { [weak self] in
-            let dt: TimeInterval = 0.05
+        let timing = self.timing
+        aggregatorTask = Task { [weak self, timing] in
+            let dt = timing.aggregatorDeltaTime
+            let interval = timing.aggregatorInterval
             var nextTick = ContinuousClock.now
             while !Task.isCancelled {
-                nextTick = nextTick.advanced(by: .milliseconds(50))
+                nextTick = nextTick.advanced(by: interval)
                 try? await Task.sleep(until: nextTick, clock: .continuous)
                 await self?.aggregatorTick(dt: dt)
             }
@@ -411,7 +431,7 @@ actor SimulationActor {
 
         guard anyContribution else {
             // Engines inactive — reset deviation tracking and push state only
-            // if it just changed (caller doesn't need 20 Hz no-op snapshots).
+            // if it just changed (caller doesn't need 10 Hz no-op snapshots).
             if bridge_routeDeviationMeters != 0 || deviationStartedAt != nil {
                 deviationStartedAt = nil
                 await pushSnapshotNow(routeDeviationMeters: 0)
@@ -496,18 +516,16 @@ actor SimulationActor {
         )
     }
 
-    // Throttled push for the hot path. The 2 Hz cadence is what keeps MapArea
-    // from rebuilding the route MapPolyline at 20 Hz; the backend still gets
-    // every SETQ tick because backend.setLocationQuiet is called from `emit`,
-    // not from here.
+    // Throttled push for the hot path. Playback remains at 2 Hz to keep
+    // MapArea from rebuilding the route MapPolyline on every tick; active
+    // non-playing motion is capped at 10 Hz. The backend still gets every SETQ
+    // tick because backend.setLocationQuiet is called from `emit`, not here.
     private func pushSnapshotThrottled(routeDeviationMeters: Double) async {
         let now = ContinuousClock.now
-        let shouldPush: Bool
-        if nav.playbackState == .playing {
-            shouldPush = lastDisplayPush.map { now - $0 >= .milliseconds(500) } ?? true
-        } else {
-            shouldPush = true
-        }
+        let interval = nav.playbackState == .playing
+            ? timing.playbackSnapshotInterval
+            : timing.activeSnapshotInterval
+        let shouldPush = lastDisplayPush.map { now - $0 >= interval } ?? true
         guard shouldPush else { return }
         lastDisplayPush = now
         bridge_routeDeviationMeters = routeDeviationMeters

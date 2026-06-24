@@ -2,7 +2,7 @@
 type: epic
 id: 036
 title: Reduce SwiftUI invalidation fan-out from snapshot pushes
-status: open
+status: dropped
 milestone: v2.2.0
 issue:
 opened: 2026-06-23
@@ -11,6 +11,13 @@ tags: [performance, ui, swiftui]
 ---
 
 # Epic 036: Reduce SwiftUI invalidation fan-out from snapshot pushes
+
+> **Dropped 2026-06-24.** This epic was gated on measurement, and the profiling resolved the gate
+> negatively: with [[034-cpu-idle-playback-spikes]] and [[035-throttle-simulation-loop]] landed, the
+> residual idle CPU is **not** `@Observable` snapshot fan-out — it is MapKit's renderer repainting a
+> visible SwiftUI `Map` (no snapshots are even pushed at idle). At idle the snapshot path is silent,
+> so change-guarding `apply()` would buy nothing. The real cost and its fix are owned by
+> [[037-mkmapview-idle-cpu]]. Kept for the record; not deleted.
 
 > Tier 3 (optional polish) of the 2026-06-23 CPU-profiling session. **Gated on measurement**: do
 > this only if Instruments still shows meaningful SwiftUI cost after

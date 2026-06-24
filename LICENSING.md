@@ -69,7 +69,7 @@ satisfies the GPL).
 
 ## Bundled third-party licenses
 
-The release app bundles a CPython 3.13 runtime (PSF license) and ~94 Python
+The release app bundles a CPython 3.13 runtime (PSF license) and ~97 Python
 packages spanning MIT, BSD, Apache-2.0, ISC, MPL-2.0, LGPL-3.0, PSF, and
 GPL-3.0. The full per-package inventory is in
 [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md). All of these licenses are
@@ -81,7 +81,8 @@ compatible with conveying the aggregate under GPL-3.0-or-later:
   per-file copyleft only.
 - **LGPL-3.0** (`pylzss`) — used as a separable, replaceable module; its
   `COPYING`/`COPYING.LESSER` are preserved.
-- **GPL-3.0-or-later** (`pymobiledevice3`, `developer_disk_image`,
+- **GPL-3.0-or-later** (`pymobiledevice3`, its bundled PyTCP stack —
+  `pmd-pytcp`, `pmd-net-proto`, `pmd-net-addr` — and `developer_disk_image`,
   `ipsw-parser`, `opack2`, `pycrashreport`, `pyiosbackup`, `pygnuutils`,
   `parameter-decorators`) — the reason the aggregate is GPLv3.
 

@@ -30,6 +30,8 @@ KNOWN_COPYLEFT = {
     "pymobiledevice3", "developer-disk-image", "developer_disk_image",
     "ipsw-parser", "opack2", "pycrashreport", "pyiosbackup", "pygnuutils",
     "parameter-decorators", "pylzss", "certifi", "jinxed", "tqdm",
+    # pymobiledevice3's bundled pure-Python TCP/IP stack (PyTCP), all GPLv3.
+    "pmd-net-addr", "pmd-net-proto", "pmd-pytcp",
 }
 
 # Corrections for packages whose PyPI metadata is wrong or ambiguous. Keyed by

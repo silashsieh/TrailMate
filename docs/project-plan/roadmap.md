@@ -38,9 +38,19 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v2.2.0 — Coverage routing & test refresh:**
+- **v2.3.0 — AI/CLI surface & docs polish:**
+  [023 — `trailmate` CLI + stdio MCP shim](epics/023-cli-mcp-shim.md),
+  [014 — README screenshots & GIF demo](epics/014-readme-screenshots.md).
+- **v2.2.0 — Coverage routing, CPU/perf, auto-update, reorder fix & test refresh:**
   [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md),
-  [033 — Refresh test & UI coverage for features shipped since v2.0.0](epics/033-refresh-test-coverage.md).
+  [033 — Refresh test & UI coverage for features shipped since v2.0.0](epics/033-refresh-test-coverage.md),
+  [037 — Migrate MapArea to MKMapView for idle CPU](epics/037-mkmapview-idle-cpu.md),
+  [038 — In-app auto-update (Sparkle)](epics/038-in-app-auto-update.md),
+  [039 — Fix saved-items drag-reorder](epics/039-fix-saved-items-reorder.md).
+  CPU-profiling wins already landed this cycle:
+  [034 — Eliminate idle & playback CPU spikes](epics/034-cpu-idle-playback-spikes.md),
+  [035 — Cap simulation-loop CPU during motion](epics/035-throttle-simulation-loop.md)
+  ([036 — Reduce SwiftUI invalidation](epics/036-reduce-swiftui-invalidation.md) dropped — superseded by 037).
 - **Shipped (v2.1.0 — 2026-06-20) — UI polish, offline use & direct location entry:**
   [024 — Fix joystick/map-control overlap](epics/024-joystick-map-control-overlap.md),
   [025 — Collapse the sidebar log by default](epics/025-collapse-log-default.md),

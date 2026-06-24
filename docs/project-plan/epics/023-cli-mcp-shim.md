@@ -3,7 +3,7 @@ type: epic
 id: 023
 title: trailmate CLI + stdio MCP shim (AI integration follow-up)
 status: open
-milestone:
+milestone: v2.3.0
 issue: 54
 opened: 2026-06-19
 shipped:

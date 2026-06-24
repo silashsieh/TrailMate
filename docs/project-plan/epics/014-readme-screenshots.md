@@ -2,8 +2,8 @@
 type: epic
 id: 014
 title: README screenshots & GIF demo
-status: idea
-milestone:
+status: open
+milestone: v2.3.0
 issue:
 opened: 2026-05-29
 shipped:

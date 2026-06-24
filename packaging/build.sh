@@ -90,6 +90,12 @@ from pymobiledevice3.usbmux import list_devices
 print('daemon + lister imports OK')
 "
 
+# 7. Regenerate the third-party license inventory from the freshly-installed
+# deps. Warns on stderr if a new GPL/LGPL/MPL package entered the tree — a
+# copyleft dep can change the license of the distributed aggregate (LICENSING.md).
+echo "→ Regenerating THIRD-PARTY-LICENSES.md"
+"$PY" "$ROOT/packaging/gen-third-party-licenses.py" "$OUT"
+
 echo
 echo "✓ Bundle ready: $OUT"
 du -sh "$OUT"

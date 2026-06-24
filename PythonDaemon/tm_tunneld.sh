@@ -1,6 +1,10 @@
 #!/bin/bash
 # tm_tunneld.sh — privileged wrapper for `pymobiledevice3 remote tunneld`.
 #
+# Part of the TrailMate Python daemon, distributed under the GNU General Public
+# License v3.0 or later (see COPYING and ../LICENSING.md). The TrailMate macOS
+# app is licensed separately under the MIT License.
+#
 # Launched as root by TrailMate.app via `osascript … with administrator
 # privileges` — ONE auth prompt for the whole session. Runs a single tunneld
 # that auto-tunnels every connected device (usb + wifi + usbmux). The host

@@ -19,7 +19,7 @@
 - macOS 26.4 (Tahoe / "26") on Apple Silicon
 - iOS 26.4 on a paired iPhone with Developer Mode enabled
 - Xcode 26.x
-- Python 3.13 (bundled), pymobiledevice3 >= 9.12
+- Python 3.13 (bundled), pymobiledevice3 9.30.1 (pinned in `packaging/build.sh`)
 
 ## References
 

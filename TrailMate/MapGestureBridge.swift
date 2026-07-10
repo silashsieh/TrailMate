@@ -33,7 +33,8 @@ final class MapGestureBridge: NSObject, NSGestureRecognizerDelegate {
     enum StrokePhase {
         case began(NSPoint, CLLocationCoordinate2D)
         case changed(NSPoint, CLLocationCoordinate2D)
-        case ended
+        case ended       // commit the stroke
+        case cancelled   // discard — recognizer cancelled/failed, no route
     }
 
     // Long-press release → coordinate (matches today's 0.5 s long-press).
@@ -89,7 +90,16 @@ final class MapGestureBridge: NSObject, NSGestureRecognizerDelegate {
     // Zoom stays live throughout (`isZoomEnabled` untouched).
     func setDrawMode(_ enabled: Bool) {
         draw?.isEnabled = enabled
+        // Suppress every non-draw interaction while a stroke owns the drag —
+        // matching today's `interactionModes: .zoom` (zoom only). The map's own
+        // pan, our long-press, our right-click menu, and rotate/pitch all go
+        // quiet so a slow stroke can't trigger long-press or the context menu and
+        // the camera holds still; `isZoomEnabled` is untouched, so zoom stays live.
+        longPress?.isEnabled = !enabled
+        rightClick?.isEnabled = !enabled
         mapView?.isScrollEnabled = !enabled
+        mapView?.isRotateEnabled = !enabled
+        mapView?.isPitchEnabled = !enabled
         log.debug("draw mode \(enabled ? "ON" : "OFF", privacy: .public) — isScrollEnabled=\(!enabled)")
     }
 
@@ -100,8 +110,10 @@ final class MapGestureBridge: NSObject, NSGestureRecognizerDelegate {
             for recognizer in [longPress, rightClick, draw].compactMap({ $0 }) {
                 mapView.removeGestureRecognizer(recognizer)
             }
-            // Leave the map interactive if we tore down mid-draw.
+            // Leave the map fully interactive if we tore down mid-draw.
             mapView.isScrollEnabled = true
+            mapView.isRotateEnabled = true
+            mapView.isPitchEnabled = true
         }
         longPress = nil
         rightClick = nil
@@ -131,13 +143,21 @@ final class MapGestureBridge: NSObject, NSGestureRecognizerDelegate {
         guard let mapView else { return }
         switch recognizer.state {
         case .began:
-            let point = recognizer.location(in: mapView)
-            onStroke?(.began(point, mapView.convert(point, toCoordinateFrom: mapView)))
+            // NSPan only begins after a small hysteresis, so `location(in:)` has
+            // already moved off the mouse-down point (SwiftUI's DragGesture(0)
+            // started AT mouse-down). Recover the true origin by subtracting the
+            // accumulated translation and deliver it as the stroke's first point.
+            let current = recognizer.location(in: mapView)
+            let translation = recognizer.translation(in: mapView)
+            let origin = NSPoint(x: current.x - translation.x, y: current.y - translation.y)
+            onStroke?(.began(origin, mapView.convert(origin, toCoordinateFrom: mapView)))
         case .changed:
             let point = recognizer.location(in: mapView)
             onStroke?(.changed(point, mapView.convert(point, toCoordinateFrom: mapView)))
-        case .ended, .cancelled, .failed:
-            onStroke?(.ended)
+        case .ended:
+            onStroke?(.ended)          // commit
+        case .cancelled, .failed:
+            onStroke?(.cancelled)      // discard — no route from a cancelled drag
         default:
             break
         }

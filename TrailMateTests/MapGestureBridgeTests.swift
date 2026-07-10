@@ -56,19 +56,29 @@ struct MapGestureBridgeTests {
         let mapView = MKMapView()
         let bridge = MapGestureBridge()
         let added = addedRecognizers(by: { bridge.attach(to: $0) }, on: mapView)
-        guard let pan = added.compactMap({ $0 as? NSPanGestureRecognizer }).first else {
-            Issue.record("draw pan recognizer was not installed")
+        guard let pan = added.compactMap({ $0 as? NSPanGestureRecognizer }).first,
+              let press = added.compactMap({ $0 as? NSPressGestureRecognizer }).first,
+              let click = added.compactMap({ $0 as? NSClickGestureRecognizer }).first else {
+            Issue.record("draw recognizers were not installed")
             return
         }
 
         bridge.setDrawMode(true)
         #expect(pan.isEnabled == true)
-        #expect(mapView.isScrollEnabled == false)   // map's own pan suppressed
-        #expect(mapView.isZoomEnabled == true)       // zoom stays live while drawing
+        #expect(press.isEnabled == false)            // long-press can't fire mid-stroke
+        #expect(click.isEnabled == false)            // right-click menu suppressed
+        #expect(mapView.isScrollEnabled == false)    // map's own pan suppressed
+        #expect(mapView.isRotateEnabled == false)    // draw mode is zoom-only…
+        #expect(mapView.isPitchEnabled == false)
+        #expect(mapView.isZoomEnabled == true)       // …so zoom stays live while drawing
 
         bridge.setDrawMode(false)
         #expect(pan.isEnabled == false)
-        #expect(mapView.isScrollEnabled == true)     // normal pan restored
+        #expect(press.isEnabled == true)             // all non-draw interaction restored
+        #expect(click.isEnabled == true)
+        #expect(mapView.isScrollEnabled == true)
+        #expect(mapView.isRotateEnabled == true)
+        #expect(mapView.isPitchEnabled == true)
         #expect(mapView.isZoomEnabled == true)
     }
 

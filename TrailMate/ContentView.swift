@@ -1609,7 +1609,10 @@ private struct MapArea: View {
             onFollowMirror: { isFollowing = $0 },
             onLongPress: { handleLongPress($0) },
             onRightClick: { presentDestinationMenu($0, at: $1) },
-            onStroke: { handleStroke($0) }
+            onStroke: { handleStroke($0) },
+            controlClickMenu: { coordinate, _ in
+                isDrawingRoute ? nil : buildDestinationMenu(coordinate)
+            }
         )
         // Bottom-trailing inset (not a plain overlay) so MapKit reflows its
         // built-in zoom/compass controls up and clear of the joystick; the map
@@ -1768,6 +1771,11 @@ private struct MapArea: View {
             strokeCoords.append(coordinate)
         case .ended:
             finishStroke()
+        case .cancelled:
+            // Recognizer cancelled/failed: drop the in-progress stroke without
+            // building a route, and stay in draw mode.
+            strokeCoords = []
+            lastStrokePoint = nil
         }
     }
 
@@ -1798,9 +1806,17 @@ private struct MapArea: View {
     // coordinate + point fresh at click time (no stale-hover tracker needed).
     // Every action drives the local red dot (the device mirrors it), so none gate
     // on connection; only origin-dependent actions disable until a position exists.
+    // Right-click (gesture-recognizer) path: build the shared menu and pop it up
+    // at the click point.
     private func presentDestinationMenu(_ coordinate: CLLocationCoordinate2D, at point: NSPoint) {
         guard !isDrawingRoute, let mapView = bridge.mapView else { return }
+        buildDestinationMenu(coordinate).popUp(positioning: nil, at: point, in: mapView)
+    }
 
+    // The shared destination menu. Used by both the right-click recognizer (popUp
+    // above) and the native control+left-click path (returned from
+    // TMMapView.menu(for:) — see the MapSurface `controlClickMenu` wiring).
+    private func buildDestinationMenu(_ coordinate: CLLocationCoordinate2D) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
@@ -1844,7 +1860,7 @@ private struct MapArea: View {
             appState.copyCoordinate(coordinate)
         })
 
-        menu.popUp(positioning: nil, at: point, in: mapView)
+        return menu
     }
 }
 

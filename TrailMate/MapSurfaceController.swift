@@ -71,6 +71,10 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
 
     func attach(to mapView: MKMapView) {
         self.mapView = mapView
+        // The controller owns the delegate — it is the single owner of the map's
+        // content and callbacks, so wiring it here (not at the call site) keeps
+        // that invariant in one place.
+        mapView.delegate = self
     }
 
     // MARK: - Structural apply

@@ -36,14 +36,17 @@ struct MapSurface: NSViewRepresentable {
     var onLongPress: (CLLocationCoordinate2D) -> Void
     var onRightClick: (CLLocationCoordinate2D, NSPoint) -> Void
     var onStroke: (MapGestureBridge.StrokePhase) -> Void
+    // Native control+left-click context menu (the AppKit convention the 0x2
+    // right-click recognizer misses). Returns the same menu the recognizer pops
+    // up, or nil to defer to the default (e.g. while drawing).
+    var controlClickMenu: (CLLocationCoordinate2D, NSPoint) -> NSMenu?
 
     func makeCoordinator() -> MapSurfaceController {
         MapSurfaceController()
     }
 
-    func makeNSView(context: Context) -> MKMapView {
-        let mapView = MKMapView()
-        mapView.delegate = context.coordinator
+    func makeNSView(context: Context) -> TMMapView {
+        let mapView = TMMapView()
 
         // `.realistic` elevation for parity with today's `.mapStyle(.standard(elevation:))`;
         // the compass + zoom controls mirror the SwiftUI `MapCompass`/`MapZoomStepper`.
@@ -52,37 +55,57 @@ struct MapSurface: NSViewRepresentable {
         mapView.showsZoomControls = true
 
         let controller = context.coordinator
-        controller.attach(to: mapView)
+        controller.attach(to: mapView)   // owns mapView.delegate = self
         controller.cameraDirector = director
         director.attach(to: mapView)
         bridge.attach(to: mapView)
 
-        wire(controller)
+        wire(controller, mapView)
         controller.apply(model, to: mapView)
         return mapView
     }
 
-    func updateNSView(_ mapView: MKMapView, context: Context) {
+    func updateNSView(_ mapView: TMMapView, context: Context) {
         let controller = context.coordinator
-        wire(controller)
+        wire(controller, mapView)
         controller.apply(model, to: mapView)
     }
 
     // Cancel the telemetry consumers when the surface is permanently removed. The
     // recognizers go away with the map view; the tasks must be cancelled by hand.
-    static func dismantleNSView(_ nsView: MKMapView, coordinator: MapSurfaceController) {
+    static func dismantleNSView(_ nsView: TMMapView, coordinator: MapSurfaceController) {
         coordinator.cancelTelemetryConsumers()
     }
 
     // Re-point the controller/collaborator closures on every structural update so
     // they always capture the freshest caller state. Cheap, and never called at
     // telemetry rate (the dot bypasses `updateNSView` entirely).
-    private func wire(_ controller: MapSurfaceController) {
+    private func wire(_ controller: MapSurfaceController, _ mapView: TMMapView) {
         controller.telemetryStreamProvider = telemetryStream
         controller.onFollowDisengagedByStream = { onFollowMirror(false) }
         director.onFollowDisengaged = { onFollowMirror(false) }
         bridge.onLongPress = onLongPress
         bridge.onRightClick = onRightClick
         bridge.onStroke = onStroke
+        mapView.controlClickMenuProvider = controlClickMenu
+    }
+}
+
+// An `MKMapView` that also surfaces the native control+left-click context menu —
+// the AppKit convention the right-click gesture recognizer (buttonMask 0x2)
+// misses, because Control+left-click is a *left* button event. Right-click stays
+// on the recognizer; this handles only the control-click path (gated on the
+// `.control` modifier + a left-mouse event) so the menu is never presented twice.
+final class TMMapView: MKMapView {
+    var controlClickMenuProvider: ((CLLocationCoordinate2D, NSPoint) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard event.modifierFlags.contains(.control),
+              event.type == .leftMouseDown || event.type == .leftMouseUp else {
+            return super.menu(for: event)
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        let coordinate = convert(point, toCoordinateFrom: self)
+        return controlClickMenuProvider?(coordinate, point) ?? super.menu(for: event)
     }
 }

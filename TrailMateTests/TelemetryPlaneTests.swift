@@ -4,15 +4,28 @@ import Observation
 import Testing
 @testable import TrailMate
 
-// Epic 041 — the telemetry plane. Three properties the substrate must hold, all
+// Epic 041/037 — the telemetry plane. Properties the substrate must hold, all
 // checkable at the seam without a device:
 //   1. the per-actor telemetry stream is latest-wins (a slow consumer reads the
 //      freshest frame, never a backlog),
-//   2. the bridge's snapshot apply is change-guarded (re-applying an identical
-//      snapshot fires no Observation, so idle same-value pushes don't fan out),
-//   3. DeviceSession.routeVersion bumps exactly once per route assignment.
+//   2. the stream is RENEWABLE — a cancelled/re-created consumer (window close →
+//      reopen) can resubscribe and frames flow again (a stored stream would be
+//      dead after the first cancel),
+//   3. the bridge's snapshot apply is change-guarded (re-applying an identical
+//      snapshot fires no Observation),
+//   4. DeviceSession.routeVersion bumps exactly once per route assignment.
 @MainActor
 struct TelemetryPlaneTests {
+
+    // Each test gets its own UserDefaults suite so an app-hosted run never
+    // persists a fake red dot into the owner's real defaults (the bridge's
+    // position persistence writes through this).
+    private static func freshDefaults() -> UserDefaults {
+        let suiteName = "com.sh.TrailMateTests.Telemetry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
 
     // MARK: - Latest-wins stream
 
@@ -21,11 +34,11 @@ struct TelemetryPlaneTests {
     // stale queue it has to drain. Three teleports before the first read must
     // surface only the third.
     @Test func telemetryStreamKeepsOnlyNewestForSlowConsumer() async {
-        let bridge = SimulationStateBridge()
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
-        let stream = sim.telemetry
+        let stream = await sim.telemetryStream()
 
-        // Produce three frames with no iterator attached yet (the slow consumer).
+        // Produce three frames without draining the iterator (the slow consumer).
         await sim.teleport(to: CLLocationCoordinate2D(latitude: 10, longitude: 10))
         await sim.teleport(to: CLLocationCoordinate2D(latitude: 20, longitude: 20))
         await sim.teleport(to: CLLocationCoordinate2D(latitude: 30, longitude: 30))
@@ -39,9 +52,9 @@ struct TelemetryPlaneTests {
     // The stream carries the route-relative derivatives too, sourced from the
     // same snapshot as the bridge push so the two planes never disagree.
     @Test func telemetryFrameCarriesPositionAndRecordingCount() async {
-        let bridge = SimulationStateBridge()
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
-        let stream = sim.telemetry
+        let stream = await sim.telemetryStream()
 
         let dot = CLLocationCoordinate2D(latitude: 25.0330, longitude: 121.5654)
         await sim.teleport(to: dot)
@@ -54,65 +67,90 @@ struct TelemetryPlaneTests {
         #expect(frame?.routeDeviationMeters == 0)
     }
 
+    // MARK: - Renewable subscription (window close → reopen)
+
+    // The stored-stream trap this replaced: an app-lifetime AsyncStream dies once
+    // its lone consumer is cancelled, so a later iterator reads nil forever. The
+    // factory hands out a fresh stream each call and seeds the newest frame, so a
+    // re-subscriber renders immediately and keeps receiving.
+    @Test func telemetryStreamIsRenewableAcrossResubscribe() async {
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
+        let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
+
+        await sim.teleport(to: CLLocationCoordinate2D(latitude: 10, longitude: 10))
+        // First subscription — seeded with the current (10,10) frame.
+        let stream1 = await sim.telemetryStream()
+        var it1 = stream1.makeAsyncIterator()
+        #expect(await it1.next()?.coordinate?.latitude == 10)
+
+        // Consumer stops (window close): drop the iterator. Resubscribe (reopen):
+        // a fresh, seeded stream must flow — a dead stored stream would give nil.
+        await sim.teleport(to: CLLocationCoordinate2D(latitude: 20, longitude: 20))
+        let stream2 = await sim.telemetryStream()
+        var it2 = stream2.makeAsyncIterator()
+        #expect(await it2.next()?.coordinate?.latitude == 20)
+
+        // …and it keeps flowing: a subsequent teleport lands on the new stream.
+        await sim.teleport(to: CLLocationCoordinate2D(latitude: 30, longitude: 30))
+        #expect(await it2.next()?.coordinate?.latitude == 30)
+    }
+
     // MARK: - Change-guarded bridge writes
 
     // Re-applying a byte-identical snapshot must not mutate any observed
     // property, so Observation fires nothing — this is the whole point of the
     // guards (idle 1 Hz jitter re-pushes the same dot; it must not fan out).
-    @Test func identicalSnapshotFiresNoObservation() {
-        let bridge = SimulationStateBridge()
+    @Test func identicalSnapshotFiresNoObservation() async {
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let snap = Self.sampleSnapshot()
         bridge.apply(snap)   // establish state == snap
 
-        var fired = false
-        withObservationTracking {
-            Self.readAllObservedFields(bridge)
-        } onChange: {
-            fired = true
+        await confirmation("identical apply fires no observation", expectedCount: 0) { confirm in
+            withObservationTracking {
+                Self.readAllObservedFields(bridge)
+            } onChange: {
+                confirm()
+            }
+            bridge.apply(snap)   // identical → every field guard skips its write
         }
-
-        bridge.apply(snap)   // identical → every field guard skips its write
-        #expect(fired == false)
     }
 
     // Control: a snapshot that differs in even one field must fire Observation,
     // proving the guards don't wall off legitimate updates.
-    @Test func changedSnapshotFiresObservation() {
-        let bridge = SimulationStateBridge()
+    @Test func changedSnapshotFiresObservation() async {
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let snap = Self.sampleSnapshot()
         bridge.apply(snap)
 
-        var fired = false
-        withObservationTracking {
-            Self.readAllObservedFields(bridge)
-        } onChange: {
-            fired = true
+        await confirmation("changed apply fires observation", expectedCount: 1) { confirm in
+            withObservationTracking {
+                Self.readAllObservedFields(bridge)
+            } onChange: {
+                confirm()
+            }
+            var changed = snap
+            changed.navigationProgress = snap.navigationProgress + 0.25
+            bridge.apply(changed)
         }
-
-        var changed = snap
-        changed.navigationProgress = snap.navigationProgress + 0.25
-        bridge.apply(changed)
-        #expect(fired == true)
     }
 
     // The coordinate guard compares lat/lon (CLLocationCoordinate2D isn't
     // Equatable): a moved dot must fire even when every scalar field is unchanged.
-    @Test func changedCoordinateAloneFiresObservation() {
-        let bridge = SimulationStateBridge()
+    @Test func changedCoordinateAloneFiresObservation() async {
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let snap = Self.sampleSnapshot()
         bridge.apply(snap)
 
-        var fired = false
-        withObservationTracking {
-            _ = bridge.simulatedCoordinate
-        } onChange: {
-            fired = true
+        await confirmation("moved coordinate fires observation", expectedCount: 1) { confirm in
+            withObservationTracking {
+                _ = bridge.simulatedCoordinate
+            } onChange: {
+                confirm()
+            }
+            var moved = snap
+            moved.simulatedCoordinate = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
+            bridge.apply(moved)
         }
-
-        var moved = snap
-        moved.simulatedCoordinate = CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
-        bridge.apply(moved)
-        #expect(fired == true)
     }
 
     // MARK: - routeVersion

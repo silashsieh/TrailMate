@@ -80,14 +80,15 @@ actor SimulationActor {
     nonisolated let events: AsyncStream<SimulationEvent>
     nonisolated private let eventsContinuation: AsyncStream<SimulationEvent>.Continuation
 
-    // The high-frequency telemetry plane (epic 041): the clean position and its
-    // route-relative derivatives, yielded wherever a snapshot is pushed today.
-    // Latest-wins (bufferingNewest(1)) so a slow consumer always reads the
-    // freshest frame and never a backlog. Dual-published alongside the bridge
-    // snapshot — the old path stays authoritative until 037 moves the map onto
-    // this plane — so this stream carries no behavior of its own yet.
-    nonisolated let telemetry: AsyncStream<TelemetryFrame>
-    nonisolated private let telemetryContinuation: AsyncStream<TelemetryFrame>.Continuation
+    // The high-frequency telemetry plane (epic 041/037): the clean position and
+    // its route-relative derivatives. SINGLE-subscription and RENEWABLE — a
+    // stored app-lifetime stream would die permanently once its lone consumer
+    // task is cancelled (e.g. the window closes in menu-bar background mode),
+    // leaving any later iterator to read `nil`. So instead each `telemetryStream()`
+    // call hands out a fresh latest-wins stream (`bufferingNewest(1)`), retiring
+    // any prior subscription's continuation and seeding the newest frame so a
+    // re-subscriber (window reopen) renders immediately.
+    private var telemetryContinuation: AsyncStream<TelemetryFrame>.Continuation?
 
     init(bridge: SimulationStateBridge, recorder: RecorderService, timing: SimulationTiming = .production) {
         self.bridge = bridge
@@ -96,14 +97,30 @@ actor SimulationActor {
         var continuation: AsyncStream<SimulationEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
         self.eventsContinuation = continuation
-        var telemetryCont: AsyncStream<TelemetryFrame>.Continuation!
-        self.telemetry = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { telemetryCont = $0 }
-        self.telemetryContinuation = telemetryCont
+        // telemetryContinuation is created per subscription in telemetryStream().
     }
 
     deinit {
         eventsContinuation.finish()
-        telemetryContinuation.finish()
+        telemetryContinuation?.finish()
+    }
+
+    // MARK: - Telemetry subscription
+
+    // Hand out a fresh single-consumer telemetry stream, retiring any prior one
+    // (see the `telemetryContinuation` note). Renewable so a consumer that is
+    // cancelled and re-created — window close → reopen in menu-bar mode — calls
+    // this again and gets a live stream, seeded with the newest frame so it
+    // renders immediately instead of waiting for the next tick.
+    func telemetryStream() -> AsyncStream<TelemetryFrame> {
+        telemetryContinuation?.finish()
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: TelemetryFrame.self,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        telemetryContinuation = continuation
+        continuation.yield(makeTelemetryFrame(from: makeSnapshot(routeDeviationMeters: bridge_routeDeviationMeters)))
+        return stream
     }
 
     // MARK: - Lifecycle
@@ -150,7 +167,7 @@ actor SimulationActor {
         // Engine is down for good (session removal / quit) — no more frames will
         // be produced, so end the telemetry stream after the final push so its
         // consumers see the cleared state and then a clean completion.
-        telemetryContinuation.finish()
+        telemetryContinuation?.finish()
     }
 
     // Attach a device backend — the output sink the loops mirror to. Snaps the
@@ -573,7 +590,7 @@ actor SimulationActor {
     // SETQ tick because backend.setLocationQuiet is called from `emit`, not here.
     private func pushTick(routeDeviationMeters: Double) async {
         let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
-        telemetryContinuation.yield(makeTelemetryFrame(from: snap))
+        telemetryContinuation?.yield(makeTelemetryFrame(from: snap))
 
         let now = ContinuousClock.now
         let interval = nav.playbackState == .playing
@@ -592,7 +609,7 @@ actor SimulationActor {
         bridge_routeDeviationMeters = dev
         lastDisplayPush = ContinuousClock.now
         let snap = makeSnapshot(routeDeviationMeters: dev)
-        telemetryContinuation.yield(makeTelemetryFrame(from: snap))
+        telemetryContinuation?.yield(makeTelemetryFrame(from: snap))
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }

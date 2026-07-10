@@ -1605,7 +1605,7 @@ private struct MapArea: View {
             model: makeModel(),
             director: director,
             bridge: bridge,
-            telemetryStream: { appState.telemetryStream(for: $0) },
+            telemetryStream: { await appState.telemetryStream(for: $0) },
             onFollowMirror: { isFollowing = $0 },
             onLongPress: { handleLongPress($0) },
             onRightClick: { presentDestinationMenu($0, at: $1) },

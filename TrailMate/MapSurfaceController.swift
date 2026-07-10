@@ -47,8 +47,9 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
 
     // Injected per-session telemetry subscription (frozen contract §2): the
     // controller resolves a session's stream through this closure, so it never
-    // imports `AppState`. Set at integration before the first `apply`.
-    var telemetryStreamProvider: ((UUID) -> AsyncStream<TelemetryFrame>)?
+    // imports `AppState`. Async because each resolution renews the actor's
+    // single-consumer stream. Set at integration before the first `apply`.
+    var telemetryStreamProvider: ((UUID) async -> AsyncStream<TelemetryFrame>)?
 
     // Fired when the SELECTED session's telemetry position clears (nil) while
     // following — the one follow-disengage path the SwiftUI layer can't observe
@@ -104,10 +105,10 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
         }
         guard let provider = telemetryStreamProvider else { return }
         for id in ids where telemetryConsumers[id] == nil {
-            let stream = provider(id)
             telemetryConsumers[id] = Task { @MainActor [weak self] in
+                let stream = await provider(id)
                 for await frame in stream {
-                    guard let self else { return }
+                    guard let self else { break }
                     self.consumeTelemetry(frame, sessionID: id)
                 }
             }

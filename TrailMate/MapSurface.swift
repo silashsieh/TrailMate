@@ -23,7 +23,8 @@ struct MapSurface: NSViewRepresentable {
 
     // Injected per-session telemetry subscription (frozen contract §2): the
     // controller resolves streams through this, so it never imports `AppState`.
-    var telemetryStream: (UUID) -> AsyncStream<TelemetryFrame>
+    // Async because each resolution renews the actor's single-consumer stream.
+    var telemetryStream: (UUID) async -> AsyncStream<TelemetryFrame>
 
     // Mirror the caller's follow-button state when follow disengages by a path
     // the SwiftUI layer can't see itself — a user camera gesture inside the map,

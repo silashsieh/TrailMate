@@ -398,10 +398,15 @@ final class AppState {
     var connectionStatus: ConnectionStatus { selectedSession.connectionStatus }
 
     // The map surface's injected telemetry subscription (epic 037): resolve one
-    // session's latest-wins frame stream by id. A missing id yields a finished
-    // stream so the caller's consumer terminates cleanly rather than hanging.
-    func telemetryStream(for id: DeviceSession.ID) -> AsyncStream<TelemetryFrame> {
-        sessions.first { $0.id == id }?.sim.telemetry ?? AsyncStream { $0.finish() }
+    // session's fresh single-consumer frame stream by id. Renewable — each call
+    // hands the actor a new subscription (retiring any prior one), so a consumer
+    // re-created on window reopen gets a live, seeded stream. A missing id yields
+    // a finished stream so the caller's consumer terminates cleanly.
+    func telemetryStream(for id: DeviceSession.ID) async -> AsyncStream<TelemetryFrame> {
+        guard let session = sessions.first(where: { $0.id == id }) else {
+            return AsyncStream { $0.finish() }
+        }
+        return await session.sim.telemetryStream()
     }
     // The selected session's friendly name, but only while it is actually
     // connected — nil otherwise so status surfaces never show a stale name

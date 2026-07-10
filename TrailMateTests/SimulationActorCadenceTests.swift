@@ -1,4 +1,5 @@
 import CoreLocation
+import Foundation
 import Testing
 @testable import TrailMate
 
@@ -17,8 +18,15 @@ struct SimulationActorCadenceTests {
 
     private final class Counter { var value = 0 }
 
+    private static func freshDefaults() -> UserDefaults {
+        let suiteName = "com.sh.TrailMateTests.Cadence.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+
     @Test func telemetryFlowsAtLoopCadenceDuringPlaybackWhileBridgeStaysThrottled() async throws {
-        let bridge = SimulationStateBridge()
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
 
         // A long route at a slow speed so playback runs for the whole sample
@@ -27,7 +35,7 @@ struct SimulationActorCadenceTests {
         let end = CLLocationCoordinate2D(latitude: 25.02, longitude: 121.0)
         await sim.loadRoute(coordinates: [start, end], baseSpeed: 5, resetStart: true)
 
-        let stream = sim.telemetry
+        let stream = await sim.telemetryStream()
         await sim.startEngine()
         await sim.play(multiplier: 1)
 

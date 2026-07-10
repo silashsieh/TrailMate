@@ -206,4 +206,81 @@ struct MapSurfaceStoreTests {
         #expect(poly1?.isSelected == true)                 // emphasis updated in place
         #expect(dot1?.isSelected == true)
     }
+
+    // MARK: - Delegate paths (the controller is the MKMapViewDelegate)
+
+    @Test func rendererStylesSelectedAndUnselectedRoutes() {
+        let map = MKMapView()
+        let controller = MapSurfaceController()
+        let a = UUID(), b = UUID()
+        controller.apply(
+            MapSurfaceModel(sessions: [
+                session(a, color: 0, selected: true, version: 1, coords: lineA),
+                session(b, color: 1, selected: false, version: 1, coords: lineB),
+            ]),
+            to: map
+        )
+        guard let polyA = routePolyline(for: a, in: map),
+              let polyB = routePolyline(for: b, in: map),
+              let rA = controller.mapView(map, rendererFor: polyA) as? MKPolylineRenderer,
+              let rB = controller.mapView(map, rendererFor: polyB) as? MKPolylineRenderer else {
+            Issue.record("route renderers not produced")
+            return
+        }
+        #expect(rA.lineWidth == 4)   // selected: thicker
+        #expect(rB.lineWidth == 3)   // unselected: thinner
+        // Selected is full-strength; unselected is dimmed to 0.7.
+        #expect((rA.strokeColor?.alphaComponent ?? 0) > 0.95)
+        #expect(abs((rB.strokeColor?.alphaComponent ?? 0) - 0.7) < 0.05)
+    }
+
+    @Test func rendererStylesTheDrawStroke() {
+        let map = MKMapView()
+        let controller = MapSurfaceController()
+        let a = UUID()
+        controller.apply(
+            MapSurfaceModel(
+                sessions: [session(a, color: 0, selected: true, version: 1, coords: lineA)],
+                strokeCoordinates: [coord(25.033, 121.565), coord(25.034, 121.566), coord(25.035, 121.567)]
+            ),
+            to: map
+        )
+        guard let stroke = map.overlays.compactMap({ $0 as? StrokePolyline }).first,
+              let renderer = controller.mapView(map, rendererFor: stroke) as? MKPolylineRenderer else {
+            Issue.record("stroke renderer not produced")
+            return
+        }
+        #expect(renderer.lineWidth == 3)
+        #expect(renderer.lineDashPattern?.map(\.intValue) == [6, 4])   // orange dashed
+    }
+
+    @Test func dotViewKeepsFixedFrameAndMidpointAcrossSelectionFlip() {
+        let map = MKMapView()
+        let controller = MapSurfaceController()
+        let a = UUID()
+        controller.apply(
+            MapSurfaceModel(sessions: [session(a, color: 0, selected: false, version: 1, coords: lineA)]),
+            to: map
+        )
+        guard let dotA = dot(for: a, in: map),
+              let view = controller.mapView(map, viewFor: dotA) as? SessionDotAnnotationView else {
+            Issue.record("dot annotation view not produced")
+            return
+        }
+        // Fixed size regardless of selection state.
+        #expect(view.frame.width == 19)
+        #expect(view.frame.height == 19)
+
+        // Simulate MapKit having positioned the view at a non-zero origin, then
+        // flip selection: the reconfigure must not reset the origin (which would
+        // strand the dot at (0,0) with no coordinate change to reposition it).
+        view.frame.origin = CGPoint(x: 100, y: 80)
+        let midBefore = CGPoint(x: view.frame.midX, y: view.frame.midY)
+
+        view.configure(color: .systemRed, isSelected: true)
+
+        #expect(view.frame.width == 19)               // still fixed
+        #expect(view.frame.midX == midBefore.x)       // origin/midpoint preserved
+        #expect(view.frame.midY == midBefore.y)
+    }
 }

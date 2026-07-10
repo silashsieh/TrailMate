@@ -261,12 +261,16 @@ nonisolated final class MarkerAnnotation: NSObject, MKAnnotation {
             }
         }
 
+        // Localized (epic 015, en + zh-Hant) — parity with the SwiftUI `Marker`
+        // titles these replaced. Feeds both the annotation title and the glyph's
+        // accessibility description. The Int interpolation resolves to the
+        // existing "Stop %lld" resource key.
         var title: String {
             switch self {
-            case .start: "Start"
-            case .end: "End"
-            case .destination: "Destination"
-            case .stop(let number): "Stop \(number)"
+            case .start: String(localized: "Start")
+            case .end: String(localized: "End")
+            case .destination: String(localized: "Destination")
+            case .stop(let number): String(localized: "Stop \(number)")
             }
         }
     }

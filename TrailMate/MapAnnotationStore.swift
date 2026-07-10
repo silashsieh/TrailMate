@@ -113,9 +113,17 @@ final class SessionDotAnnotationView: MKAnnotationView {
     private let ringLayer = CALayer()
     private let fillLayer = CALayer()
 
+    // Fixed view size — the largest state (selected: fill 16 + ring 3). Keeping
+    // the frame constant is what makes selection/color reconfigure safe: MapKit
+    // may not reposition a live annotation view without a coordinate change, so
+    // resetting the frame origin on a selection flip would strand the dot at
+    // view-space (0,0). Only the centered sublayers resize.
+    private static let side: CGFloat = 19
+
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         wantsLayer = true
+        frame = CGRect(x: 0, y: 0, width: Self.side, height: Self.side)
         // Center the dot on the coordinate (no pin-style bottom anchor).
         centerOffset = .zero
         layer?.addSublayer(ringLayer)
@@ -133,14 +141,15 @@ final class SessionDotAnnotationView: MKAnnotationView {
         let container = fillDesign + ringWidth
         let visibleFill = fillDesign - ringWidth
 
-        frame = CGRect(x: 0, y: 0, width: container, height: container)
+        // Resize the sublayers in place, centered on the fixed view midpoint —
+        // the view frame is never touched here, so its origin can't shift.
+        let mid = CGPoint(x: bounds.midX, y: bounds.midY)
 
-        ringLayer.frame = bounds
+        ringLayer.frame = CGRect(x: mid.x - container / 2, y: mid.y - container / 2, width: container, height: container)
         ringLayer.cornerRadius = container / 2
         ringLayer.backgroundColor = NSColor.white.cgColor
 
-        let inset = (container - visibleFill) / 2
-        fillLayer.frame = CGRect(x: inset, y: inset, width: visibleFill, height: visibleFill)
+        fillLayer.frame = CGRect(x: mid.x - visibleFill / 2, y: mid.y - visibleFill / 2, width: visibleFill, height: visibleFill)
         fillLayer.cornerRadius = visibleFill / 2
         fillLayer.backgroundColor = color.cgColor
     }

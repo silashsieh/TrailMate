@@ -30,6 +30,12 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
     // view and on every `apply`. Weak: the view's lifetime is SwiftUI's.
     private(set) weak var mapView: MKMapView?
 
+    // The camera owner (WP4). The controller owns the `MKMapViewDelegate`, so it
+    // forwards the region-change callbacks the director needs for persistence and
+    // follow-disengage detection. Weak: the director's lifetime is WP6's. Left
+    // nil until wired at integration, so the surface core stands alone.
+    weak var cameraDirector: MapCameraDirector?
+
     // MARK: - Attachment
 
     func attach(to mapView: MKMapView) {
@@ -70,5 +76,16 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
             return view
         }
         return overlayStore.view(for: annotation, in: mapView)
+    }
+
+    // Region-change callbacks are forwarded to the camera director (WP4), which
+    // uses them for its programmatic-move token accounting, follow-disengage
+    // detection, and region persistence. No-ops until a director is wired.
+    func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
+        cameraDirector?.regionWillChange(animated: animated)
+    }
+
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        cameraDirector?.regionDidChange(animated: animated)
     }
 }

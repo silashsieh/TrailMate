@@ -178,6 +178,11 @@ final class MapCameraDirector {
     // MARK: - Helpers
 
     private func performProgrammaticMove(_ body: () -> Void) {
+        // The single choke point for every camera command the director issues
+        // (engage, steady-follow recenter, focus). Signposting here gives WP7 the
+        // actual camera-command cadence — which the dead-band coalesces well below
+        // the dot's 10 Hz — on the `MapPerf` plane.
+        mapPerfSignposter.emitEvent("camera-move")
         outstandingProgrammaticMoves += 1
         body()
     }

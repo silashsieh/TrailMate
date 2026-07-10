@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import MapKit
 
@@ -1566,329 +1567,208 @@ private struct DestinationActionBar: View {
 
 // MARK: - Map
 
+// The detail-pane map. Hosts the imperative `MapSurface` (one `MKMapView`) and
+// layers the SwiftUI chrome over it — joystick inset, top control chips, the
+// destination action bar, and the keyboard handlers — exactly as they layered
+// over the old SwiftUI `Map`.
+//
+// The load-bearing property (epic 037): a moving dot never re-evaluates this
+// body. The dot flows to the map on the telemetry stream (consumed inside
+// `MapSurfaceController`), and every SwiftUI readout that changes at telemetry
+// rate — the status/hint chip, the follow button — lives in the isolated
+// `MapControlsOverlay` child, so a position tick invalidates only that child and
+// never re-runs `makeModel()` / `updateNSView`. `MapArea` observes only
+// structural state (sessions, routes, markers, draw/stroke, focus).
 private struct MapArea: View {
     @Environment(AppState.self) private var appState
-    @State private var cameraPosition: MapCameraPosition = .region(MapCameraPersistence.loadRegion())
+
+    // The long-lived imperative collaborators, owned here for the surface's
+    // lifetime and injected into `MapSurface` (it attaches them to the map view).
+    // Plain reference types, not @Observable — the map must not re-render SwiftUI.
+    @State private var director = MapCameraDirector()
+    @State private var bridge = MapGestureBridge()
+
     @State private var pendingDestination: CLLocationCoordinate2D?
-    // Session-only, like MapKit's user-tracking: not persisted across launches.
+    // Follow-button mirror. The director owns the authoritative follow state;
+    // this tracks it for the button and is synced back on gesture/stream
+    // disengage via `onFollowMirror`.
     @State private var isFollowing = false
-    // Last user-chosen zoom, so follow recenters without changing it.
-    @State private var followSpan: MKCoordinateSpan = MapCameraPersistence.loadRegion().span
-    // .contextMenu doesn't expose its click location, so a hover tracker records the last
-    // pointer position (map-local space); it's converted to a coordinate lazily at menu
-    // time, since a stored coordinate would go stale if the camera moved under the cursor.
-    @State private var lastHoverPoint: CGPoint?
-    // Draw mode (hand-drawn routes): gates the freehand stroke gesture and drops
-    // .pan from the map's interaction modes while active. The stroke is kept as
-    // coordinates (converted at capture time, so it stays world-anchored) plus the
-    // last raw screen point for jitter decimation.
+    // Draw mode (hand-drawn routes). The gesture bridge suppresses the map's pan
+    // while enabled; the stroke is kept as world-anchored coordinates (converted
+    // at capture) plus the last raw screen point for jitter decimation.
     @State private var isDrawingRoute = false
     @State private var strokeCoords: [CLLocationCoordinate2D] = []
-    @State private var lastStrokePoint: CGPoint?
+    @State private var lastStrokePoint: NSPoint?
 
     var body: some View {
-        MapReader { proxy in
-            // Drawing claims the drag for the stroke; zoom stays live (scroll/pinch
-            // don't collide with a one-button drag), pan returns when drawing ends.
-            Map(position: $cameraPosition, interactionModes: isDrawingRoute ? .zoom : .all) {
-                // Every session's route + simulated dot, color-coded so multiple
-                // devices are distinguishable on the shared map. The selected
-                // session is emphasized (thicker line, larger dot+ring); its
-                // planning markers (start/stop/end below) belong to it alone.
-                ForEach(Array(appState.sessions.enumerated()), id: \.element.id) { index, session in
-                    let color = AppState.sessionPalette[index % AppState.sessionPalette.count]
-                    let isSelected = session.id == appState.selectedSessionID
-
-                    if !session.routeCoordinates.isEmpty {
-                        MapPolyline(coordinates: session.routeCoordinates)
-                            .stroke(color.opacity(isSelected ? 1.0 : 0.7), lineWidth: isSelected ? 4 : 3)
-                    }
-
-                    if let coord = session.simState.simulatedCoordinate {
-                        Annotation("", coordinate: coord) {
-                            Circle()
-                                .fill(color)
-                                .frame(width: isSelected ? 16 : 12, height: isSelected ? 16 : 12)
-                                .overlay(Circle().stroke(.white, lineWidth: isSelected ? 3 : 2))
-                        }
-                    }
+        MapSurface(
+            model: makeModel(),
+            director: director,
+            bridge: bridge,
+            telemetryStream: { appState.telemetryStream(for: $0) },
+            onFollowMirror: { isFollowing = $0 },
+            onLongPress: { handleLongPress($0) },
+            onRightClick: { presentDestinationMenu($0, at: $1) },
+            onStroke: { handleStroke($0) }
+        )
+        // Bottom-trailing inset (not a plain overlay) so MapKit reflows its
+        // built-in zoom/compass controls up and clear of the joystick; the map
+        // still draws full-bleed behind it, and the inset collapses to zero when
+        // the joystick is idle.
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
+            if appState.simState.joystickIsActive {
+                VirtualJoystickView { x, y in
+                    appState.updateStickInput(x: x, y: y)
                 }
-
-                if strokeCoords.count >= 2 {
-                    MapPolyline(coordinates: strokeCoords)
-                        .stroke(.orange, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [6, 4]))
-                }
-
-                if let from = appState.fromCoordinate {
-                    Marker("Start", systemImage: "flag.fill", coordinate: from)
-                        .tint(.green)
-                }
-
-                ForEach(Array(appState.stops.enumerated()), id: \.element.id) { idx, stop in
-                    if let coord = stop.coordinate {
-                        Marker("Stop \(idx + 1)",
-                               systemImage: "\(idx + 1).circle.fill",
-                               coordinate: coord)
-                            .tint(.blue)
-                    }
-                }
-
-                if let to = appState.toCoordinate {
-                    Marker("End", systemImage: "mappin", coordinate: to)
-                        .tint(.orange)
-                }
-
-                if let dest = pendingDestination {
-                    Marker("Destination", systemImage: "mappin.and.ellipse", coordinate: dest)
-                        .tint(.purple)
-                }
-            }
-            .mapStyle(.standard(elevation: .realistic))
-            .mapControls {
-                MapCompass()
-                MapZoomStepper()
-            }
-            .onMapCameraChange(frequency: .onEnd) { context in
-                MapCameraPersistence.save(region: context.region)
-                followSpan = context.region.span
-            }
-            // Any user camera gesture hands control back to the user, mirroring
-            // MapKit's user-tracking semantics. Follow's own programmatic updates
-            // report positionedByUser == false, so they don't self-disengage.
-            .onMapCameraChange(frequency: .continuous) { _ in
-                if isFollowing && cameraPosition.positionedByUser {
-                    isFollowing = false
-                }
-            }
-            // CLLocationCoordinate2D isn't Equatable; compare a derived [Double]? instead.
-            .onChange(of: appState.simState.simulatedCoordinate.map { [$0.latitude, $0.longitude] }) { _, _ in
-                guard isFollowing else { return }
-                guard let coord = appState.simState.simulatedCoordinate else {
-                    // Nothing left to follow (location cleared back to real GPS).
-                    isFollowing = false
-                    return
-                }
-                recenter(on: coord)
-            }
-            // Selecting a saved location/route frames it on the map (#53). A fresh
-            // request id fires this even when the same item is picked twice. The
-            // selection takes camera control, so any active follow disengages.
-            .onChange(of: appState.mapFocus?.id) { _, newID in
-                guard newID != nil, let region = appState.mapFocus?.region else { return }
-                isFollowing = false
-                withAnimation {
-                    cameraPosition = .region(region)
-                }
-            }
-            // Long-press fallback for the right-click context menu below — kept so existing
-            // muscle memory survives. Long-press, not tap: a plain tap would steal the Map's
-            // own pan/zoom gestures, and the 0.5s threshold disambiguates intent from
-            // incidental clicks.
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.5)
-                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-                    .onEnded { value in
-                        guard case .second(true, let drag) = value, let drag else { return }
-                        guard let coordinate = proxy.convert(drag.location, from: .local) else { return }
-
-                        // First press: there's no origin yet, so a popover offering "Go directly"
-                        // or "Route here" would have nothing to anchor from. Teleport instead
-                        // (works whether or not a device is connected — it moves the red dot).
-                        if appState.simState.simulatedCoordinate == nil {
-                            appState.teleport(to: coordinate)
-                        } else {
-                            pendingDestination = coordinate
-                        }
-                    }
-            )
-            // Draw mode's gesture arbitration: while drawing, `.gesture` enables the
-            // stroke drag and masks out the long-press wrapped above (a slow stroke
-            // would otherwise trigger it); while not drawing, `.subviews` disables the
-            // stroke gesture entirely so the map's normal interactions are untouched.
-            .gesture(drawGesture(proxy: proxy), including: isDrawingRoute ? .gesture : .subviews)
-            .onContinuousHover(coordinateSpace: .local) { phase in
-                // Keep the last point on .ended — the menu's content is evaluated after the
-                // right-click, by which time hover tracking has already stopped.
-                if case .active(let point) = phase {
-                    lastHoverPoint = point
-                }
-            }
-            .contextMenu {
-                destinationMenu(proxy: proxy)
-            }
-            // Placed as a bottom-trailing safe-area inset rather than a plain overlay so
-            // MapKit reflows its built-in zoom/compass controls (which it positions within
-            // the map's safe area) up and clear of the joystick instead of letting the
-            // joystick occlude them. The Map still draws full-bleed behind the inset, so the
-            // joystick keeps floating over the map; when it's idle the inset collapses to
-            // zero and the controls return to the corner.
-            .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-                if appState.simState.joystickIsActive {
-                    VirtualJoystickView { x, y in
-                        appState.updateStickInput(x: x, y: y)
-                    }
-                    .padding(24)
-                }
-            }
-            .focusable()
-            .pointerStyle(isDrawingRoute ? .rectSelection : nil)
-            .onKeyPress(.escape) {
-                guard isDrawingRoute else { return .ignored }
-                exitDrawMode()
-                return .handled
-            }
-            .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, "w", "a", "s", "d"], phases: [.down, .up]) { press in
-                guard appState.simState.joystickIsActive else {
-                    return .ignored
-                }
-
-                let direction: JoystickEngine.Direction
-                let key = press.key
-                if key == .upArrow || key == "w" {
-                    direction = .up
-                } else if key == .downArrow || key == "s" {
-                    direction = .down
-                } else if key == .leftArrow || key == "a" {
-                    direction = .left
-                } else if key == .rightArrow || key == "d" {
-                    direction = .right
-                } else {
-                    return .ignored
-                }
-
-                if press.phase == .down {
-                    appState.pressDirection(direction)
-                } else {
-                    appState.releaseDirection(direction)
-                }
-                return .handled
-            }
-            .overlay(alignment: .top) {
-                VStack(spacing: 8) {
-                    HStack(spacing: 8) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(appState.connectionStatus.isConnected ? .green : .gray)
-                                .frame(width: 8, height: 8)
-                            Text(mapHintText)
-                                .font(.callout)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-
-                        // Record, Follow, and Draw all act on the local red dot or
-                        // route, not the device — Record captures the simulated path
-                        // (offline too), Follow tracks the dot's camera, Draw builds a
-                        // route — so all three show whether or not a device is connected.
-                        RecordButton()
-                        followButton
-                        drawButton
-                    }
-
-                    if let dest = pendingDestination {
-                        DestinationActionBar(coord: dest) { action in
-                            switch action {
-                            case .teleport:
-                                appState.teleport(to: dest)
-                            case .direct:
-                                appState.travelDirectly(to: dest)
-                            case .route:
-                                Task { await appState.routeFromCurrent(to: dest) }
-                            case .wander:
-                                appState.pendingWanderCenter = dest
-                                appState.showWanderSheet = true
-                            case .appendDirect:
-                                Task { await appState.appendDirectly(to: dest) }
-                            case .appendRoute:
-                                Task { await appState.appendRoute(to: dest) }
-                            case .copy:
-                                // Leave the bar up so copy can precede another
-                                // action on the same point.
-                                appState.copyCoordinate(dest)
-                                return
-                            case .cancel:
-                                break
-                            }
-                            pendingDestination = nil
-                        }
-                    }
-                }
-                .padding(.top, 8)
+                .padding(24)
             }
         }
-    }
-
-    private var followButton: some View {
-        Button {
-            if isFollowing {
-                isFollowing = false
-            } else if let coord = appState.simState.simulatedCoordinate {
-                isFollowing = true
-                // Center now rather than waiting for the next snapshot push.
-                recenter(on: coord)
+        .focusable()
+        .pointerStyle(isDrawingRoute ? .rectSelection : nil)
+        .onKeyPress(.escape) {
+            guard isDrawingRoute else { return .ignored }
+            exitDrawMode()
+            return .handled
+        }
+        .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, "w", "a", "s", "d"], phases: [.down, .up]) { press in
+            guard appState.simState.joystickIsActive else {
+                return .ignored
             }
-        } label: {
-            Image(systemName: isFollowing ? "location.fill" : "location")
-                .font(.callout)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .disabled(appState.simState.simulatedCoordinate == nil)
-        .help(isFollowing ? "Stop following the simulated position"
-                          : "Follow the simulated position")
-    }
 
-    private func recenter(on coord: CLLocationCoordinate2D) {
-        withAnimation {
-            cameraPosition = .region(MKCoordinateRegion(center: coord, span: followSpan))
-        }
-    }
-
-    private var drawButton: some View {
-        Button {
-            if isDrawingRoute {
-                exitDrawMode()
+            let direction: JoystickEngine.Direction
+            let key = press.key
+            if key == .upArrow || key == "w" {
+                direction = .up
+            } else if key == .downArrow || key == "s" {
+                direction = .down
+            } else if key == .leftArrow || key == "a" {
+                direction = .left
+            } else if key == .rightArrow || key == "d" {
+                direction = .right
             } else {
-                isDrawingRoute = true
-                // The camera must hold still under the stroke.
-                isFollowing = false
+                return .ignored
             }
-        } label: {
-            Image(systemName: "pencil.line")
-                .font(.callout)
-                .foregroundStyle(isDrawingRoute ? Color.accentColor : Color.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
+
+            if press.phase == .down {
+                appState.pressDirection(direction)
+            } else {
+                appState.releaseDirection(direction)
+            }
+            return .handled
         }
-        .buttonStyle(.plain)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .help(isDrawingRoute ? "Stop drawing (Esc)" : "Draw a route by dragging on the map")
+        // Selecting a saved location/route frames it on the map (#53). A fresh
+        // request id fires this even when the same item is picked twice. Focus
+        // takes camera control, so any active follow disengages — programmatically,
+        // so the director's gesture callback does not fire; sync the mirror here.
+        .onChange(of: appState.mapFocus?.id) { _, newID in
+            guard newID != nil, let region = appState.mapFocus?.region else { return }
+            director.focus(on: region)
+            isFollowing = false
+        }
+        .overlay(alignment: .top) {
+            MapControlsOverlay(
+                director: director,
+                isDrawingRoute: isDrawingRoute,
+                isFollowing: $isFollowing,
+                pendingDestination: $pendingDestination,
+                onToggleDrawMode: { toggleDrawMode() }
+            )
+        }
     }
 
-    // Freehand stroke capture. Raw drag locations are decimated in screen space
-    // (hand jitter lives there, and its meter size scales with zoom) and converted
-    // to coordinates immediately, so the stroke stays world-anchored no matter
-    // what the camera does afterwards.
-    private func drawGesture(proxy: MapProxy) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                if let last = lastStrokePoint {
-                    let dx = value.location.x - last.x
-                    let dy = value.location.y - last.y
-                    guard dx * dx + dy * dy >= 9 else { return }  // < 3 pt: jitter
-                }
-                guard let coord = proxy.convert(value.location, from: .local) else { return }
-                lastStrokePoint = value.location
-                strokeCoords.append(coord)
+    // MARK: - Structural model
+
+    // Build the structural snapshot for `MapSurface`. Reads only structural state
+    // (sessions/selection/routeVersion/routes, planning markers, stroke, draw
+    // flag) — never the simulated coordinate — so a position tick never re-runs
+    // this body.
+    private func makeModel() -> MapSurfaceModel {
+        let sessions = appState.sessions.enumerated().map { index, session in
+            SessionRenderState(
+                id: session.id,
+                colorIndex: index % AppState.sessionPalette.count,
+                isSelected: session.id == appState.selectedSessionID,
+                routeVersion: session.routeVersion,
+                routeCoordinates: session.routeCoordinates
+            )
+        }
+        // Planning markers belong to the selected session (the forwarding
+        // accessors resolve to it), plus the pending long-press destination.
+        let markers = MapMarkers(
+            from: appState.fromCoordinate,
+            to: appState.toCoordinate,
+            pendingDestination: pendingDestination,
+            stops: appState.stops.enumerated().compactMap { index, stop in
+                // 1-based slot number (position in the full stop list), matching
+                // the sidebar's "Stop N" — kept even if an earlier stop is unresolved.
+                stop.coordinate.map { MapMarkers.Stop(id: stop.id, number: index + 1, coordinate: $0) }
             }
-            .onEnded { _ in
-                finishStroke()
+        )
+        return MapSurfaceModel(
+            sessions: sessions,
+            markers: markers,
+            strokeCoordinates: strokeCoords,
+            isDrawingRoute: isDrawingRoute
+        )
+    }
+
+    // MARK: - Draw mode
+
+    private func toggleDrawMode() {
+        if isDrawingRoute {
+            exitDrawMode()
+        } else {
+            enterDrawMode()
+        }
+    }
+
+    private func enterDrawMode() {
+        isDrawingRoute = true
+        // The camera must hold still under the stroke.
+        director.setFollowing(false)
+        isFollowing = false
+        bridge.setDrawMode(true)
+    }
+
+    private func exitDrawMode() {
+        isDrawingRoute = false
+        bridge.setDrawMode(false)
+        strokeCoords = []
+        lastStrokePoint = nil
+    }
+
+    // MARK: - Gesture handlers (bridge callbacks)
+
+    // Long-press: with no origin yet, teleport (a popover offering "Go directly"
+    // would have nothing to anchor from); otherwise open the destination bar.
+    private func handleLongPress(_ coordinate: CLLocationCoordinate2D) {
+        if appState.simState.simulatedCoordinate == nil {
+            appState.teleport(to: coordinate)
+        } else {
+            pendingDestination = coordinate
+        }
+    }
+
+    // Freehand stroke. Screen-space jitter decimation (hand jitter lives there,
+    // and its meter size scales with zoom) matching today's < 3 pt threshold;
+    // coordinates are already converted by the bridge, so the stroke stays
+    // world-anchored regardless of later camera moves.
+    private func handleStroke(_ phase: MapGestureBridge.StrokePhase) {
+        switch phase {
+        case .began(let point, let coordinate):
+            lastStrokePoint = point
+            strokeCoords.append(coordinate)
+        case .changed(let point, let coordinate):
+            if let last = lastStrokePoint {
+                let dx = point.x - last.x
+                let dy = point.y - last.y
+                guard dx * dx + dy * dy >= 9 else { return }   // < 3 pt: jitter
             }
+            lastStrokePoint = point
+            strokeCoords.append(coordinate)
+        case .ended:
+            finishStroke()
+        }
     }
 
     private func finishStroke() {
@@ -1906,82 +1786,179 @@ private struct MapArea: View {
             return
         }
         isDrawingRoute = false
+        bridge.setDrawMode(false)
         Task { await appState.loadDrawnRoute(route) }
     }
 
-    private func exitDrawMode() {
-        isDrawingRoute = false
-        strokeCoords = []
-        lastStrokePoint = nil
+    // MARK: - Right-click destination menu
+
+    // Same actions as `DestinationActionBar` (the long-press capsule), presented
+    // as a native `NSMenu` at the click point — macOS convention, and consistent
+    // with the sidebar rows' context menus. The gesture bridge hands over the
+    // coordinate + point fresh at click time (no stale-hover tracker needed).
+    // Every action drives the local red dot (the device mirrors it), so none gate
+    // on connection; only origin-dependent actions disable until a position exists.
+    private func presentDestinationMenu(_ coordinate: CLLocationCoordinate2D, at point: NSPoint) {
+        guard !isDrawingRoute, let mapView = bridge.mapView else { return }
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let header = NSMenuItem(
+            title: String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude),
+            action: nil,
+            keyEquivalent: ""
+        )
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(.separator())
+
+        let hasOrigin = appState.simState.simulatedCoordinate != nil
+
+        menu.addItem(ClosureMenuItem(title: String(localized: "Teleport"), systemImage: "bolt.fill", isEnabled: true) {
+            appState.teleport(to: coordinate)
+        })
+        menu.addItem(ClosureMenuItem(title: String(localized: "Go directly"), systemImage: "arrow.up.right.circle", isEnabled: hasOrigin) {
+            appState.travelDirectly(to: coordinate)
+        })
+        menu.addItem(ClosureMenuItem(title: String(localized: "Route here"), systemImage: "map.fill", isEnabled: hasOrigin && !appState.isCalculatingRoute) {
+            Task { await appState.routeFromCurrent(to: coordinate) }
+        })
+
+        if !appState.routeCoordinates.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem(title: String(localized: "Append direct"), systemImage: "arrow.forward.to.line", isEnabled: true) {
+                Task { await appState.appendDirectly(to: coordinate) }
+            })
+            menu.addItem(ClosureMenuItem(title: String(localized: "Append route"), systemImage: "arrow.triangle.branch", isEnabled: !appState.isCalculatingRoute) {
+                Task { await appState.appendRoute(to: coordinate) }
+            })
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem(title: String(localized: "Wander nearby…"), systemImage: "shuffle.circle", isEnabled: !appState.isCalculatingRoute) {
+            appState.pendingWanderCenter = coordinate
+            appState.showWanderSheet = true
+        })
+        menu.addItem(ClosureMenuItem(title: String(localized: "Copy Coordinate"), systemImage: "doc.on.doc", isEnabled: true) {
+            appState.copyCoordinate(coordinate)
+        })
+
+        menu.popUp(positioning: nil, at: point, in: mapView)
     }
+}
 
-    // Right-click destination menu: same actions as DestinationActionBar (the long-press
-    // capsule), presented as a native context menu at the pointer — macOS convention, and
-    // consistent with the sidebar rows' .contextMenu. Every action drives the local red dot
-    // (the device mirrors it when connected), so none gate on connection; only origin-
-    // dependent actions disable until a position exists.
-    @ViewBuilder
-    private func destinationMenu(proxy: MapProxy) -> some View {
-        if !isDrawingRoute,
-           let point = lastHoverPoint,
-           let coordinate = proxy.convert(point, from: .local) {
-            Section(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)) {
-                Button {
-                    appState.teleport(to: coordinate)
-                } label: {
-                    Label("Teleport", systemImage: "bolt.fill")
-                }
+// The top control chips + destination action bar, isolated from `MapArea` so
+// their reads of telemetry-rate state (the simulated coordinate, playback
+// state/progress) invalidate only this child — never `MapArea`, whose re-eval
+// would drive an `updateNSView` (overlay reconciliation) on every position tick.
+// This is epic 037's "small, explicitly isolated SwiftUI readout that keeps
+// updating at a throttled, equality-guarded rate."
+private struct MapControlsOverlay: View {
+    @Environment(AppState.self) private var appState
+    let director: MapCameraDirector
+    let isDrawingRoute: Bool
+    @Binding var isFollowing: Bool
+    @Binding var pendingDestination: CLLocationCoordinate2D?
+    let onToggleDrawMode: () -> Void
 
-                // Unlike long-press (which teleports instantly when there's no origin), a
-                // context menu always opens; origin-dependent actions just disable instead.
-                Button {
-                    appState.travelDirectly(to: coordinate)
-                } label: {
-                    Label("Go directly", systemImage: "arrow.up.right.circle")
-                }
-                .disabled(appState.simState.simulatedCoordinate == nil)
-
-                Button {
-                    Task { await appState.routeFromCurrent(to: coordinate) }
-                } label: {
-                    Label("Route here", systemImage: "map.fill")
-                }
-                .disabled(appState.simState.simulatedCoordinate == nil || appState.isCalculatingRoute)
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                statusChip
+                // Record, Follow, and Draw all act on the local red dot or route,
+                // not the device, so all three show whether or not one is connected.
+                RecordButton()
+                followButton
+                drawButton
             }
 
-            if !appState.routeCoordinates.isEmpty {
-                Section {
-                    Button {
-                        Task { await appState.appendDirectly(to: coordinate) }
-                    } label: {
-                        Label("Append direct", systemImage: "arrow.forward.to.line")
-                    }
-
-                    Button {
-                        Task { await appState.appendRoute(to: coordinate) }
-                    } label: {
-                        Label("Append route", systemImage: "arrow.triangle.branch")
-                    }
-                    .disabled(appState.isCalculatingRoute)
-                }
-            }
-
-            Section {
-                Button {
-                    appState.pendingWanderCenter = coordinate
-                    appState.showWanderSheet = true
-                } label: {
-                    Label("Wander nearby…", systemImage: "shuffle.circle")
-                }
-                .disabled(appState.isCalculatingRoute)
-
-                Button {
-                    appState.copyCoordinate(coordinate)
-                } label: {
-                    Label("Copy Coordinate", systemImage: "doc.on.doc")
+            if let dest = pendingDestination {
+                DestinationActionBar(coord: dest) { action in
+                    handle(action, dest: dest)
                 }
             }
         }
+        .padding(.top, 8)
+    }
+
+    private var statusChip: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(appState.connectionStatus.isConnected ? .green : .gray)
+                .frame(width: 8, height: 8)
+            Text(mapHintText)
+                .font(.callout)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var followButton: some View {
+        Button {
+            if isFollowing {
+                director.setFollowing(false)
+                isFollowing = false
+            } else if let coord = appState.simState.simulatedCoordinate {
+                director.setFollowing(true)
+                // Center now rather than waiting for the next telemetry frame.
+                director.followTarget(moved: coord)
+                isFollowing = true
+            }
+        } label: {
+            Image(systemName: isFollowing ? "location.fill" : "location")
+                .font(.callout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .disabled(appState.simState.simulatedCoordinate == nil)
+        .help(isFollowing ? "Stop following the simulated position"
+                          : "Follow the simulated position")
+    }
+
+    private var drawButton: some View {
+        Button {
+            onToggleDrawMode()
+        } label: {
+            Image(systemName: "pencil.line")
+                .font(.callout)
+                .foregroundStyle(isDrawingRoute ? Color.accentColor : Color.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .help(isDrawingRoute ? "Stop drawing (Esc)" : "Draw a route by dragging on the map")
+    }
+
+    private func handle(_ action: DestinationActionBar.Action, dest: CLLocationCoordinate2D) {
+        switch action {
+        case .teleport:
+            appState.teleport(to: dest)
+        case .direct:
+            appState.travelDirectly(to: dest)
+        case .route:
+            Task { await appState.routeFromCurrent(to: dest) }
+        case .wander:
+            appState.pendingWanderCenter = dest
+            appState.showWanderSheet = true
+        case .appendDirect:
+            Task { await appState.appendDirectly(to: dest) }
+        case .appendRoute:
+            Task { await appState.appendRoute(to: dest) }
+        case .copy:
+            // Leave the bar up so copy can precede another action on the same point.
+            appState.copyCoordinate(dest)
+            return
+        case .cancel:
+            break
+        }
+        pendingDestination = nil
     }
 
     private var mapHintText: String {
@@ -2011,5 +1988,39 @@ private struct MapArea: View {
             }
             return String(localized: "Right-click the map to set a starting location")
         }
+    }
+}
+
+// A closure-backed `NSMenuItem` for the right-click destination menu. AppKit
+// menu items dispatch through target/action; this wraps a Swift closure so the
+// menu can be built inline from the current app state at click time (mirroring
+// the old SwiftUI `.contextMenu`). The class stays nonisolated to match
+// `NSMenuItem`'s inherited initializers; the handler is `@MainActor` (it touches
+// MainActor state) and is invoked through `assumeIsolated` since AppKit delivers
+// menu actions on the main thread. `nonisolated` opts out of the module's
+// default MainActor isolation so the initializers match `NSMenuItem`'s.
+private nonisolated final class ClosureMenuItem: NSMenuItem {
+    private let handler: @MainActor () -> Void
+
+    init(title: String, systemImage: String?, isEnabled: Bool, handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(invoke), keyEquivalent: "")
+        target = self
+        self.isEnabled = isEnabled
+        if let systemImage {
+            image = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)
+        }
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // AppKit delivers menu actions on the main thread, so this is safe to mark
+    // `@MainActor` even on the nonisolated class — matching how IBAction handlers
+    // are treated — which lets the MainActor `handler` be called directly.
+    @MainActor @objc private func invoke() {
+        handler()
     }
 }

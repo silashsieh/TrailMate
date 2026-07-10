@@ -1,3 +1,4 @@
+import AppKit
 import MapKit
 import SwiftUI
 
@@ -8,12 +9,32 @@ import SwiftUI
 // via the controller's telemetry seam — so a moving dot triggers no SwiftUI
 // update (epic 037's load-bearing property).
 //
-// The camera (WP4) and gestures (WP5) attach to the controller's `mapView`;
-// this representable stays a thin structural conduit. When those land, this
-// view gains the handler/camera inputs the frozen contract sketches — kept out
-// of the surface core so the packages build independently.
+// The long-lived collaborators (camera director, gesture bridge) are owned by
+// the caller (MapArea's @State) and injected here; `makeNSView` attaches them to
+// the one `MKMapView` and wires the controller's telemetry fan-out. This view
+// stays a thin conduit — it holds no per-tick state and observes nothing that
+// changes at telemetry rate.
 struct MapSurface: NSViewRepresentable {
     var model: MapSurfaceModel
+
+    // Long-lived collaborators owned by the caller (MapArea), attached here.
+    var director: MapCameraDirector
+    var bridge: MapGestureBridge
+
+    // Injected per-session telemetry subscription (frozen contract §2): the
+    // controller resolves streams through this, so it never imports `AppState`.
+    var telemetryStream: (UUID) -> AsyncStream<TelemetryFrame>
+
+    // Mirror the caller's follow-button state when follow disengages by a path
+    // the SwiftUI layer can't see itself — a user camera gesture inside the map,
+    // or the selected session's position clearing.
+    var onFollowMirror: (Bool) -> Void
+
+    // Gesture actions (WP5 → integration): long-press coordinate, right-click
+    // (coordinate + click point for menu placement), freehand stroke phases.
+    var onLongPress: (CLLocationCoordinate2D) -> Void
+    var onRightClick: (CLLocationCoordinate2D, NSPoint) -> Void
+    var onStroke: (MapGestureBridge.StrokePhase) -> Void
 
     func makeCoordinator() -> MapSurfaceController {
         MapSurfaceController()
@@ -29,12 +50,38 @@ struct MapSurface: NSViewRepresentable {
         mapView.showsCompass = true
         mapView.showsZoomControls = true
 
-        context.coordinator.attach(to: mapView)
-        context.coordinator.apply(model, to: mapView)
+        let controller = context.coordinator
+        controller.attach(to: mapView)
+        controller.cameraDirector = director
+        director.attach(to: mapView)
+        bridge.attach(to: mapView)
+
+        wire(controller)
+        controller.apply(model, to: mapView)
         return mapView
     }
 
     func updateNSView(_ mapView: MKMapView, context: Context) {
-        context.coordinator.apply(model, to: mapView)
+        let controller = context.coordinator
+        wire(controller)
+        controller.apply(model, to: mapView)
+    }
+
+    // Cancel the telemetry consumers when the surface is permanently removed. The
+    // recognizers go away with the map view; the tasks must be cancelled by hand.
+    static func dismantleNSView(_ nsView: MKMapView, coordinator: MapSurfaceController) {
+        coordinator.cancelTelemetryConsumers()
+    }
+
+    // Re-point the controller/collaborator closures on every structural update so
+    // they always capture the freshest caller state. Cheap, and never called at
+    // telemetry rate (the dot bypasses `updateNSView` entirely).
+    private func wire(_ controller: MapSurfaceController) {
+        controller.telemetryStreamProvider = telemetryStream
+        controller.onFollowDisengagedByStream = { onFollowMirror(false) }
+        director.onFollowDisengaged = { onFollowMirror(false) }
+        bridge.onLongPress = onLongPress
+        bridge.onRightClick = onRightClick
+        bridge.onStroke = onStroke
     }
 }

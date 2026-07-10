@@ -63,7 +63,7 @@ struct MapSurfaceStoreTests {
             markers: MapMarkers(
                 from: coord(25.030, 121.564),
                 to: coord(25.045, 121.567),
-                stops: [MapMarkers.Stop(id: UUID(), coordinate: coord(25.037, 121.565))]
+                stops: [MapMarkers.Stop(id: UUID(), number: 1, coordinate: coord(25.037, 121.565))]
             )
         )
 

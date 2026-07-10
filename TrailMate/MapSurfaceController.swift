@@ -2,6 +2,13 @@ import CoreLocation
 import MapKit
 import os
 
+// Signpost plane for the map surface (epic 037, WP7 verification). Intervals and
+// events are trivially cheap when Instruments isn't recording, so they can sit on
+// the hot paths: overlay reconciliation, per-frame dot moves, and camera
+// commands (the last emitted from `MapCameraDirector`). Subsystem/category are
+// stable so a WP7 trace can filter on `category:MapPerf`.
+let mapPerfSignposter = OSSignposter(subsystem: "com.harry.trailmate", category: "MapPerf")
+
 // The coordinator behind `MapSurface`: the single owner of the `MKMapView`'s
 // content and its `MKMapViewDelegate`. It drives the map imperatively so a
 // position update never evaluates a SwiftUI body (epic 037).
@@ -36,6 +43,29 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
     // nil until wired at integration, so the surface core stands alone.
     weak var cameraDirector: MapCameraDirector?
 
+    // MARK: - Telemetry fan-out (WP6)
+
+    // Injected per-session telemetry subscription (frozen contract §2): the
+    // controller resolves a session's stream through this closure, so it never
+    // imports `AppState`. Set at integration before the first `apply`.
+    var telemetryStreamProvider: ((UUID) -> AsyncStream<TelemetryFrame>)?
+
+    // Fired when the SELECTED session's telemetry position clears (nil) while
+    // following — the one follow-disengage path the SwiftUI layer can't observe
+    // itself. WP6 mirrors its follow-button state here. (The director's own
+    // `onFollowDisengaged` covers the user-gesture path.)
+    var onFollowDisengagedByStream: (() -> Void)?
+
+    // The single consumer task per session (keyed by id). Exactly one iterator
+    // per single-consumer stream; started when a session first appears, cancelled
+    // when it disappears or the surface is dismantled.
+    private var telemetryConsumers: [UUID: Task<Void, Never>] = [:]
+
+    // The session whose dot the camera follows — the selected one. Read per frame
+    // by the consumer to decide whether to drive the director. Updated from the
+    // structural model in `apply`.
+    private var selectedSessionID: UUID?
+
     // MARK: - Attachment
 
     func attach(to mapView: MKMapView) {
@@ -45,9 +75,13 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
     // MARK: - Structural apply
 
     func apply(_ model: MapSurfaceModel, to mapView: MKMapView) {
+        let interval = mapPerfSignposter.beginInterval("overlay-apply")
+        defer { mapPerfSignposter.endInterval("overlay-apply", interval) }
         self.mapView = mapView
         overlayStore.apply(model, to: mapView)
         annotationStore.apply(model.sessions, to: mapView)
+        selectedSessionID = model.sessions.first(where: { $0.isSelected })?.id
+        syncTelemetryConsumers(for: model.sessions.map(\.id))
     }
 
     // MARK: - Telemetry seam
@@ -56,7 +90,48 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
     // the telemetry stream, outside `apply`, so it uses the retained `mapView`.
     func setDotCoordinate(sessionID: UUID, coordinate: CLLocationCoordinate2D?) {
         guard let mapView else { return }
+        mapPerfSignposter.emitEvent("dot-move")
         annotationStore.setDotCoordinate(sessionID: sessionID, coordinate: coordinate, in: mapView)
+    }
+
+    // Start a consumer for each newly-present session and cancel the ones whose
+    // session has gone away — so there is always exactly one iterator per stream.
+    private func syncTelemetryConsumers(for ids: [UUID]) {
+        let present = Set(ids)
+        for (id, task) in telemetryConsumers where !present.contains(id) {
+            task.cancel()
+            telemetryConsumers[id] = nil
+        }
+        guard let provider = telemetryStreamProvider else { return }
+        for id in ids where telemetryConsumers[id] == nil {
+            let stream = provider(id)
+            telemetryConsumers[id] = Task { @MainActor [weak self] in
+                for await frame in stream {
+                    guard let self else { return }
+                    self.consumeTelemetry(frame, sessionID: id)
+                }
+            }
+        }
+    }
+
+    // The sole per-session fan-out: move the dot every frame, and — only for the
+    // selected, followed session — drive the camera, or disengage follow when the
+    // position clears.
+    private func consumeTelemetry(_ frame: TelemetryFrame, sessionID: UUID) {
+        setDotCoordinate(sessionID: sessionID, coordinate: frame.coordinate)
+        guard sessionID == selectedSessionID, let director = cameraDirector else { return }
+        if let coordinate = frame.coordinate {
+            director.followTarget(moved: coordinate)   // self-gates on isFollowing
+        } else if director.isFollowing {
+            director.followTargetCleared()
+            onFollowDisengagedByStream?()
+        }
+    }
+
+    // Cancel every consumer — the surface is being dismantled (view teardown).
+    func cancelTelemetryConsumers() {
+        for (_, task) in telemetryConsumers { task.cancel() }
+        telemetryConsumers.removeAll()
     }
 
     // MARK: - MKMapViewDelegate

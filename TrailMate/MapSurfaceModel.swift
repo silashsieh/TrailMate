@@ -44,10 +44,14 @@ struct SessionRenderState {
 // stream.
 struct MapMarkers {
     // A numbered mid-route stop. `id` keeps the annotation object stable across
-    // reorders/insertions so only its glyph number (derived from position)
-    // updates in place; the coordinate is resolved (non-nil) by the caller.
+    // reorders/insertions so only its glyph number updates in place. `number` is
+    // the 1-based slot position in the route's stop list (carried explicitly, not
+    // derived from array position) so the map glyph matches the sidebar's
+    // "Stop N" even when an earlier stop is still unresolved. The coordinate is
+    // resolved (non-nil) by the caller.
     struct Stop {
         let id: UUID
+        let number: Int
         let coordinate: CLLocationCoordinate2D
     }
 

@@ -121,8 +121,8 @@ final class MapOverlayStore {
             mapView.removeAnnotation(marker)
             stopMarkers[id] = nil
         }
-        for (index, stop) in markers.stops.enumerated() {
-            let number = index + 1
+        for stop in markers.stops {
+            let number = stop.number
             if let marker = stopMarkers[stop.id] {
                 if !Self.coordinateEqual(marker.coordinate, stop.coordinate) {
                     marker.coordinate = stop.coordinate

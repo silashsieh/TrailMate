@@ -396,6 +396,13 @@ final class AppState {
 
     var simState: SimulationStateBridge { selectedSession.simState }
     var connectionStatus: ConnectionStatus { selectedSession.connectionStatus }
+
+    // The map surface's injected telemetry subscription (epic 037): resolve one
+    // session's latest-wins frame stream by id. A missing id yields a finished
+    // stream so the caller's consumer terminates cleanly rather than hanging.
+    func telemetryStream(for id: DeviceSession.ID) -> AsyncStream<TelemetryFrame> {
+        sessions.first { $0.id == id }?.sim.telemetry ?? AsyncStream { $0.finish() }
+    }
     // The selected session's friendly name, but only while it is actually
     // connected — nil otherwise so status surfaces never show a stale name
     // (epic 026). Single source of truth for the connected name shown in the

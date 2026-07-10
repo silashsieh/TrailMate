@@ -98,15 +98,18 @@ TrailMate/
 │  DaemonBridge, and its route/playback state.             │
 ├──────────────────────────────────────────────────────────┤
 │  SimulationStateBridge (@MainActor @Observable)          │  UI projection
-│  One per session. Snapshot fields views observe:         │  (MainActor)
-│  simulatedCoordinate, nav playback state/progress,       │
-│  joystick active flag, route deviation, recording state. │
-│  Populated by its session's SimulationActor snapshot push.│
+│  One per session. Structural state SwiftUI observes:     │  (MainActor)
+│  playback state/progress, joystick + recording flags,    │
+│  route deviation, and the dot coordinate. Its            │
+│  SimulationActor applies each snapshot change-guarded    │
+│  per field, so an idle same-value push fires nothing.    │
 ├──────────────────────────────────────────────────────────┤
 │  SimulationActor                                         │  Simulation core
 │  • Owns the engines as nonisolated stored properties.    │  (off MainActor)
 │  • 10 Hz aggregator loop, 1 Hz idle jitter, 5 Hz         │
-│    deviation check, throttled UI snapshot push.          │
+│    deviation check, then a dual-publish push:            │
+│    a latest-wins AsyncStream<TelemetryFrame> plus a      │
+│    change-guarded snapshot to the bridge.                │
 │  • Holds the active SimulationBackend; calls             │
 │    setLocationQuiet synchronously on the hot path.       │
 │  • Owns the App Nap activity token while attached.       │
@@ -161,7 +164,7 @@ Swift 6 strict concurrency, with three isolation domains:
 |Domain                |Contents                                                                                                                      |
 |----------------------|------------------------------------------------------------------------------------------------------------------------------|
 |MainActor             |`AppState` (the device manager), `DeviceSession` (per device) + its `SimulationStateBridge`, `RecorderService`, `TunnelBroker`, `DeviceDiscoveryService`, `CommandServer`, `SavedRoutesStore`, views|
-|`SimulationActor`     |Engines (nav/joystick/integrator/noise), aggregator + idle-jitter loops, deviation check, snapshot push, App Nap token. **One per session** — independent actors, no shared mutable state.|
+|`SimulationActor`     |Engines (nav/joystick/integrator/noise), aggregator + idle-jitter loops, deviation check, dual-plane publish (latest-wins telemetry stream + change-guarded bridge snapshot), App Nap token. **One per session** — independent actors, no shared mutable state.|
 |`DaemonBridge` (actor)|Process lifecycle, stdin/stdout state, pending-line continuations. **One per connected session**, held private to it.          |
 
 Multi-device (epic 012) replicates the actor/bridge/daemon per `DeviceSession` rather than sharing them; `AppState` owns the collection and a `selectedSessionID`. The control surface (route panel, playback, joystick) binds to the selected session via `AppState`'s forwarding accessors; the map iterates all sessions for color-coded markers + routes. Device-routing is structural: a `DeviceSession` holds its `DaemonBridge` privately and a `SimulationActor` only ever talks to the backend injected at its own `attach()`, so a command resolved to session A by `connectedUDID` can never reach B's daemon. The single physical joystick is armed on exactly the selected session (`AppState.syncActiveJoystick`), connected or not — the joystick steers that session's local red dot whether or not a device is mirroring it; other sessions' engines read the controller but stay inactive, contributing no velocity.
@@ -170,7 +173,7 @@ The simulated position is a live *local* state, not a device side effect (epic 0
 
 `DaemonBridge` reads its daemon's stdout with an event-driven `readabilityHandler` (feeding an ordered `AsyncStream` drained by one Task into the actor), **not** `FileHandle.bytes.lines`. This is load-bearing for multi-device: `bytes.lines` does a blocking read that holds Foundation's shared file-handle async-read queue, so once one device connects and its daemon goes idle, that bridge's blocked reader starves every *other* bridge's reader — a second device's daemon connects and prints `READY` but the bridge never reads it, hanging on "Connecting…" forever. The readabilityHandler never blocks, so concurrent bridges read independently. (Connecting one device at a time always worked, which is what made this look like a stack/tunnel limit rather than a reader bug.)
 
-The engines are marked `nonisolated final class` so the simulation actor can call them synchronously inside a tick — no per-tick `await` hop. The UI throttle lives in the actor's snapshot-push path: route playback snapshots stay capped at 2 Hz, and active non-playing motion is capped at 10 Hz so joystick steering does not rebuild MapKit faster than the loop cadence. The backend still receives every SETQ tick at 10 Hz because `setLocationQuiet` is `nonisolated` on `DaemonBridge` (cached pipe handle + serial queue). A `Thread.sleep(forTimeInterval:)` on MainActor will *not* delay SETQ delivery — that was the failure mode the actor split eliminated.
+The engines are marked `nonisolated final class` so the simulation actor can call them synchronously inside a tick — no per-tick `await` hop. Every push feeds **two planes** (epic 041). The high-frequency plane is a per-actor latest-wins `AsyncStream<TelemetryFrame>` (`bufferingNewest(1)`) carrying the clean position and its route-relative derivatives — leg progress, elapsed distance, route deviation, recording point count — available to non-SwiftUI consumers that need position updates without evaluating a SwiftUI body; latest-wins means a consumer that wakes late reads the freshest frame, not a backlog. The structural plane is the `@Observable` `SimulationStateBridge` the SwiftUI `Map` observes; its `apply` is now change-guarded per field — a property is written only when the incoming value differs, and the coordinate guard compares lat/lon since `CLLocationCoordinate2D` is not `Equatable` — because Observation does not dedupe same-value writes, so an unguarded 2–10 Hz push would re-invalidate every observing view every tick even when nothing it reads changed. Both planes are fed at the same points and the same cadence: the throttle still lives in the snapshot-push path, with route playback snapshots capped at 2 Hz and active non-playing motion at 10 Hz, so a tick never rebuilds MapKit faster than the loop cadence. The backend still receives every SETQ tick at 10 Hz because `setLocationQuiet` is `nonisolated` on `DaemonBridge` (cached pipe handle + serial queue). A `Thread.sleep(forTimeInterval:)` on MainActor will *not* delay SETQ delivery — that was the failure mode the actor split eliminated. `DeviceSession` exposes `routeVersion`, a monotonic counter bumped on every `routeCoordinates` assignment, so a consumer can diff route identity in O(1) rather than comparing coordinate arrays.
 
 ## Daemon Protocol
 

@@ -61,7 +61,16 @@ final class DeviceSession: Identifiable {
     var fromCoordinate: CLLocationCoordinate2D?
     var toCoordinate: CLLocationCoordinate2D?
     var stops: [RouteStop] = []
-    var routeCoordinates: [CLLocationCoordinate2D] = []
+    var routeCoordinates: [CLLocationCoordinate2D] = [] {
+        // Monotonic identity for the route (epic 041): every assignment bumps it,
+        // so a consumer can diff route identity in O(1) — compare one Int instead
+        // of two coordinate arrays — to decide whether to rebuild map overlays.
+        // Every route source (calculate/direct/append/wander/GPX import/drawn/
+        // replay) and AppState's forwarding setter mutate this property, so all
+        // of them flow through this didSet; a mutating .append bumps it too.
+        didSet { routeVersion &+= 1 }
+    }
+    private(set) var routeVersion: Int = 0
     var isCalculatingRoute = false
 
     private var daemonBridge: (any SimulationBackend)?

@@ -80,6 +80,15 @@ actor SimulationActor {
     nonisolated let events: AsyncStream<SimulationEvent>
     nonisolated private let eventsContinuation: AsyncStream<SimulationEvent>.Continuation
 
+    // The high-frequency telemetry plane (epic 041): the clean position and its
+    // route-relative derivatives, yielded wherever a snapshot is pushed today.
+    // Latest-wins (bufferingNewest(1)) so a slow consumer always reads the
+    // freshest frame and never a backlog. Dual-published alongside the bridge
+    // snapshot — the old path stays authoritative until 037 moves the map onto
+    // this plane — so this stream carries no behavior of its own yet.
+    nonisolated let telemetry: AsyncStream<TelemetryFrame>
+    nonisolated private let telemetryContinuation: AsyncStream<TelemetryFrame>.Continuation
+
     init(bridge: SimulationStateBridge, recorder: RecorderService, timing: SimulationTiming = .production) {
         self.bridge = bridge
         self.recorderRef = recorder
@@ -87,10 +96,14 @@ actor SimulationActor {
         var continuation: AsyncStream<SimulationEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
         self.eventsContinuation = continuation
+        var telemetryCont: AsyncStream<TelemetryFrame>.Continuation!
+        self.telemetry = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { telemetryCont = $0 }
+        self.telemetryContinuation = telemetryCont
     }
 
     deinit {
         eventsContinuation.finish()
+        telemetryContinuation.finish()
     }
 
     // MARK: - Lifecycle
@@ -134,6 +147,10 @@ actor SimulationActor {
             activityToken = nil
         }
         await pushSnapshotNow()
+        // Engine is down for good (session removal / quit) — no more frames will
+        // be produced, so end the telemetry stream after the final push so its
+        // consumers see the cleared state and then a clean completion.
+        telemetryContinuation.finish()
     }
 
     // Attach a device backend — the output sink the loops mirror to. Snaps the
@@ -516,6 +533,19 @@ actor SimulationActor {
         )
     }
 
+    // Telemetry frame carrying the high-frequency subset of the snapshot.
+    // Derived from the same snapshot so the two planes never disagree about the
+    // position they publish for one push.
+    private func makeTelemetryFrame(from snap: SimSnapshot) -> TelemetryFrame {
+        TelemetryFrame(
+            coordinate: snap.simulatedCoordinate,
+            progress: snap.navigationProgress,
+            elapsedDistance: snap.navigationElapsedDistance,
+            routeDeviationMeters: snap.routeDeviationMeters,
+            recordingPointCount: snap.recordingPointCount
+        )
+    }
+
     // Throttled push for the hot path. Playback remains at 2 Hz to keep
     // MapArea from rebuilding the route MapPolyline on every tick; active
     // non-playing motion is capped at 10 Hz. The backend still gets every SETQ
@@ -530,6 +560,10 @@ actor SimulationActor {
         lastDisplayPush = now
         bridge_routeDeviationMeters = routeDeviationMeters
         let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
+        // Dual-publish: telemetry plane first (latest-wins, no view body), then
+        // the structural bridge snapshot on MainActor — same cadence as the
+        // bridge push so the throttle bounds both planes identically.
+        telemetryContinuation.yield(makeTelemetryFrame(from: snap))
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }
@@ -540,6 +574,7 @@ actor SimulationActor {
         bridge_routeDeviationMeters = dev
         lastDisplayPush = ContinuousClock.now
         let snap = makeSnapshot(routeDeviationMeters: dev)
+        telemetryContinuation.yield(makeTelemetryFrame(from: snap))
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }
@@ -595,18 +630,58 @@ actor SimulationActor {
 // MARK: - MainActor side: snapshot apply
 
 @MainActor extension SimulationStateBridge {
+    // Change-guarded per field (epic 041): write a property only when the new
+    // value actually differs. Observation does not dedupe same-value writes, so
+    // an unguarded 2–10 Hz push would re-invalidate every observing view every
+    // tick even when nothing it reads changed. CLLocationCoordinate2D is not
+    // Equatable, so its guard compares lat/lon. persistPositionThrottled still
+    // runs on every apply (it has its own 1 Hz throttle) so persistence cadence
+    // is unchanged whether or not the coordinate write was skipped.
     func apply(_ snap: SimSnapshot) {
-        simulatedCoordinate = snap.simulatedCoordinate
+        if !Self.coordinatesEqual(simulatedCoordinate, snap.simulatedCoordinate) {
+            simulatedCoordinate = snap.simulatedCoordinate
+        }
         persistPositionThrottled()
-        navigationPlaybackState = snap.navigationPlaybackState
-        navigationProgress = snap.navigationProgress
-        navigationElapsedDistance = snap.navigationElapsedDistance
-        navigationTotalDistance = snap.navigationTotalDistance
-        navigationCompletedLoops = snap.navigationCompletedLoops
-        joystickIsActive = snap.joystickIsActive
-        joystickControllerName = snap.joystickControllerName
-        routeDeviationMeters = snap.routeDeviationMeters
-        recordingPointCount = snap.recordingPointCount
-        isRecording = snap.isRecording
+        if navigationPlaybackState != snap.navigationPlaybackState {
+            navigationPlaybackState = snap.navigationPlaybackState
+        }
+        if navigationProgress != snap.navigationProgress {
+            navigationProgress = snap.navigationProgress
+        }
+        if navigationElapsedDistance != snap.navigationElapsedDistance {
+            navigationElapsedDistance = snap.navigationElapsedDistance
+        }
+        if navigationTotalDistance != snap.navigationTotalDistance {
+            navigationTotalDistance = snap.navigationTotalDistance
+        }
+        if navigationCompletedLoops != snap.navigationCompletedLoops {
+            navigationCompletedLoops = snap.navigationCompletedLoops
+        }
+        if joystickIsActive != snap.joystickIsActive {
+            joystickIsActive = snap.joystickIsActive
+        }
+        if joystickControllerName != snap.joystickControllerName {
+            joystickControllerName = snap.joystickControllerName
+        }
+        if routeDeviationMeters != snap.routeDeviationMeters {
+            routeDeviationMeters = snap.routeDeviationMeters
+        }
+        if recordingPointCount != snap.recordingPointCount {
+            recordingPointCount = snap.recordingPointCount
+        }
+        if isRecording != snap.isRecording {
+            isRecording = snap.isRecording
+        }
+    }
+
+    private static func coordinatesEqual(
+        _ lhs: CLLocationCoordinate2D?,
+        _ rhs: CLLocationCoordinate2D?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): return true
+        case let (l?, r?): return l.latitude == r.latitude && l.longitude == r.longitude
+        default: return false
+        }
     }
 }

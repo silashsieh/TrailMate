@@ -461,18 +461,28 @@ actor SimulationActor {
         emit(pos)
 
         if nav.playbackState == .playing {
-            await maybeCheckDeviation(pos: pos)
+            // Deviation is sampled on its own 200 ms cadence; the per-tick push
+            // carries the last sampled value. Splitting the sampling from the
+            // push is what lets telemetry flow every tick (10 Hz) while the
+            // deviation check stays cheap.
+            maybeCheckDeviation(pos: pos)
+            await pushTick(routeDeviationMeters: bridge_routeDeviationMeters)
         } else {
             // Joystick-only (no route playing) still needs the bridge updated
             // so SwiftUI sees the moving coordinate. Without this push, emit()
             // keeps streaming SETQ to the device but simulatedCoordinate on
             // the bridge stays frozen on whatever startJoystick last pushed.
             deviationStartedAt = nil
-            await pushSnapshot(routeDeviationMeters: 0)
+            bridge_routeDeviationMeters = 0
+            await pushTick(routeDeviationMeters: 0)
         }
     }
 
-    private func maybeCheckDeviation(pos: CLLocationCoordinate2D) async {
+    // Sample route deviation at a 200 ms cadence (cheaper than every 100 ms tick)
+    // and cache it in `bridge_routeDeviationMeters` for the per-tick push to
+    // carry; abort playback if the dot has drifted too far for too long. It no
+    // longer pushes a snapshot itself — the aggregator tick pushes every frame.
+    private func maybeCheckDeviation(pos: CLLocationCoordinate2D) {
         let now = ContinuousClock.now
         if let last = lastDeviationCheck, now - last < .milliseconds(200) {
             return
@@ -495,7 +505,7 @@ actor SimulationActor {
         } else {
             deviationStartedAt = nil
         }
-        await pushSnapshot(routeDeviationMeters: dev)
+        bridge_routeDeviationMeters = dev
     }
 
     // MARK: - Emit + bridge
@@ -546,11 +556,25 @@ actor SimulationActor {
         )
     }
 
-    // Throttled push for the hot path. Playback remains at 2 Hz to keep
-    // MapArea from rebuilding the route MapPolyline on every tick; active
-    // non-playing motion is capped at 10 Hz. The backend still gets every SETQ
-    // tick because backend.setLocationQuiet is called from `emit`, not here.
-    private func pushSnapshotThrottled(routeDeviationMeters: Double) async {
+    // The per-tick hot-path push, partitioned across the two planes by cadence
+    // (epic 037):
+    //
+    //   • Telemetry plane — yielded on EVERY aggregator tick (up to the 10 Hz
+    //     loop cadence during both playback and active non-playing motion), so
+    //     the map dot moves at the full loop rate. Latest-wins buffering
+    //     (bufferingNewest(1)) makes any overshoot past a slow consumer harmless.
+    //   • Structural bridge — kept on its own throttle: 2 Hz during playback,
+    //     10 Hz active. This bounds the SwiftUI sidebar metrics so they never
+    //     rise to 10 Hz during playback (the reviewed plan's "UI metrics stay
+    //     throttled" rule); only the dot got smoother.
+    //
+    // Both planes derive from the same SimSnapshot so they can never disagree
+    // about the position published for one tick. The backend still gets every
+    // SETQ tick because backend.setLocationQuiet is called from `emit`, not here.
+    private func pushTick(routeDeviationMeters: Double) async {
+        let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
+        telemetryContinuation.yield(makeTelemetryFrame(from: snap))
+
         let now = ContinuousClock.now
         let interval = nav.playbackState == .playing
             ? timing.playbackSnapshotInterval
@@ -558,12 +582,6 @@ actor SimulationActor {
         let shouldPush = lastDisplayPush.map { now - $0 >= interval } ?? true
         guard shouldPush else { return }
         lastDisplayPush = now
-        bridge_routeDeviationMeters = routeDeviationMeters
-        let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
-        // Dual-publish: telemetry plane first (latest-wins, no view body), then
-        // the structural bridge snapshot on MainActor — same cadence as the
-        // bridge push so the throttle bounds both planes identically.
-        telemetryContinuation.yield(makeTelemetryFrame(from: snap))
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }
@@ -577,11 +595,6 @@ actor SimulationActor {
         telemetryContinuation.yield(makeTelemetryFrame(from: snap))
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
-    }
-
-    // Throttled push variant used inside the aggregator loop.
-    private func pushSnapshot(routeDeviationMeters: Double) async {
-        await pushSnapshotThrottled(routeDeviationMeters: routeDeviationMeters)
     }
 
     // MARK: - GCController observers

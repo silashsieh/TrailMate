@@ -197,8 +197,11 @@ coordinator `MapSurfaceController` (MainActor) owns:
   MapKit render pass; the uncapped 10 Hz dot measured 21.1/22.4% CPU during playback — worse
   than the pre-migration 15% — while a 5 Hz cap measured 14.8/13.6%, below every pre-migration
   figure. Flat elevation was A/B-measured in the same session and exonerated (noise-to-worse),
-  so `.realistic` stays. Cap lives in `SimulationTiming.mapTelemetryInterval`; transitions
-  (teleport/stop) bypass it.
+  so `.realistic` stays. Cap lives in `SimulationTiming.mapTelemetryInterval` and applies to PLAYBACK only —
+  joystick/active motion keeps the 10 Hz active cadence (pre-migration hand-steering parity;
+  measured cost pending the final-head rerun) — and transitions (teleport/stop), mid-tick
+  completion flips, and the trailing edge of motion bypass it. A/B figures were measured at the
+  pre-review-fix head; a final-head revalidation run is pending before ship.
 - **Esc does not exit draw mode — accepted (owner decision, 2026-07-12).** With the AppKit
   `MKMapView` as first responder, SwiftUI's `.onKeyPress(.escape)` never fires; the pencil
   button is the draw-mode exit. The owner explicitly declined an AppKit Esc-routing fix.
@@ -217,6 +220,15 @@ coordinator `MapSurfaceController` (MainActor) owns:
   first nonzero layout (`applyInitialRegionIfNeeded`).
 - Pre-existing ~9% idle-with-route render floor (equal on the pre-migration build) — new
   follow-up epic; measure dot-present vs dot-absent first (DTS-705203 residual).
+- Independent PR review (Codex, PR #69) found three publish/camera defects, all fixed with
+  regression tests: (1) the leading-edge telemetry cap could permanently drop a route's
+  terminal coordinate and its playing→idle flip when completion happened between ticks —
+  transitions and motion trailing edges now publish unthrottled; (2) the camera token guard
+  swallowed a REAL user pan overlapping an in-flight programmatic animation — a live
+  user-input probe (NSApp.currentEvent classification, injectable) now wins over outstanding
+  tokens; (3) switching the selected session while following waited up to a cap interval (or
+  forever, for an idle session) — the controller now hands the camera the newest cached frame
+  immediately on selection change.
 - Test suites leaked per-test `com.sh.TrailMateTests.*` defaults domains (no
   `removePersistentDomain`) — fold into epic 033's test refresh.
 

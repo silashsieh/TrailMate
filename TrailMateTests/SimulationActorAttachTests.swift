@@ -1,5 +1,6 @@
 import CoreLocation
 import Dispatch
+import Foundation
 import Testing
 @testable import TrailMate
 
@@ -9,6 +10,13 @@ import Testing
 // (MockSimulationBackend deliberately swallows locations), so it's exercised
 // here at the actor seam with a backend that records the hot-path push.
 struct SimulationActorAttachTests {
+
+    private static func freshDefaults() -> UserDefaults {
+        let suiteName = "com.sh.TrailMateTests.Attach.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
 
     // Records the last coordinate pushed through the nonisolated, hot-path
     // setLocationQuiet — guarded by the same serial-queue pattern DaemonBridge
@@ -35,7 +43,7 @@ struct SimulationActorAttachTests {
 
     @MainActor
     @Test func attachMirrorsCurrentRedDotToDevice() async throws {
-        let bridge = SimulationStateBridge()
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let recorder = RecorderService()
         let sim = SimulationActor(bridge: bridge, recorder: recorder)
         // Zero noise so the emitted value equals the clean coordinate exactly
@@ -64,7 +72,7 @@ struct SimulationActorAttachTests {
     // re-syncs the device").
     @MainActor
     @Test func reattachAfterOfflineMoveMirrorsTheNewDot() async throws {
-        let bridge = SimulationStateBridge()
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
         await sim.updateNoiseSigma(0)
 
@@ -97,13 +105,18 @@ struct SimulationActorAttachTests {
 
     @MainActor
     @Test func nonPlayingSnapshotThrottleDoesNotThrottleDeviceEmits() async throws {
-        let bridge = SimulationStateBridge()
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let timing = SimulationTiming(
             aggregatorDeltaTime: 0.02,
             aggregatorInterval: .milliseconds(20),
             scrubEmitInterval: .milliseconds(20),
             playbackSnapshotInterval: .milliseconds(500),
-            activeSnapshotInterval: .milliseconds(250),
+            // Wide on purpose: the test's claim is ORDERING (device emits are
+            // not gated by the UI throttle), and a 250 ms throttle made the
+            // "bridge still unmoved" check racy under CI load. Two full seconds
+            // keeps the intent — the device must move long before any UI push —
+            // while no realistic scheduler stall can flip the outcome.
+            activeSnapshotInterval: .milliseconds(2000),
             mapTelemetryInterval: .milliseconds(200)
         )
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService(), timing: timing)
@@ -129,7 +142,7 @@ struct SimulationActorAttachTests {
         #expect(deviceMovedBeforeUIPush)
         #expect(Self.distanceMeters(bridge.simulatedCoordinate, from: start) < 0.01)
 
-        let uiEventuallyMoved = await waitUntil(timeout: .milliseconds(500)) {
+        let uiEventuallyMoved = await waitUntil(timeout: .milliseconds(3000)) {
             Self.distanceMeters(bridge.simulatedCoordinate, from: start) > 0.5
         }
         #expect(uiEventuallyMoved)

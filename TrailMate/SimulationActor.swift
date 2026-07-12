@@ -30,14 +30,19 @@ nonisolated struct SimulationTiming: Sendable {
     let scrubEmitInterval: Duration
     let playbackSnapshotInterval: Duration
     let activeSnapshotInterval: Duration
-    // Map-telemetry (dot/camera) cadence floor. 200 ms = 5 Hz, chosen by the
-    // 2026-07-11 Release A/B on the same route (20 s visible-window samples):
-    // every telemetry frame forces a MapKit render pass, and at the full 10 Hz
-    // loop cadence playback cost regressed past the pre-migration numbers
-    // (Follow-off 21.1%, Follow-on 22.4%); capped at 5 Hz it dropped to 14.8% /
-    // 13.6% — below every pre-migration figure — while the dot stays 2.5×
-    // smoother than the old 2 Hz snapshot path. Flat elevation was measured in
-    // the same A/B and exonerated (no benefit), so `.realistic` stays.
+    // PLAYBACK map-telemetry (dot/camera) cadence floor. 200 ms = 5 Hz, chosen
+    // by the 2026-07-11 Release A/B on the same route (20 s visible-window
+    // samples, measured at the pre-review-fix head): every telemetry frame
+    // forces a MapKit render pass, and at the full 10 Hz loop cadence playback
+    // cost regressed past the pre-migration numbers (Follow-off 21.1%,
+    // Follow-on 22.4%); capped at 5 Hz it dropped to 14.8% / 13.6% — below
+    // every pre-migration figure — while the dot stays 2.5× smoother than the
+    // old 2 Hz snapshot path. Flat elevation was measured in the same A/B and
+    // exonerated (no benefit), so `.realistic` stays. Scope: playback ONLY —
+    // joystick/active motion publishes at activeSnapshotInterval (10 Hz,
+    // pre-migration responsiveness parity), and state transitions plus the
+    // trailing edge of motion publish unthrottled so terminal coordinates and
+    // playing→idle flips are never dropped.
     let mapTelemetryInterval: Duration
 
     static let production = SimulationTiming(
@@ -74,6 +79,13 @@ actor SimulationActor {
 
     private var lastDisplayPush: ContinuousClock.Instant?
     private var lastTelemetryYield: ContinuousClock.Instant?
+    // Publish-side transition detection (review blocker, PR #69): a route that
+    // completes between cadence ticks flips playing→idle INSIDE nav.tick, where
+    // no user action fires an unthrottled push — without these, the leading-edge
+    // telemetry cap could permanently drop the terminal coordinate and the
+    // bridge throttle could drop the idle flip, leaving dot + controls stale.
+    private var lastPublishedPlaybackState: NavigationEngine.PlaybackState = .idle
+    private var lastTickHadContribution = false
     private var lastDeviationCheck: ContinuousClock.Instant?
     private var deviationStartedAt: ContinuousClock.Instant?
 
@@ -475,14 +487,19 @@ actor SimulationActor {
         }
 
         guard anyContribution else {
-            // Engines inactive — reset deviation tracking and push state only
-            // if it just changed (caller doesn't need 10 Hz no-op snapshots).
-            if bridge_routeDeviationMeters != 0 || deviationStartedAt != nil {
+            // Engines inactive. Trailing edge of motion (last tick moved, this
+            // one didn't): publish once, unthrottled, so the FINAL position —
+            // up to one cap interval of travel — is never dropped by the
+            // leading-edge telemetry cap. Otherwise push only if deviation
+            // state just changed (caller doesn't need 10 Hz no-op snapshots).
+            if lastTickHadContribution || bridge_routeDeviationMeters != 0 || deviationStartedAt != nil {
+                lastTickHadContribution = false
                 deviationStartedAt = nil
                 await pushSnapshotNow(routeDeviationMeters: 0)
             }
             return
         }
+        lastTickHadContribution = true
 
         integrator.step(vx: vx, vy: vy, dt: dt)
         guard let pos = integrator.position else { return }
@@ -495,6 +512,13 @@ actor SimulationActor {
             // deviation check stays cheap.
             maybeCheckDeviation(pos: pos)
             await pushTick(routeDeviationMeters: bridge_routeDeviationMeters)
+        } else if nav.playbackState != lastPublishedPlaybackState {
+            // nav.tick flipped the state THIS tick (route completed / loop
+            // target reached between user actions): publish the transition and
+            // the terminal coordinate unthrottled — both throttles could
+            // otherwise drop it, and no further tick would retry.
+            deviationStartedAt = nil
+            await pushSnapshotNow(routeDeviationMeters: bridge_routeDeviationMeters)
         } else {
             // Joystick-only (no route playing) still needs the bridge updated
             // so SwiftUI sees the moving coordinate. Without this push, emit()
@@ -606,8 +630,17 @@ actor SimulationActor {
     // SETQ tick because backend.setLocationQuiet is called from `emit`, not here.
     private func pushTick(routeDeviationMeters: Double) async {
         let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
+        lastPublishedPlaybackState = snap.navigationPlaybackState
+        // The A/B-measured 5 Hz cap applies to PLAYBACK (where the render-pass
+        // cost was measured and the dot follows a smooth path); active
+        // non-playing motion — joystick steering — publishes at the loop's
+        // active cadence (10 Hz) to keep pre-migration responsiveness, well
+        // inside the ~300 ms perceptibility line.
+        let telemetryInterval = snap.navigationPlaybackState == .playing
+            ? timing.mapTelemetryInterval
+            : timing.activeSnapshotInterval
         let now = ContinuousClock.now
-        if lastTelemetryYield.map({ now - $0 >= timing.mapTelemetryInterval }) ?? true {
+        if lastTelemetryYield.map({ now - $0 >= telemetryInterval }) ?? true {
             lastTelemetryYield = now
             telemetryContinuation?.yield(makeTelemetryFrame(from: snap))
         }
@@ -632,6 +665,7 @@ actor SimulationActor {
         lastDisplayPush = ContinuousClock.now
         lastTelemetryYield = lastDisplayPush
         let snap = makeSnapshot(routeDeviationMeters: dev)
+        lastPublishedPlaybackState = snap.navigationPlaybackState
         telemetryContinuation?.yield(makeTelemetryFrame(from: snap))
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }

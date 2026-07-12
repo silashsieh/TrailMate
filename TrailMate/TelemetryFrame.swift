@@ -10,7 +10,7 @@ import CoreLocation
 // re-invalidate every observing view on every tick.
 //
 // A Sendable value type: built on SimulationActor, consumed anywhere.
-struct TelemetryFrame: Sendable {
+nonisolated struct TelemetryFrame: Sendable {
     var coordinate: CLLocationCoordinate2D?   // last emitted clean position
     var progress: Double                      // 0…1 within the current leg
     var elapsedDistance: Double               // meters along route

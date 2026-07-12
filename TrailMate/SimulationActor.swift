@@ -30,13 +30,23 @@ nonisolated struct SimulationTiming: Sendable {
     let scrubEmitInterval: Duration
     let playbackSnapshotInterval: Duration
     let activeSnapshotInterval: Duration
+    // Map-telemetry (dot/camera) cadence floor. 200 ms = 5 Hz, chosen by the
+    // 2026-07-11 Release A/B on the same route (20 s visible-window samples):
+    // every telemetry frame forces a MapKit render pass, and at the full 10 Hz
+    // loop cadence playback cost regressed past the pre-migration numbers
+    // (Follow-off 21.1%, Follow-on 22.4%); capped at 5 Hz it dropped to 14.8% /
+    // 13.6% — below every pre-migration figure — while the dot stays 2.5×
+    // smoother than the old 2 Hz snapshot path. Flat elevation was measured in
+    // the same A/B and exonerated (no benefit), so `.realistic` stays.
+    let mapTelemetryInterval: Duration
 
     static let production = SimulationTiming(
         aggregatorDeltaTime: 0.1,
         aggregatorInterval: .milliseconds(100),
         scrubEmitInterval: .milliseconds(100),
         playbackSnapshotInterval: .milliseconds(500),
-        activeSnapshotInterval: .milliseconds(100)
+        activeSnapshotInterval: .milliseconds(100),
+        mapTelemetryInterval: .milliseconds(200)
     )
 }
 
@@ -63,6 +73,7 @@ actor SimulationActor {
     private var activityToken: Any?
 
     private var lastDisplayPush: ContinuousClock.Instant?
+    private var lastTelemetryYield: ContinuousClock.Instant?
     private var lastDeviationCheck: ContinuousClock.Instant?
     private var deviationStartedAt: ContinuousClock.Instant?
 
@@ -576,23 +587,31 @@ actor SimulationActor {
     // The per-tick hot-path push, partitioned across the two planes by cadence
     // (epic 037):
     //
-    //   • Telemetry plane — yielded on EVERY aggregator tick (up to the 10 Hz
-    //     loop cadence during both playback and active non-playing motion), so
-    //     the map dot moves at the full loop rate. Latest-wins buffering
+    //   • Telemetry plane — yielded from the tick path (decoupled from the 5 Hz
+    //     deviation guard and the bridge throttle), capped at
+    //     `timing.mapTelemetryInterval` (5 Hz in production). Every frame forces
+    //     a MapKit render pass, and the 2026-07-11 Release A/B measured the
+    //     uncapped 10 Hz costing more during playback than the pre-migration
+    //     map (21–22% vs 15%); at 5 Hz it beats every pre-migration number
+    //     (14.8/13.6%) while staying 2.5× smoother than the old 2 Hz. See the
+    //     constant's comment for the full figures. Latest-wins buffering
     //     (bufferingNewest(1)) makes any overshoot past a slow consumer harmless.
     //   • Structural bridge — kept on its own throttle: 2 Hz during playback,
     //     10 Hz active. This bounds the SwiftUI sidebar metrics so they never
-    //     rise to 10 Hz during playback (the reviewed plan's "UI metrics stay
-    //     throttled" rule); only the dot got smoother.
+    //     rise to loop cadence during playback (the reviewed plan's "UI metrics
+    //     stay throttled" rule).
     //
     // Both planes derive from the same SimSnapshot so they can never disagree
     // about the position published for one tick. The backend still gets every
     // SETQ tick because backend.setLocationQuiet is called from `emit`, not here.
     private func pushTick(routeDeviationMeters: Double) async {
         let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
-        telemetryContinuation?.yield(makeTelemetryFrame(from: snap))
-
         let now = ContinuousClock.now
+        if lastTelemetryYield.map({ now - $0 >= timing.mapTelemetryInterval }) ?? true {
+            lastTelemetryYield = now
+            telemetryContinuation?.yield(makeTelemetryFrame(from: snap))
+        }
+
         let interval = nav.playbackState == .playing
             ? timing.playbackSnapshotInterval
             : timing.activeSnapshotInterval
@@ -604,10 +623,14 @@ actor SimulationActor {
     }
 
     // Unthrottled push for state transitions (start/stop/pause/teleport/etc.).
+    // Transitions bypass the map-telemetry cap on purpose — a teleport or stop
+    // must reach the dot immediately — and stamp the cap window so the next
+    // tick doesn't double up within the same interval.
     private func pushSnapshotNow(routeDeviationMeters: Double? = nil) async {
         let dev = routeDeviationMeters ?? bridge_routeDeviationMeters
         bridge_routeDeviationMeters = dev
         lastDisplayPush = ContinuousClock.now
+        lastTelemetryYield = lastDisplayPush
         let snap = makeSnapshot(routeDeviationMeters: dev)
         telemetryContinuation?.yield(makeTelemetryFrame(from: snap))
         let bridge = self.bridge

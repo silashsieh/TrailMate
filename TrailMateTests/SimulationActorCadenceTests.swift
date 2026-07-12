@@ -3,16 +3,19 @@ import Foundation
 import Testing
 @testable import TrailMate
 
-// Epic 037 — the telemetry/bridge cadence split. Unlike the other actor tests
-// (deterministic, no aggregator), this one drives the real 10 Hz loop for a
-// short window because the split lives entirely in the per-tick push path.
+// Epic 037 — the telemetry/bridge cadence split AND the map-telemetry cap.
+// Unlike the other actor tests (deterministic, no aggregator), this one drives
+// the real loop for a short window because both properties live in the
+// per-tick push path.
 //
-// Property under test: during playback the telemetry stream flows at the
-// aggregator cadence (10 Hz), decoupled from the structural bridge push, which
-// stays throttled to 2 Hz. Before the split, telemetry was dual-published on the
-// same 2 Hz throttle, so a ~1 s playback window would have surfaced ~2 frames;
-// the split raises that to ~10. A comfortable lower bound keeps it robust to
-// scheduler jitter while still failing on the pre-split behavior.
+// Properties under test, during playback:
+//  1. Telemetry flows from the tick path, decoupled from the 2 Hz structural
+//     bridge throttle (pre-split, telemetry rode the same 2 Hz throttle).
+//  2. Telemetry is CAPPED at `mapTelemetryInterval` (5 Hz in production) — the
+//     2026-07-11 Release A/B showed every frame forces a MapKit render pass:
+//     uncapped 10 Hz cost 21–22% CPU during playback (worse than the 15%
+//     pre-migration map); capped 5 Hz cost 14.8/13.6% (better than every
+//     pre-migration figure). The upper bound below fails if the cap is lost.
 @MainActor
 struct SimulationActorCadenceTests {
 
@@ -25,7 +28,7 @@ struct SimulationActorCadenceTests {
         return defaults
     }
 
-    @Test func telemetryFlowsAtLoopCadenceDuringPlaybackWhileBridgeStaysThrottled() async throws {
+    @Test func mapTelemetryIsCappedAtFiveHzAndDecoupledFromBridgeThrottle() async throws {
         let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
 
@@ -40,7 +43,7 @@ struct SimulationActorCadenceTests {
         await sim.play(multiplier: 1)
 
         // Sole consumer of the single-consumer stream, counting frames delivered
-        // over a ~1 s window of playback.
+        // over a ~2 s window of playback.
         let counter = Counter()
         let consumer = Task { @MainActor in
             for await _ in stream {
@@ -49,12 +52,15 @@ struct SimulationActorCadenceTests {
             }
         }
 
-        try await Task.sleep(for: .milliseconds(1000))
+        try await Task.sleep(for: .milliseconds(2000))
         consumer.cancel()
         await sim.stopEngine()
 
-        // 10 Hz over ~1 s clears the old 2 Hz playback-telemetry ceiling by a wide
-        // margin; ≥ 5 tolerates scheduler jitter and never passes on 2 Hz.
-        #expect(counter.value >= 5)
+        // 5 Hz over ~2 s ≈ 10 frames, plus the subscription seed and the play()
+        // transition push. Lower bound: the old 2 Hz playback ceiling would give
+        // ~4+2 ≈ 6 — require clearly more. Upper bound: an uncapped 10 Hz loop
+        // would give ~20+2 — require clearly fewer, so losing the cap fails.
+        #expect(counter.value >= 8, "cadence too low: \(counter.value) frames in 2 s")
+        #expect(counter.value <= 15, "map-telemetry cap lost: \(counter.value) frames in 2 s")
     }
 }

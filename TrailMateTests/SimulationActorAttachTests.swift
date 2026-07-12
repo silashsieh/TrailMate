@@ -103,7 +103,8 @@ struct SimulationActorAttachTests {
             aggregatorInterval: .milliseconds(20),
             scrubEmitInterval: .milliseconds(20),
             playbackSnapshotInterval: .milliseconds(500),
-            activeSnapshotInterval: .milliseconds(250)
+            activeSnapshotInterval: .milliseconds(250),
+            mapTelemetryInterval: .milliseconds(200)
         )
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService(), timing: timing)
         let backend = RecordingBackend()

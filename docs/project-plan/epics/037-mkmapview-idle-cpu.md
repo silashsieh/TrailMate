@@ -243,8 +243,12 @@ did — is playback and Follow. All figures: Release, 20 s visible-window sample
 - [ ] Map features behave identically (accepted deviation: **Esc does not exit draw mode; the
       pencil button is the exit** — see Decisions). Verified by owner walkthrough: full-area
       map, instant region/route render, single correct context menu, follow engage/disengage,
-      joystick overlay + control reflow, keyboard steering. Remaining owner checks before
-      ship: hand-drawn stroke end-to-end, window close→reopen dot resume, long-press
-      destination bar, region persistence across relaunch, zh-Hant marker labels.
+      joystick overlay + control reflow, keyboard steering. **Final manual gate PASSED
+      (2026-07-12, RC1 Release build):** hand-drawn route end-to-end — pencil mode, drag
+      from near Fujian toward Taiwan; the gesture endpoints produced a loaded ~380.6 km
+      route with Play enabled and Export GPX available; original title bar and
+      NavigationSplitView sidebar confirmed restored. Optional remaining spot-checks
+      (non-gating): window close→reopen dot resume, long-press destination bar, region
+      persistence across relaunch, zh-Hant marker labels.
 - Out of scope, filed as follow-up: a pre-existing ~9% idle-with-route render floor (present
       and equal on the before build; prime suspect DTS-705203 annotation residual).

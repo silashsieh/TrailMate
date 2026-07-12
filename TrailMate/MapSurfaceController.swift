@@ -85,7 +85,19 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
         self.mapView = mapView
         overlayStore.apply(model, to: mapView)
         annotationStore.apply(model.sessions, to: mapView)
-        selectedSessionID = model.sessions.first(where: { $0.isSelected })?.id
+        let newSelection = model.sessions.first(where: { $0.isSelected })?.id
+        if newSelection != selectedSessionID {
+            selectedSessionID = newSelection
+            // Follow handoff (review blocker, PR #69): the newly selected
+            // session's stream may not tick for up to a cap interval — or ever,
+            // if that session is idle — so an engaged follow recenters from the
+            // newest CACHED frame immediately instead of waiting.
+            if let id = newSelection, let director = cameraDirector,
+               director.isFollowing, let cached = lastKnownCoordinate[id],
+               let coordinate = cached {
+                director.followTarget(moved: coordinate)
+            }
+        }
         syncTelemetryConsumers(for: model.sessions.map(\.id))
     }
 
@@ -101,11 +113,16 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
 
     // Start a consumer for each newly-present session and cancel the ones whose
     // session has gone away — so there is always exactly one iterator per stream.
+    // Newest frame coordinate per session (nil value = position cleared), so a
+    // selection switch can hand the camera a position without waiting a tick.
+    private var lastKnownCoordinate: [UUID: CLLocationCoordinate2D?] = [:]
+
     private func syncTelemetryConsumers(for ids: [UUID]) {
         let present = Set(ids)
         for (id, task) in telemetryConsumers where !present.contains(id) {
             task.cancel()
             telemetryConsumers[id] = nil
+            lastKnownCoordinate[id] = nil
         }
         guard let provider = telemetryStreamProvider else { return }
         for id in ids where telemetryConsumers[id] == nil {
@@ -122,7 +139,8 @@ final class MapSurfaceController: NSObject, MKMapViewDelegate {
     // The sole per-session fan-out: move the dot every frame, and — only for the
     // selected, followed session — drive the camera, or disengage follow when the
     // position clears.
-    private func consumeTelemetry(_ frame: TelemetryFrame, sessionID: UUID) {
+    func consumeTelemetry(_ frame: TelemetryFrame, sessionID: UUID) {
+        lastKnownCoordinate[sessionID] = frame.coordinate
         setDotCoordinate(sessionID: sessionID, coordinate: frame.coordinate)
         guard sessionID == selectedSessionID, let director = cameraDirector else { return }
         if let coordinate = frame.coordinate {

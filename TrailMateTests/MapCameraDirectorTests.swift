@@ -187,4 +187,49 @@ struct MapCameraDirectorTests {
         // And it is the large, zoomed-out span, not the initial attach span.
         #expect(director.followSpan.latitudeDelta > 0.2)
     }
+
+    // MARK: - User-input arbitration (review blocker, PR #69)
+
+    // A REAL user pan that overlaps an in-flight programmatic animation arrives
+    // while our token is still outstanding. The live-input probe must win over
+    // the token so the gesture disengages follow instead of being swallowed.
+    @Test("A live user input disengages follow even with a programmatic move in flight")
+    func liveUserInputBeatsOutstandingToken() {
+        let mapView = makeMapView()
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+
+        var disengaged = 0
+        director.onFollowDisengaged = { disengaged += 1 }
+
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))   // animated engage → token outstanding
+
+        // The user grabs the map mid-animation: a live camera-input event is
+        // being dispatched at willChange time.
+        director.userCameraInputProbe = { true }
+        director.regionWillChange(animated: true)
+
+        #expect(director.isFollowing == false)
+        #expect(disengaged == 1)
+    }
+
+    @Test("Without live user input, an in-flight programmatic move still never disengages")
+    func programmaticMoveWithoutLiveInputStaysFollowing() {
+        let mapView = makeMapView()
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+
+        var disengaged = 0
+        director.onFollowDisengaged = { disengaged += 1 }
+
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))   // token outstanding
+
+        director.userCameraInputProbe = { false }
+        director.regionWillChange(animated: true)            // our own callback
+
+        #expect(director.isFollowing == true)
+        #expect(disengaged == 0)
+    }
 }

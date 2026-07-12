@@ -1,3 +1,4 @@
+import AppKit
 import CoreLocation
 import MapKit
 import os
@@ -168,13 +169,45 @@ final class MapCameraDirector {
     // A region change is starting. With no programmatic token outstanding it's a
     // user pan/zoom, which hands camera control back — mirroring MapKit's
     // user-tracking semantics.
+    // A region change is starting. Two independent signals decide whose it is
+    // (review blocker, PR #69 — a token check alone swallowed a REAL user pan
+    // that overlapped an in-flight programmatic animation, because the token was
+    // still outstanding):
+    //  • zero outstanding programmatic tokens → nothing of ours is in flight,
+    //    so the change is the user's;
+    //  • a live user camera-input event (scroll/drag/magnify/rotate) is being
+    //    processed RIGHT NOW → the change is the user's even while our tokens
+    //    are outstanding.
     func regionWillChange(animated: Bool) {
-        guard outstandingProgrammaticMoves == 0 else { return }
         guard isFollowing else { return }
+        if outstandingProgrammaticMoves > 0 && !userCameraInputProbe() { return }
         isFollowing = false
         engagePending = false
         log.debug("Follow disengaged by user camera gesture")
         onFollowDisengaged?()
+    }
+
+    // Injectable for tests; the default asks AppKit whether the event being
+    // dispatched this very moment is a camera-driving user input. Programmatic
+    // setRegion/setCamera callbacks run either with no current event or with a
+    // stale one, so the freshness check keeps momentum-scroll true and stale
+    // leftovers false.
+    var userCameraInputProbe: () -> Bool = {
+        MapCameraDirector.isUserCameraInput(
+            NSApp.currentEvent,
+            uptime: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    static func isUserCameraInput(_ event: NSEvent?, uptime: TimeInterval) -> Bool {
+        guard let event else { return false }
+        switch event.type {
+        case .scrollWheel, .magnify, .rotate, .swipe,
+             .leftMouseDown, .leftMouseDragged, .otherMouseDragged, .beginGesture:
+            return uptime - event.timestamp < 1.0
+        default:
+            return false
+        }
     }
 
     // A region change settled. Retire one programmatic token (if any) and mirror

@@ -283,4 +283,50 @@ struct MapSurfaceStoreTests {
         #expect(view.frame.midX == midBefore.x)       // origin/midpoint preserved
         #expect(view.frame.midY == midBefore.y)
     }
+
+    // Review blocker (PR #69): switching the selected session while Follow is
+    // engaged must recenter from the newest CACHED frame immediately — the new
+    // session's stream may not tick for up to a cap interval, or ever if it is
+    // idle.
+    @Test func selectionSwitchHandsFollowTheCachedFrame() {
+        let mapView = MKMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let controller = MapSurfaceController()
+        controller.attach(to: mapView)
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+        controller.cameraDirector = director
+
+        let a = UUID(), b = UUID()
+        let aCoord = coord(25.0330, 121.5654)
+        let bCoord = coord(24.1477, 120.6736)   // Taichung — far from A
+
+        // A selected and followed; both sessions have delivered frames.
+        controller.apply(MapSurfaceModel(sessions: [
+            session(a, color: 0, selected: true, version: 1, coords: []),
+            session(b, color: 1, selected: false, version: 1, coords: []),
+        ]), to: mapView)
+        controller.consumeTelemetry(
+            TelemetryFrame(coordinate: aCoord, progress: 0, elapsedDistance: 0,
+                           routeDeviationMeters: 0, recordingPointCount: 0),
+            sessionID: a
+        )
+        controller.consumeTelemetry(
+            TelemetryFrame(coordinate: bCoord, progress: 0, elapsedDistance: 0,
+                           routeDeviationMeters: 0, recordingPointCount: 0),
+            sessionID: b
+        )
+        director.setFollowing(true)
+        director.followTarget(moved: aCoord)   // engaged and centered on A
+
+        // Switch selection to B: the camera must move to B's cached frame NOW,
+        // without waiting for B's next telemetry frame.
+        controller.apply(MapSurfaceModel(sessions: [
+            session(a, color: 0, selected: false, version: 1, coords: []),
+            session(b, color: 1, selected: true, version: 1, coords: []),
+        ]), to: mapView)
+
+        #expect(abs(mapView.region.center.latitude - bCoord.latitude) < 0.05,
+                "camera did not hand off to the newly selected session's cached frame")
+        #expect(abs(mapView.region.center.longitude - bCoord.longitude) < 0.05)
+    }
 }

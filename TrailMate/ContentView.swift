@@ -1614,6 +1614,10 @@ private struct MapArea: View {
                 isDrawingRoute ? nil : buildDestinationMenu(coordinate)
             }
         )
+        // The joystick inset below shrinks the container safe area; a plain
+        // NSViewRepresentable is laid out inside it (gray band under the map),
+        // where SwiftUI `Map` drew full-bleed behind the inset — restore that.
+        .ignoresSafeArea(.container, edges: .bottom)
         // Bottom-trailing inset (not a plain overlay) so MapKit reflows its
         // built-in zoom/compass controls up and clear of the joystick; the map
         // still draws full-bleed behind it, and the inset collapses to zero when

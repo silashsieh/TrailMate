@@ -45,8 +45,9 @@ struct MapSurface: NSViewRepresentable {
         MapSurfaceController()
     }
 
-    func makeNSView(context: Context) -> TMMapView {
-        let mapView = TMMapView()
+    func makeNSView(context: Context) -> MapContainerView {
+        let container = MapContainerView()
+        let mapView = container.mapView
 
         // `.realistic` elevation for parity with today's `.mapStyle(.standard(elevation:))`;
         // the compass + zoom controls mirror the SwiftUI `MapCompass`/`MapZoomStepper`.
@@ -60,34 +61,76 @@ struct MapSurface: NSViewRepresentable {
         director.attach(to: mapView)
         bridge.attach(to: mapView)
 
-        wire(controller, mapView)
+        // The persisted region cannot be applied while the map is 0×0 (its
+        // camera degenerates and MapKit renders blank tiles until the next
+        // interaction), so the director defers it; the container reports the
+        // first real layout.
+        container.onFirstNonzeroLayout = { [weak director] in
+            director?.applyInitialRegionIfNeeded()
+        }
+
+        wire(controller, container)
         controller.apply(model, to: mapView)
-        return mapView
+        return container
     }
 
-    func updateNSView(_ mapView: TMMapView, context: Context) {
+    func updateNSView(_ container: MapContainerView, context: Context) {
         let controller = context.coordinator
-        wire(controller, mapView)
-        controller.apply(model, to: mapView)
+        wire(controller, container)
+        controller.apply(model, to: container.mapView)
     }
 
     // Cancel the telemetry consumers when the surface is permanently removed. The
     // recognizers go away with the map view; the tasks must be cancelled by hand.
-    static func dismantleNSView(_ nsView: TMMapView, coordinator: MapSurfaceController) {
+    static func dismantleNSView(_ container: MapContainerView, coordinator: MapSurfaceController) {
         coordinator.cancelTelemetryConsumers()
     }
 
     // Re-point the controller/collaborator closures on every structural update so
     // they always capture the freshest caller state. Cheap, and never called at
     // telemetry rate (the dot bypasses `updateNSView` entirely).
-    private func wire(_ controller: MapSurfaceController, _ mapView: TMMapView) {
+    private func wire(_ controller: MapSurfaceController, _ container: MapContainerView) {
         controller.telemetryStreamProvider = telemetryStream
         controller.onFollowDisengagedByStream = { onFollowMirror(false) }
         director.onFollowDisengaged = { onFollowMirror(false) }
         bridge.onLongPress = onLongPress
         bridge.onRightClick = onRightClick
         bridge.onStroke = onStroke
-        mapView.controlClickMenuProvider = controlClickMenu
+        container.mapView.controlClickMenuProvider = controlClickMenu
+    }
+}
+
+// Owns the `TMMapView` and guarantees it always fills the SwiftUI-proposed
+// bounds. SwiftUI resizes THIS plain view; `layout()` force-syncs the map's
+// frame to it — belt (autoresizing) and braces (explicit sync), because the
+// map view's frame silently stopped tracking the hosting view's size when the
+// representable returned the `MKMapView` directly (map pinned to a stale
+// partial frame; gray bands elsewhere). It also reports the first nonzero
+// layout so the initial camera region is applied only once the map has size.
+final class MapContainerView: NSView {
+    let mapView = TMMapView()
+    var onFirstNonzeroLayout: (() -> Void)?
+    private var reportedNonzeroLayout = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        autoresizesSubviews = true
+        mapView.frame = bounds
+        mapView.autoresizingMask = [.width, .height]
+        addSubview(mapView)
+    }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override func layout() {
+        super.layout()
+        if mapView.frame != bounds {
+            mapView.frame = bounds
+        }
+        if !reportedNonzeroLayout, bounds.width > 0, bounds.height > 0 {
+            reportedNonzeroLayout = true
+            onFirstNonzeroLayout?()
+        }
     }
 }
 

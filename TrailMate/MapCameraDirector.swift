@@ -72,10 +72,24 @@ final class MapCameraDirector {
     // MARK: - Attachment
 
     // Wire the map and apply the persisted region once. WP6 calls this after the
-    // controller has created its `MKMapView`.
+    // controller has created its `MKMapView`. The region is applied immediately
+    // only when the map already has real size (tests attach framed maps); in the
+    // app the view is 0×0 inside makeNSView — setting a region there degenerates
+    // the camera and MapKit renders blank tiles until the next interaction — so
+    // `MapContainerView` calls `applyInitialRegionIfNeeded()` on the first
+    // nonzero layout instead.
     func attach(to mapView: MKMapView) {
         self.mapView = mapView
-        guard !didApplyInitialRegion else { return }
+        if mapView.bounds.width > 0, mapView.bounds.height > 0 {
+            applyInitialRegionIfNeeded()
+        }
+    }
+
+    // Idempotent: from attach (already-sized map) or the container's first
+    // nonzero layout (the app path). Never re-applies mid-session, so a rebuilt
+    // view can't yank the camera back to the saved region.
+    func applyInitialRegionIfNeeded() {
+        guard !didApplyInitialRegion, let mapView else { return }
         didApplyInitialRegion = true
 
         let region = MapCameraPersistence.loadRegion()

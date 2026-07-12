@@ -21,3 +21,6 @@ packaging/.cache/
 
 # Release artifacts produced by packaging/release.sh
 build/
+
+# graphify knowledge-graph output (generated)
+graphify-out/

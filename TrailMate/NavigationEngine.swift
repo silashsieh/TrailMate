@@ -55,10 +55,12 @@ nonisolated final class NavigationEngine {
         cacheProjectedRoutePoints(for: coordinates)
 
         var cumulative: [Double] = [0]
-        for i in 1..<coordinates.count {
-            let from = CLLocation(latitude: coordinates[i - 1].latitude, longitude: coordinates[i - 1].longitude)
-            let to = CLLocation(latitude: coordinates[i].latitude, longitude: coordinates[i].longitude)
-            cumulative.append(cumulative.last! + from.distance(from: to))
+        if coordinates.count >= 2 {   // 1..<count on an empty array would trap
+            for i in 1..<coordinates.count {
+                let from = CLLocation(latitude: coordinates[i - 1].latitude, longitude: coordinates[i - 1].longitude)
+                let to = CLLocation(latitude: coordinates[i].latitude, longitude: coordinates[i].longitude)
+                cumulative.append(cumulative.last! + from.distance(from: to))
+            }
         }
         cumulativeDistances = cumulative
         totalDistance = cumulative.last ?? 0
@@ -67,7 +69,17 @@ nonisolated final class NavigationEngine {
         elapsedDistance = 0
     }
 
+    // A route the integrator can actually traverse: at least one segment of
+    // nonzero length. One-point and zero-length routes must never enter
+    // `.playing` — tick() would flip them straight back to `.idle` internally,
+    // a transition nothing else would think to publish (PR #69 review, High 2).
+    var isPlayable: Bool { coordinates.count >= 2 && totalDistance > 0 }
+
     func play(multiplier: Double) {
+        guard isPlayable else {
+            playbackState = .idle
+            return
+        }
         speedMultiplier = multiplier
         // Starting fresh (not resuming a pause) re-arms from the top — without
         // this, Play on a route that already ran to completion would re-idle

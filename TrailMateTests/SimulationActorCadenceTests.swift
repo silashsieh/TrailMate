@@ -159,4 +159,27 @@ struct SimulationActorCadenceTests {
                     "joystick telemetry appears capped below loop cadence: min step \(minDelta) m/frame")
         }
     }
+
+    // High 2 (second review), observable end-to-end: pressing Play on a
+    // degenerate (one-point) route must leave the PUBLISHED state idle. Before
+    // the fix, play() entered .playing (published), tick() flipped back to
+    // .idle internally, and nothing published the flip — the UI stayed stuck
+    // on "playing" forever.
+    @Test func playOnDegenerateRoutePublishesIdle() async throws {
+        let bridge = SimulationStateBridge(defaults: Self.freshDefaults())
+        let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
+
+        await sim.loadRoute(
+            coordinates: [CLLocationCoordinate2D(latitude: 25.0, longitude: 121.0)],
+            baseSpeed: 5, resetStart: true
+        )
+        await sim.startEngine()
+        await sim.play(multiplier: 1)
+
+        try await Task.sleep(for: .milliseconds(400))
+        await sim.stopEngine()
+
+        #expect(bridge.navigationPlaybackState == .idle,
+                "degenerate route left the published state at \(bridge.navigationPlaybackState)")
+    }
 }

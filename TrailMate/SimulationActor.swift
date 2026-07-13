@@ -488,12 +488,16 @@ actor SimulationActor {
         }
 
         guard anyContribution else {
-            // Engines inactive. Trailing edge of motion (last tick moved, this
-            // one didn't): publish once, unthrottled, so the FINAL position —
-            // up to one cap interval of travel — is never dropped by the
-            // leading-edge telemetry cap. Otherwise push only if deviation
-            // state just changed (caller doesn't need 10 Hz no-op snapshots).
-            if lastTickHadContribution || bridge_routeDeviationMeters != 0 || deviationStartedAt != nil {
+            // Engines inactive. Publish once, unthrottled, when anything a
+            // consumer relies on just changed: the trailing edge of motion
+            // (last tick moved, this one didn't — the FINAL position must not
+            // be dropped by the leading-edge cap), an internal playback-state
+            // flip that produced no movement (a degenerate route idling inside
+            // tick(); PR #69 review, High 2), or a deviation reset. Otherwise
+            // stay quiet (caller doesn't need 10 Hz no-op snapshots).
+            if nav.playbackState != lastPublishedPlaybackState
+                || lastTickHadContribution
+                || bridge_routeDeviationMeters != 0 || deviationStartedAt != nil {
                 lastTickHadContribution = false
                 deviationStartedAt = nil
                 await pushSnapshotNow(routeDeviationMeters: 0)

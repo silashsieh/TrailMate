@@ -108,9 +108,10 @@ struct SimulationActorCadenceTests {
 
         await sim.play(multiplier: 1)
         try await Task.sleep(for: .milliseconds(800))
-        consumer.cancel()
-        await sim.stopEngine()
 
+        // M6: assert BEFORE any teardown — stopEngine() publishes idle itself,
+        // which would satisfy these checks even if the natural completion had
+        // dropped the transition. Everything below the teardown line is cleanup.
         #expect(bridge.navigationPlaybackState == .idle,
                 "playing→idle transition was dropped by the throttle")
         let lastCoord = box.last?.coordinate
@@ -120,6 +121,9 @@ struct SimulationActorCadenceTests {
         }
         #expect(distanceToEnd != nil && distanceToEnd! < 1.5,
                 "terminal coordinate not published (last frame \(String(describing: lastCoord)))")
+
+        consumer.cancel()
+        await sim.stopEngine()
     }
 
     // The 5 Hz cap is PLAYBACK-only: joystick steering keeps the loop's 10 Hz
@@ -177,9 +181,12 @@ struct SimulationActorCadenceTests {
         await sim.play(multiplier: 1)
 
         try await Task.sleep(for: .milliseconds(400))
-        await sim.stopEngine()
 
+        // M6: assert BEFORE teardown — stopEngine() would publish idle on its
+        // own and mask a refusal path that never published.
         #expect(bridge.navigationPlaybackState == .idle,
                 "degenerate route left the published state at \(bridge.navigationPlaybackState)")
+
+        await sim.stopEngine()
     }
 }

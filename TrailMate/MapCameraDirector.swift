@@ -180,34 +180,25 @@ final class MapCameraDirector {
     //    are outstanding.
     func regionWillChange(animated: Bool) {
         guard isFollowing else { return }
-        if outstandingProgrammaticMoves > 0 && !userCameraInputProbe() { return }
+        if outstandingProgrammaticMoves > 0 && !userCameraInputIsLive() { return }
         isFollowing = false
         engagePending = false
         log.debug("Follow disengaged by user camera gesture")
         onFollowDisengaged?()
     }
 
-    // Injectable for tests; the default asks AppKit whether the event being
-    // dispatched this very moment is a camera-driving user input. Programmatic
-    // setRegion/setCamera callbacks run either with no current event or with a
-    // stale one, so the freshness check keeps momentum-scroll true and stale
-    // leftovers false.
-    var userCameraInputProbe: () -> Bool = {
-        MapCameraDirector.isUserCameraInput(
-            NSApp.currentEvent,
-            uptime: ProcessInfo.processInfo.systemUptime
-        )
-    }
+    // Injectable for tests. The default is MAP-SCOPED: it asks the attached
+    // `TMMapView` whether a camera-driving user input (pan drag, scroll,
+    // magnify, rotate) reached THAT view within its live window — an app-global
+    // NSApp.currentEvent heuristic could misclassify unrelated input, e.g. a
+    // sidebar scroll coinciding with a programmatic settle (PR #69 review,
+    // High 1). Programmatic setRegion/setCamera callbacks never stamp the map's
+    // input tracker, so they always read false here.
+    var userCameraInputProbe: (() -> Bool)?
 
-    static func isUserCameraInput(_ event: NSEvent?, uptime: TimeInterval) -> Bool {
-        guard let event else { return false }
-        switch event.type {
-        case .scrollWheel, .magnify, .rotate, .swipe,
-             .leftMouseDown, .leftMouseDragged, .otherMouseDragged, .beginGesture:
-            return uptime - event.timestamp < 1.0
-        default:
-            return false
-        }
+    private func userCameraInputIsLive() -> Bool {
+        if let probe = userCameraInputProbe { return probe() }
+        return (mapView as? TMMapView)?.userCameraInputIsLive() ?? false
     }
 
     // A region change settled. Retire one programmatic token (if any) and mirror

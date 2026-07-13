@@ -232,4 +232,55 @@ struct MapCameraDirectorTests {
         #expect(director.isFollowing == true)
         #expect(disengaged == 0)
     }
+
+    // High 1 (second review): the DEFAULT probe is map-scoped — it reads the
+    // attached TMMapView's input tracker, never app-global event state, so
+    // unrelated input (sidebar scrolls) can't disengage follow and a real map
+    // gesture is recognized even mid-programmatic-animation.
+    @Test("Default probe: a live map input disengages follow past an outstanding token")
+    func mapScopedInputBeatsOutstandingToken() {
+        let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+
+        var disengaged = 0
+        director.onFollowDisengaged = { disengaged += 1 }
+
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))   // token outstanding
+
+        mapView.noteUserCameraInput()                        // pan/scroll hit THIS map
+        director.regionWillChange(animated: true)
+
+        #expect(director.isFollowing == false)
+        #expect(disengaged == 1)
+    }
+
+    @Test("Default probe: with no map input, an in-flight programmatic move never disengages")
+    func noMapInputKeepsFollowDuringProgrammaticMove() {
+        let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+
+        var disengaged = 0
+        director.onFollowDisengaged = { disengaged += 1 }
+
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))   // token outstanding
+
+        director.regionWillChange(animated: true)            // our own callback
+
+        #expect(director.isFollowing == true)
+        #expect(disengaged == 0)
+    }
+
+    @Test("Map input tracker: live inside the window, expired after it")
+    func userInputLiveWindowSemantics() {
+        let mapView = TMMapView(frame: .zero)
+        #expect(mapView.userCameraInputIsLive(now: 100) == false)
+
+        mapView.noteUserCameraInput(at: 100)
+        #expect(mapView.userCameraInputIsLive(now: 100.5) == true)
+        #expect(mapView.userCameraInputIsLive(now: 100 + TMMapView.userInputLiveWindow + 0.1) == false)
+    }
 }

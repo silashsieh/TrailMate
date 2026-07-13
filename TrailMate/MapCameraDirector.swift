@@ -120,6 +120,10 @@ final class MapCameraDirector {
             // no settling callback). Otherwise it could swallow the user's first
             // gesture of this follow session.
             outstandingProgrammaticMoves = 0
+            // And start a fresh input epoch: the pan that happened BEFORE the
+            // user pressed Follow is history, not a disengage of the engage's
+            // own recenter (the stale-latch failure this replaces).
+            consumeUserInput()
         }
     }
 
@@ -130,6 +134,13 @@ final class MapCameraDirector {
     // `span == followSpan`, so following never changes the user's zoom.
     func followTarget(moved coordinate: CLLocationCoordinate2D) {
         guard isFollowing, let mapView else { return }
+
+        // A user gesture that never produced its own callback (fully coalesced)
+        // must win over the next steady recenter, not be steamrolled by it.
+        if hasUnconsumedUserInput() {
+            disengageByUserGesture()
+            return
+        }
 
         if engagePending {
             engagePending = false
@@ -180,25 +191,42 @@ final class MapCameraDirector {
     //    are outstanding.
     func regionWillChange(animated: Bool) {
         guard isFollowing else { return }
-        if outstandingProgrammaticMoves > 0 && !userCameraInputIsLive() { return }
+        if outstandingProgrammaticMoves > 0 && !hasUnconsumedUserInput() { return }
+        disengageByUserGesture()
+    }
+
+    // Injectable for tests. The default is MAP-SCOPED: the attached `TMMapView`
+    // bumps a sequence for every camera-driving input that reaches THAT view
+    // (never app-global event state). The director CONSUMES the sequence at
+    // every attribution and at every point where older input becomes stale by
+    // definition — engaging follow, and issuing a programmatic move — so a
+    // gesture is attributed EXACTLY ONCE and can neither linger (a pan followed
+    // by an immediate re-engage must not disengage the engage's own recenter)
+    // nor be swallowed (a pan coalesced into an in-flight programmatic move is
+    // still attributed at that move's settle).
+    var userInputSequenceProvider: (() -> UInt64)?
+
+    private var consumedUserInputSequence: UInt64 = 0
+
+    private func currentUserInputSequence() -> UInt64 {
+        if let provider = userInputSequenceProvider { return provider() }
+        return (mapView as? TMMapView)?.userCameraInputSequence ?? 0
+    }
+
+    private func hasUnconsumedUserInput() -> Bool {
+        currentUserInputSequence() > consumedUserInputSequence
+    }
+
+    private func consumeUserInput() {
+        consumedUserInputSequence = currentUserInputSequence()
+    }
+
+    private func disengageByUserGesture() {
+        consumeUserInput()
         isFollowing = false
         engagePending = false
         log.debug("Follow disengaged by user camera gesture")
         onFollowDisengaged?()
-    }
-
-    // Injectable for tests. The default is MAP-SCOPED: it asks the attached
-    // `TMMapView` whether a camera-driving user input (pan drag, scroll,
-    // magnify, rotate) reached THAT view within its live window — an app-global
-    // NSApp.currentEvent heuristic could misclassify unrelated input, e.g. a
-    // sidebar scroll coinciding with a programmatic settle (PR #69 review,
-    // High 1). Programmatic setRegion/setCamera callbacks never stamp the map's
-    // input tracker, so they always read false here.
-    var userCameraInputProbe: (() -> Bool)?
-
-    private func userCameraInputIsLive() -> Bool {
-        if let probe = userCameraInputProbe { return probe() }
-        return (mapView as? TMMapView)?.userCameraInputIsLive() ?? false
     }
 
     // A region change settled. Retire one programmatic token (if any) and mirror
@@ -208,6 +236,12 @@ final class MapCameraDirector {
         if outstandingProgrammaticMoves > 0 {
             outstandingProgrammaticMoves -= 1
         }
+        // A real gesture can coalesce into an in-flight programmatic move
+        // without its own regionWillChange; attribute it here, exactly once,
+        // when the move settles.
+        if isFollowing, hasUnconsumedUserInput() {
+            disengageByUserGesture()
+        }
         guard let region = mapView?.region else { return }
         MapCameraPersistence.save(region: region)
         followSpan = region.span
@@ -216,6 +250,10 @@ final class MapCameraDirector {
     // MARK: - Helpers
 
     private func performProgrammaticMove(_ body: () -> Void) {
+        // Anything the user did BEFORE this move was either already attributed
+        // or is stale; consuming here guarantees this move's own callbacks are
+        // never blamed on it.
+        consumeUserInput()
         // The single choke point for every camera command the director issues
         // (engage, steady-follow recenter, focus). Signposting here gives WP7 the
         // actual camera-command cadence — which the dead-band coalesces well below

@@ -142,30 +142,26 @@ final class MapContainerView: NSView {
 final class TMMapView: MKMapView {
     var controlClickMenuProvider: ((CLLocationCoordinate2D, NSPoint) -> NSMenu?)?
 
-    // MAP-SCOPED user camera-input tracking (PR #69 review, High 1). The
-    // camera director must tell a real pan/zoom ON THIS MAP from its own
-    // programmatic callbacks; an app-global NSApp.currentEvent heuristic could
-    // misclassify unrelated input (e.g. a sidebar scroll coinciding with a
-    // programmatic settle). Every camera-driving input that reaches this view
-    // stamps a timestamp; the director treats a `regionWillChange` within the
-    // live window as user-driven. The window outlasts one event so drag
-    // sequences and scroll momentum (which keep restamping) stay covered.
-    static let userInputLiveWindow: TimeInterval = 1.0
-    private(set) var lastUserCameraInputUptime: TimeInterval = -.greatestFiniteMagnitude
+    // MAP-SCOPED user camera-input tracking (PR #69 reviews, High). The camera
+    // director must tell a real pan/zoom ON THIS MAP from its own programmatic
+    // callbacks. A monotonically increasing SEQUENCE — not a timestamp latch —
+    // so the director can CONSUME what it has attributed: a time window would
+    // stay "live" after a pan and misclassify the animated recenter of an
+    // immediate Follow re-engage as another user gesture. Every camera-driving
+    // input that reaches this view (pan drag, scroll incl. momentum, magnify,
+    // rotate, smart-magnify — deliberately NOT a bare mouse-down, which is a
+    // click, not a camera gesture) bumps the sequence; the director compares it
+    // against the last sequence it consumed.
+    private(set) var userCameraInputSequence: UInt64 = 0
 
-    func noteUserCameraInput(at uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        lastUserCameraInputUptime = uptime
-    }
-
-    func userCameraInputIsLive(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
-        now - lastUserCameraInputUptime < Self.userInputLiveWindow
+    func noteUserCameraInput() {
+        userCameraInputSequence &+= 1
     }
 
     override func scrollWheel(with event: NSEvent) { noteUserCameraInput(); super.scrollWheel(with: event) }
     override func magnify(with event: NSEvent) { noteUserCameraInput(); super.magnify(with: event) }
     override func rotate(with event: NSEvent) { noteUserCameraInput(); super.rotate(with: event) }
     override func smartMagnify(with event: NSEvent) { noteUserCameraInput(); super.smartMagnify(with: event) }
-    override func mouseDown(with event: NSEvent) { noteUserCameraInput(); super.mouseDown(with: event) }
     override func mouseDragged(with event: NSEvent) { noteUserCameraInput(); super.mouseDragged(with: event) }
 
     override func menu(for event: NSEvent) -> NSMenu? {

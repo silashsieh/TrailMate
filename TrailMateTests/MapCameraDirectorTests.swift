@@ -193,51 +193,49 @@ struct MapCameraDirectorTests {
     // A REAL user pan that overlaps an in-flight programmatic animation arrives
     // while our token is still outstanding. The live-input probe must win over
     // the token so the gesture disengages follow instead of being swallowed.
-    @Test("A live user input disengages follow even with a programmatic move in flight")
-    func liveUserInputBeatsOutstandingToken() {
+    @Test("Injected sequence: input arriving mid-move disengages; none arriving never does")
+    func injectedSequenceArbitration() {
         let mapView = makeMapView()
         let director = MapCameraDirector()
         director.attach(to: mapView)
 
-        var disengaged = 0
-        director.onFollowDisengaged = { disengaged += 1 }
-
-        director.setFollowing(true)
-        director.followTarget(moved: coord(25.05, 121.55))   // animated engage → token outstanding
-
-        // The user grabs the map mid-animation: a live camera-input event is
-        // being dispatched at willChange time.
-        director.userCameraInputProbe = { true }
-        director.regionWillChange(animated: true)
-
-        #expect(director.isFollowing == false)
-        #expect(disengaged == 1)
-    }
-
-    @Test("Without live user input, an in-flight programmatic move still never disengages")
-    func programmaticMoveWithoutLiveInputStaysFollowing() {
-        let mapView = makeMapView()
-        let director = MapCameraDirector()
-        director.attach(to: mapView)
-
+        var sequence: UInt64 = 0
+        director.userInputSequenceProvider = { sequence }
         var disengaged = 0
         director.onFollowDisengaged = { disengaged += 1 }
 
         director.setFollowing(true)
         director.followTarget(moved: coord(25.05, 121.55))   // token outstanding
 
-        director.userCameraInputProbe = { false }
         director.regionWillChange(animated: true)            // our own callback
+        #expect(director.isFollowing == true && disengaged == 0)
 
-        #expect(director.isFollowing == true)
-        #expect(disengaged == 0)
+        sequence += 1                                        // user grabs the map mid-flight
+        director.regionWillChange(animated: true)
+        #expect(director.isFollowing == false)
+        #expect(disengaged == 1)
     }
 
-    // High 1 (second review): the DEFAULT probe is map-scoped — it reads the
-    // attached TMMapView's input tracker, never app-global event state, so
-    // unrelated input (sidebar scrolls) can't disengage follow and a real map
-    // gesture is recognized even mid-programmatic-animation.
-    @Test("Default probe: a live map input disengages follow past an outstanding token")
+    // Synthesize a real left-drag and push it through the production TMMapView
+    // input override (stamps the sequence, then forwards to super).
+    private func dragMap(_ mapView: TMMapView) {
+        if let event = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: 200, y: 200),
+            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ) {
+            mapView.mouseDragged(with: event)
+        } else {
+            mapView.noteUserCameraInput()
+        }
+    }
+
+    // High (reviews 2–3): the DEFAULT intent source is map-scoped — a SEQUENCE
+    // the director consumes at every attribution, engage, and programmatic
+    // move, so unrelated input can't disengage follow, a real map gesture is
+    // recognized even mid-programmatic-animation, attribution happens exactly
+    // once, and stale input never lingers into a re-engage.
+    @Test("Default source: a live map input disengages follow past an outstanding token")
     func mapScopedInputBeatsOutstandingToken() {
         let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
         let director = MapCameraDirector()
@@ -256,7 +254,7 @@ struct MapCameraDirectorTests {
         #expect(disengaged == 1)
     }
 
-    @Test("Default probe: with no map input, an in-flight programmatic move never disengages")
+    @Test("Default source: with no map input, an in-flight programmatic move never disengages")
     func noMapInputKeepsFollowDuringProgrammaticMove() {
         let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
         let director = MapCameraDirector()
@@ -274,13 +272,73 @@ struct MapCameraDirectorTests {
         #expect(disengaged == 0)
     }
 
-    @Test("Map input tracker: live inside the window, expired after it")
-    func userInputLiveWindowSemantics() {
+    @Test("Map input tracker: the sequence increments per camera-driving input")
+    func userInputSequenceSemantics() {
         let mapView = TMMapView(frame: .zero)
-        #expect(mapView.userCameraInputIsLive(now: 100) == false)
+        #expect(mapView.userCameraInputSequence == 0)
+        dragMap(mapView)
+        dragMap(mapView)
+        #expect(mapView.userCameraInputSequence == 2)
+    }
 
-        mapView.noteUserCameraInput(at: 100)
-        #expect(mapView.userCameraInputIsLive(now: 100.5) == true)
-        #expect(mapView.userCameraInputIsLive(now: 100 + TMMapView.userInputLiveWindow + 0.1) == false)
+    // Third-review acceptance: an overlapping REAL pan (production input path)
+    // disengages exactly once — and an IMMEDIATE re-engage (well inside what
+    // used to be the 1 s latch window) must keep both the director state and
+    // the UI mirror engaged through its own programmatic callbacks.
+    @Test("Overlapping pan disengages exactly once; immediate re-engage sticks")
+    func overlappingPanDisengagesOnceAndImmediateReengageSticks() {
+        let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+
+        var mirror = false
+        var disengaged = 0
+        director.onFollowDisengaged = { mirror = false; disengaged += 1 }
+
+        // Engage (mirrors ContentView's followButton).
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))   // animated engage, token out
+        mirror = true
+
+        // The user pans while that animation is in flight — production path.
+        dragMap(mapView)
+        director.regionWillChange(animated: true)            // the pan's callback
+        #expect(director.isFollowing == false && mirror == false && disengaged == 1)
+        director.regionDidChange(animated: true)             // settle
+        #expect(disengaged == 1, "attribution must be exactly once")
+
+        // Immediately re-engage — the stale time latch would have blamed the
+        // engage's own recenter on the finished pan and flipped Follow back off.
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.06, 121.56))
+        mirror = true
+        director.regionWillChange(animated: true)            // engage's own callback
+        director.regionDidChange(animated: true)
+
+        #expect(director.isFollowing == true, "re-engage was disengaged by stale input")
+        #expect(mirror == true, "UI mirror desynchronized")
+        #expect(disengaged == 1)
+    }
+
+    @Test("A pan coalesced into an in-flight move (no willChange of its own) is attributed at settle, once")
+    func coalescedPanAttributedAtSettleExactlyOnce() {
+        let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+
+        var disengaged = 0
+        director.onFollowDisengaged = { disengaged += 1 }
+
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))   // token out, animation in flight
+
+        dragMap(mapView)                                     // coalesced: no extra willChange
+        director.regionDidChange(animated: true)             // the move settles
+
+        #expect(director.isFollowing == false)
+        #expect(disengaged == 1)
+
+        director.regionDidChange(animated: true)             // spurious extra settle
+        #expect(disengaged == 1, "attribution must be exactly once")
     }
 }

@@ -227,9 +227,11 @@ coordinator `MapSurfaceController` (MainActor) owns:
   regression tests: (1) the leading-edge telemetry cap could permanently drop a route's
   terminal coordinate and its playing→idle flip when completion happened between ticks —
   transitions and motion trailing edges now publish unthrottled; (2) the camera token guard
-  swallowed a REAL user pan overlapping an in-flight programmatic animation — a live
-  user-input probe (NSApp.currentEvent classification, injectable) now wins over outstanding
-  tokens; (3) switching the selected session while following waited up to a cap interval (or
+  swallowed a REAL user pan overlapping an in-flight programmatic animation — resolved (after
+  a further review iteration) by a MAP-SCOPED, CONSUMED input sequence: TMMapView bumps a
+  counter per camera-driving input, and the director consumes it at every attribution, engage,
+  and programmatic move, so a gesture is attributed exactly once, coalesced gestures are
+  caught at the move's settle, and stale input can never disengage an immediate re-engage; (3) switching the selected session while following waited up to a cap interval (or
   forever, for an idle session) — the controller now hands the camera the newest cached frame
   immediately on selection change.
 - Test suites leaked per-test `com.sh.TrailMateTests.*` defaults domains (no

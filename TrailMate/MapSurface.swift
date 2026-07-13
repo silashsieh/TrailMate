@@ -173,7 +173,7 @@ final class TMMapView: MKMapView {
         guard window != nil else { return }
         inputMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.scrollWheel, .magnify, .rotate, .smartMagnify,
-                       .leftMouseDown, .leftMouseDragged, .otherMouseDragged]
+                       .leftMouseDown, .leftMouseUp, .leftMouseDragged, .otherMouseDragged]
         ) { [weak self] event in
             self?.classifyAndStampUserCameraInput(event)
             return event
@@ -186,24 +186,36 @@ final class TMMapView: MKMapView {
     // while still installed in a window). A nonisolated deinit can't touch
     // MainActor state under strict concurrency anyway.
 
-    // The monitor's body, callable directly by tests (the classification and
-    // geometry below are the production path; only the event-loop pump is
-    // bypassed). Returns whether the event stamped the sequence.
+    // A left-button gesture is attributed by its ORIGIN: the SwiftUI overlays
+    // (virtual joystick, destination bar, chips) render over the full-bleed
+    // map, so a drag that starts on an overlay can wander across raw map
+    // pixels mid-gesture — location-scoping alone would misread it as a map
+    // pan and disengage Follow (PR #69 review, High). Set on mouse-down from
+    // the hit-tested target, cleared on mouse-up.
+    private var dragOriginatedInMap = false
+
+    // The monitor's body. Scoping is by the event's actual HIT-TESTED TARGET
+    // (resolved from the window's content view, so sibling/SwiftUI overlay
+    // views win where they cover the map), never by raw map-bounds geometry.
+    // Returns whether the event stamped the sequence.
     @discardableResult
     func classifyAndStampUserCameraInput(_ event: NSEvent) -> Bool {
         guard event.window === window, window != nil else { return false }
-        let local = convert(event.locationInWindow, from: nil)
-        guard bounds.contains(local) else { return false }
 
         switch event.type {
-        case .scrollWheel, .magnify, .rotate, .smartMagnify,
-             .leftMouseDragged, .otherMouseDragged:
+        case .scrollWheel, .magnify, .rotate, .smartMagnify, .otherMouseDragged:
+            // Instantaneous camera inputs: attributed by their current target.
+            guard hitTestedView(of: event)?.isDescendant(of: self) == true else { return false }
             noteUserCameraInput()
             return true
         case .leftMouseDown:
+            let hit = hitTestedView(of: event)
+            let inMap = hit?.isDescendant(of: self) == true
+            dragOriginatedInMap = inMap
+            guard inMap else { return false }
             // Clicks are camera input only when they drive the camera: a
-            // double-click (zoom in / shift-zoom out) anywhere on the canvas,
-            // or a click landing on one of MapKit's own control subviews (zoom
+            // double-click (zoom in / shift-zoom out) on the canvas, or a
+            // click landing on one of MapKit's own control subviews (zoom
             // stepper, compass). A plain single click on the canvas — e.g.
             // selecting the dot or a marker — must NOT stamp, or it would
             // falsely disengage Follow at the next settle.
@@ -211,16 +223,32 @@ final class TMMapView: MKMapView {
                 noteUserCameraInput()
                 return true
             }
-            if let superview,
-               let hit = hitTest(superview.convert(event.locationInWindow, from: nil)),
-               hit !== self, hit.isDescendant(of: self), isMapControl(hit) {
+            if let hit, hit !== self, isMapControl(hit) {
                 noteUserCameraInput()
                 return true
             }
             return false
+        case .leftMouseDragged:
+            // A pan only if the gesture BEGAN in the map's own hierarchy.
+            guard dragOriginatedInMap else { return false }
+            noteUserCameraInput()
+            return true
+        case .leftMouseUp:
+            dragOriginatedInMap = false
+            return false
         default:
             return false
         }
+    }
+
+    // Deepest view under the event, resolved from the window's content view so
+    // overlay siblings above the map win exactly as they do for real event
+    // routing.
+    private func hitTestedView(of event: NSEvent) -> NSView? {
+        guard let root = window?.contentView else { return nil }
+        let point = root.superview?.convert(event.locationInWindow, from: nil)
+            ?? event.locationInWindow
+        return root.hitTest(point)
     }
 
     // MapKit's built-in camera widgets: the zoom stepper is an NSControl; the

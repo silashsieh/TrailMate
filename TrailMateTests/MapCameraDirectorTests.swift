@@ -218,20 +218,26 @@ struct MapCameraDirectorTests {
 
     // Synthesize a real left-drag and push it through the production TMMapView
     // input override (stamps the sequence, then forwards to super).
-    // Host a map in a real (never-shown) window so window/geometry scoping and
-    // MapKit's built-in control subviews are live, then push synthesized events
-    // through the production classifier (the local monitor's body).
-    private func hostedMap() -> (TMMapView, NSWindow) {
-        let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+    // Host a map in a real (never-shown) window, embedded like production: a
+    // plain container content view holds the MapContainerView, and tests can
+    // add sibling overlay views ABOVE it (the AppKit analogue of the SwiftUI
+    // joystick/chips overlays). Events are pumped through NSApp.sendEvent so
+    // the ACTUAL INSTALLED LOCAL MONITOR — not a direct classifier call — does
+    // the stamping.
+    private func hostedMap() -> (TMMapView, NSWindow, NSView) {
+        let container = NSView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let mapContainer = MapContainerView(frame: container.bounds)
+        let mapView = mapContainer.mapView
         mapView.showsZoomControls = true
         mapView.showsCompass = true
+        container.addSubview(mapContainer)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
-        window.contentView = mapView
-        window.contentView?.layoutSubtreeIfNeeded()
-        return (mapView, window)
+        window.contentView = container
+        container.layoutSubtreeIfNeeded()
+        return (mapView, window, container)
     }
 
     private func mouseEvent(_ type: NSEvent.EventType, at windowPoint: NSPoint,
@@ -244,10 +250,29 @@ struct MapCameraDirectorTests {
         )
     }
 
+    // Dispatch through the app so the installed local monitor observes it —
+    // the production event path, minus only the hardware.
+    private func pump(_ type: NSEvent.EventType, at windowPoint: NSPoint,
+                      in window: NSWindow, clicks: Int = 1) {
+        guard let event = mouseEvent(type, at: windowPoint, in: window, clicks: clicks) else {
+            Issue.record("could not synthesize \(type)")
+            return
+        }
+        NSApp.sendEvent(event)
+    }
+
+    // A full drag gesture over the given point, through the monitor.
+    private func pumpDrag(at point: NSPoint, in window: NSWindow) {
+        pump(.leftMouseDown, at: point, in: window)
+        pump(.leftMouseDragged, at: NSPoint(x: point.x + 12, y: point.y + 12), in: window)
+        pump(.leftMouseDragged, at: NSPoint(x: point.x + 24, y: point.y + 24), in: window)
+        pump(.leftMouseUp, at: NSPoint(x: point.x + 24, y: point.y + 24), in: window)
+    }
+
     private func dragMap(_ mapView: TMMapView) {
-        if let window = mapView.window,
-           let event = mouseEvent(.leftMouseDragged, at: NSPoint(x: 200, y: 200), in: window) {
-            mapView.classifyAndStampUserCameraInput(event)
+        if let window = mapView.window {
+            pumpDrag(at: NSPoint(x: 200, y: 200), in: window)
+            if mapView.userCameraInputSequence == 0 { mapView.noteUserCameraInput() }
         } else {
             mapView.noteUserCameraInput()
         }
@@ -377,7 +402,7 @@ struct MapCameraDirectorTests {
         _ comment: Comment,
         stamp: (TMMapView, NSWindow) -> Bool
     ) {
-        let (mapView, window) = hostedMap()
+        let (mapView, window, _) = hostedMap()
         defer { window.orderOut(nil) }
         let controller = MapSurfaceController()
         controller.attach(to: mapView)                 // controller owns mapView.delegate
@@ -453,32 +478,88 @@ struct MapCameraDirectorTests {
             }
             let center = CGPoint(x: control.bounds.midX, y: control.bounds.midY)
             let inWindow = control.convert(center, to: nil)
-            guard let event = mouseEvent(.leftMouseDown, at: inWindow, in: window) else { return false }
-            return mapView.classifyAndStampUserCameraInput(event)
+            let before = mapView.userCameraInputSequence
+            pump(.leftMouseDown, at: inWindow, in: window)
+            pump(.leftMouseUp, at: inWindow, in: window)
+            return mapView.userCameraInputSequence > before
         }
     }
 
     @Test("Double-click zoom during an outstanding Follow move disengages once; re-engage sticks")
     func doubleClickZoomDisengagesFollowExactlyOnce() {
         runClickZoomAcceptance("double-click zoom") { mapView, window in
-            guard let event = mouseEvent(.leftMouseDown, at: NSPoint(x: 200, y: 200),
-                                         in: window, clicks: 2) else { return false }
-            return mapView.classifyAndStampUserCameraInput(event)
+            let before = mapView.userCameraInputSequence
+            pump(.leftMouseDown, at: NSPoint(x: 200, y: 200), in: window, clicks: 2)
+            pump(.leftMouseUp, at: NSPoint(x: 200, y: 200), in: window, clicks: 2)
+            return mapView.userCameraInputSequence > before
         }
+    }
+
+    @Test("A genuine map drag through the monitor disengages once; re-engage sticks")
+    func genuineMapDragThroughMonitorDisengagesExactlyOnce() {
+        runClickZoomAcceptance("map drag") { mapView, window in
+            let before = mapView.userCameraInputSequence
+            pumpDrag(at: NSPoint(x: 150, y: 150), in: window)
+            return mapView.userCameraInputSequence > before
+        }
+    }
+
+    // Fifth review, High: a drag on a SIBLING OVERLAY above the full-bleed map
+    // (the virtual joystick's AppKit analogue) must not stamp the sequence or
+    // disengage Follow — the event's hit-tested ORIGIN, not its location over
+    // the map's bounds, decides attribution. Real events through the installed
+    // monitor; disengage path through the controller's delegate methods.
+    @Test("An overlay drag over the map neither stamps nor disengages Follow")
+    func overlayDragNeverStampsOrDisengagesFollow() {
+        let (mapView, window, container) = hostedMap()
+        defer { window.orderOut(nil) }
+
+        // A joystick-like sibling ABOVE the map, bottom-right, inside the
+        // map's visual bounds.
+        let overlay = NSView(frame: NSRect(x: 250, y: 20, width: 120, height: 120))
+        container.addSubview(overlay, positioned: .above, relativeTo: nil)
+
+        let controller = MapSurfaceController()
+        controller.attach(to: mapView)
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+        controller.cameraDirector = director
+        mapView.delegate = nil   // deterministic callback modeling (see above)
+
+        var mirror = false
+        var disengaged = 0
+        director.onFollowDisengaged = { mirror = false; disengaged += 1 }
+        controller.onFollowDisengagedByStream = { mirror = false }
+
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))   // token outstanding
+        mirror = true
+
+        // Drag the joystick (overlay) while the Follow move is in flight.
+        let before = mapView.userCameraInputSequence
+        pumpDrag(at: NSPoint(x: 310, y: 80), in: window)     // center of overlay
+        #expect(mapView.userCameraInputSequence == before,
+                "overlay drag stamped the map input sequence")
+
+        // The Follow move's own callbacks settle via the controller delegate.
+        controller.mapView(mapView, regionWillChangeAnimated: true)
+        controller.mapView(mapView, regionDidChangeAnimated: true)
+        #expect(director.isFollowing == true, "overlay drag disengaged Follow")
+        #expect(mirror == true && disengaged == 0)
+
+        // Joystick telemetry keeps recentering — still no false attribution.
+        director.followTarget(moved: coord(25.051, 121.551))
+        #expect(director.isFollowing == true && disengaged == 0)
     }
 
     @Test("A plain single canvas click never stamps (no false Follow disengage)")
     func plainCanvasClickDoesNotStamp() {
-        let (mapView, window) = hostedMap()
+        let (mapView, window, _) = hostedMap()
         defer { window.orderOut(nil) }
         // A point on the raw canvas, away from the corner-anchored controls.
-        guard let event = mouseEvent(.leftMouseDown, at: NSPoint(x: 200, y: 200), in: window) else {
-            Issue.record("could not synthesize event")
-            return
-        }
         let before = mapView.userCameraInputSequence
-        let stamped = mapView.classifyAndStampUserCameraInput(event)
-        #expect(stamped == false)
+        pump(.leftMouseDown, at: NSPoint(x: 200, y: 200), in: window)
+        pump(.leftMouseUp, at: NSPoint(x: 200, y: 200), in: window)
         #expect(mapView.userCameraInputSequence == before)
     }
 }

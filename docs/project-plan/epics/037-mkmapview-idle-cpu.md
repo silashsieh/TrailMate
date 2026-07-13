@@ -199,9 +199,12 @@ coordinator `MapSurfaceController` (MainActor) owns:
   figure. Flat elevation was A/B-measured in the same session and exonerated (noise-to-worse),
   so `.realistic` stays. Cap lives in `SimulationTiming.mapTelemetryInterval` and applies to PLAYBACK only —
   joystick/active motion keeps the 10 Hz active cadence (pre-migration hand-steering parity;
-  measured cost pending the final-head rerun) — and transitions (teleport/stop), mid-tick
+  final-head interaction sample: 5.8%) — and transitions (teleport/stop), mid-tick
   completion flips, and the trailing edge of motion bypass it. A/B figures were measured at the
-  pre-review-fix head; a final-head revalidation run is pending before ship.
+  pre-review-fix head (decision basis); the final-head revalidation (2026-07-13, RC2) passed
+  every band: idle+route 0.5%, playback Follow-off 7.4%, Follow-on 8.4%, joystick interaction
+  5.8% — and the terminal-publish fix was verified live (100× playback to completion → idle UI,
+  position at the exact route endpoint 25.0548, 121.6059).
 - **Esc does not exit draw mode — accepted (owner decision, 2026-07-12).** With the AppKit
   `MKMapView` as first responder, SwiftUI's `.onKeyPress(.escape)` never fires; the pencil
   button is the draw-mode exit. The owner explicitly declined an AppKit Esc-routing fix.

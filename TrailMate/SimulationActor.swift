@@ -42,7 +42,8 @@ nonisolated struct SimulationTiming: Sendable {
     // joystick/active motion publishes at activeSnapshotInterval (10 Hz,
     // pre-migration responsiveness parity), and state transitions plus the
     // trailing edge of motion publish unthrottled so terminal coordinates and
-    // playing→idle flips are never dropped.
+    // playing→idle flips are never dropped. Final-head revalidation (2026-07-13,
+    // review-fixed build, same protocol): playback 7.4% / 8.4% — bands met.
     let mapTelemetryInterval: Duration
 
     static let production = SimulationTiming(

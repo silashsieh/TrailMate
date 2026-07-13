@@ -218,13 +218,36 @@ struct MapCameraDirectorTests {
 
     // Synthesize a real left-drag and push it through the production TMMapView
     // input override (stamps the sequence, then forwards to super).
+    // Host a map in a real (never-shown) window so window/geometry scoping and
+    // MapKit's built-in control subviews are live, then push synthesized events
+    // through the production classifier (the local monitor's body).
+    private func hostedMap() -> (TMMapView, NSWindow) {
+        let mapView = TMMapView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        mapView.showsZoomControls = true
+        mapView.showsCompass = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 400),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        window.contentView = mapView
+        window.contentView?.layoutSubtreeIfNeeded()
+        return (mapView, window)
+    }
+
+    private func mouseEvent(_ type: NSEvent.EventType, at windowPoint: NSPoint,
+                            in window: NSWindow, clicks: Int = 1) -> NSEvent? {
+        NSEvent.mouseEvent(
+            with: type, location: windowPoint, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: clicks, pressure: 1
+        )
+    }
+
     private func dragMap(_ mapView: TMMapView) {
-        if let event = NSEvent.mouseEvent(
-            with: .leftMouseDragged, location: NSPoint(x: 200, y: 200),
-            modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
-        ) {
-            mapView.mouseDragged(with: event)
+        if let window = mapView.window,
+           let event = mouseEvent(.leftMouseDragged, at: NSPoint(x: 200, y: 200), in: window) {
+            mapView.classifyAndStampUserCameraInput(event)
         } else {
             mapView.noteUserCameraInput()
         }
@@ -340,5 +363,122 @@ struct MapCameraDirectorTests {
 
         director.regionDidChange(animated: true)             // spurious extra settle
         #expect(disengaged == 1, "attribution must be exactly once")
+    }
+
+    // MARK: - Click-driven zoom (fourth review, High)
+
+    // Wire director + controller like production (controller owns the delegate;
+    // MapArea's follow-button mirror listens to the director's callback) and
+    // run the reviewer's acceptance sequence for a click-driven zoom `kind`:
+    // engage → click-zoom while the engage animation is outstanding → the
+    // delegate callback disengages Follow + mirror exactly once → immediate
+    // re-engage stays engaged through its own callbacks.
+    private func runClickZoomAcceptance(
+        _ comment: Comment,
+        stamp: (TMMapView, NSWindow) -> Bool
+    ) {
+        let (mapView, window) = hostedMap()
+        defer { window.orderOut(nil) }
+        let controller = MapSurfaceController()
+        controller.attach(to: mapView)                 // controller owns mapView.delegate
+        let director = MapCameraDirector()
+        director.attach(to: mapView)
+        controller.cameraDirector = director
+        // Deterministic callback modeling: an in-window map fires delegate
+        // callbacks SYNCHRONOUSLY on setRegion, which would retire the engage
+        // token before the modeled zoom callbacks below and double-fire the
+        // sequence. Detach the live delegate and invoke the controller's
+        // delegate methods explicitly — the production forwarding chain
+        // (controller → director) is exactly what runs either way.
+        mapView.delegate = nil
+
+        var mirror = false
+        var disengaged = 0
+        director.onFollowDisengaged = { mirror = false; disengaged += 1 }
+        controller.onFollowDisengagedByStream = { mirror = false }
+
+        // Engage (mirrors ContentView's followButton) — animated recenter outstanding.
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.05, 121.55))
+        mirror = true
+
+        // The user zooms by CLICK while that move is in flight.
+        #expect(stamp(mapView, window), comment)
+
+        // MapKit's callbacks for the zoom arrive via the CONTROLLER's delegate.
+        controller.mapView(mapView, regionWillChangeAnimated: true)
+        #expect(director.isFollowing == false, comment)
+        #expect(mirror == false && disengaged == 1, comment)
+        controller.mapView(mapView, regionDidChangeAnimated: true)
+        #expect(disengaged == 1, comment)
+
+        // Immediate re-engage must survive its own programmatic callbacks.
+        director.setFollowing(true)
+        director.followTarget(moved: coord(25.06, 121.56))
+        mirror = true
+        controller.mapView(mapView, regionWillChangeAnimated: true)
+        controller.mapView(mapView, regionDidChangeAnimated: true)
+        #expect(director.isFollowing == true && mirror == true, comment)
+        #expect(disengaged == 1, comment)
+    }
+
+    @Test("Zoom-stepper click during an outstanding Follow move disengages once; re-engage sticks")
+    func zoomStepperClickDisengagesFollowExactlyOnce() {
+        runClickZoomAcceptance("zoom-stepper click") { mapView, window in
+            // Locate MapKit's real zoom control subview and click its center.
+            func findControl(_ view: NSView) -> NSView? {
+                for sub in view.subviews {
+                    let name = String(describing: type(of: sub)).lowercased()
+                    if sub is NSControl || name.contains("zoom") {
+                        return sub
+                    }
+                    if let found = findControl(sub) { return found }
+                }
+                return nil
+            }
+            // MapKit materializes its control subviews lazily; give the run
+            // loop a few turns before searching.
+            var control = findControl(mapView)
+            var spins = 0
+            while control == nil, spins < 10 {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                mapView.layoutSubtreeIfNeeded()
+                control = findControl(mapView)
+                spins += 1
+            }
+            guard let control, control.frame.width > 0 else {
+                let tree = mapView.subviews.map { String(describing: type(of: $0)) }
+                Issue.record("MapKit zoom control subview not found; top-level subviews: \(tree)")
+                return false
+            }
+            let center = CGPoint(x: control.bounds.midX, y: control.bounds.midY)
+            let inWindow = control.convert(center, to: nil)
+            guard let event = mouseEvent(.leftMouseDown, at: inWindow, in: window) else { return false }
+            return mapView.classifyAndStampUserCameraInput(event)
+        }
+    }
+
+    @Test("Double-click zoom during an outstanding Follow move disengages once; re-engage sticks")
+    func doubleClickZoomDisengagesFollowExactlyOnce() {
+        runClickZoomAcceptance("double-click zoom") { mapView, window in
+            guard let event = mouseEvent(.leftMouseDown, at: NSPoint(x: 200, y: 200),
+                                         in: window, clicks: 2) else { return false }
+            return mapView.classifyAndStampUserCameraInput(event)
+        }
+    }
+
+    @Test("A plain single canvas click never stamps (no false Follow disengage)")
+    func plainCanvasClickDoesNotStamp() {
+        let (mapView, window) = hostedMap()
+        defer { window.orderOut(nil) }
+        // A point on the raw canvas, away from the corner-anchored controls.
+        guard let event = mouseEvent(.leftMouseDown, at: NSPoint(x: 200, y: 200), in: window) else {
+            Issue.record("could not synthesize event")
+            return
+        }
+        let before = mapView.userCameraInputSequence
+        let stamped = mapView.classifyAndStampUserCameraInput(event)
+        #expect(stamped == false)
+        #expect(mapView.userCameraInputSequence == before)
     }
 }

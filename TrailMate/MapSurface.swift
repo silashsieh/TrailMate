@@ -158,11 +158,85 @@ final class TMMapView: MKMapView {
         userCameraInputSequence &+= 1
     }
 
-    override func scrollWheel(with event: NSEvent) { noteUserCameraInput(); super.scrollWheel(with: event) }
-    override func magnify(with event: NSEvent) { noteUserCameraInput(); super.magnify(with: event) }
-    override func rotate(with event: NSEvent) { noteUserCameraInput(); super.rotate(with: event) }
-    override func smartMagnify(with event: NSEvent) { noteUserCameraInput(); super.smartMagnify(with: event) }
-    override func mouseDragged(with event: NSEvent) { noteUserCameraInput(); super.mouseDragged(with: event) }
+    // Events are observed with a LOCAL MONITOR, not responder overrides: the
+    // built-in zoom stepper and compass are MapKit SUBVIEWS, so their clicks
+    // hit-test to those subviews and never reach this view's responder methods
+    // — a click-driven zoom would otherwise stay untracked and be swallowed
+    // while a Follow move is outstanding (PR #69 review, High). The monitor
+    // observes and never consumes; scoping is geometric: this map's window,
+    // inside this map's bounds.
+    private var inputMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let inputMonitor { NSEvent.removeMonitor(inputMonitor); self.inputMonitor = nil }
+        guard window != nil else { return }
+        inputMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.scrollWheel, .magnify, .rotate, .smartMagnify,
+                       .leftMouseDown, .leftMouseDragged, .otherMouseDragged]
+        ) { [weak self] event in
+            self?.classifyAndStampUserCameraInput(event)
+            return event
+        }
+    }
+
+    // No deinit teardown: leaving a window triggers viewDidMoveToWindow(nil),
+    // which removes the monitor; and the monitor holds self weakly, so even a
+    // torn-down view leaves only an inert observer (a view can't deallocate
+    // while still installed in a window). A nonisolated deinit can't touch
+    // MainActor state under strict concurrency anyway.
+
+    // The monitor's body, callable directly by tests (the classification and
+    // geometry below are the production path; only the event-loop pump is
+    // bypassed). Returns whether the event stamped the sequence.
+    @discardableResult
+    func classifyAndStampUserCameraInput(_ event: NSEvent) -> Bool {
+        guard event.window === window, window != nil else { return false }
+        let local = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(local) else { return false }
+
+        switch event.type {
+        case .scrollWheel, .magnify, .rotate, .smartMagnify,
+             .leftMouseDragged, .otherMouseDragged:
+            noteUserCameraInput()
+            return true
+        case .leftMouseDown:
+            // Clicks are camera input only when they drive the camera: a
+            // double-click (zoom in / shift-zoom out) anywhere on the canvas,
+            // or a click landing on one of MapKit's own control subviews (zoom
+            // stepper, compass). A plain single click on the canvas — e.g.
+            // selecting the dot or a marker — must NOT stamp, or it would
+            // falsely disengage Follow at the next settle.
+            if event.clickCount >= 2 {
+                noteUserCameraInput()
+                return true
+            }
+            if let superview,
+               let hit = hitTest(superview.convert(event.locationInWindow, from: nil)),
+               hit !== self, hit.isDescendant(of: self), isMapControl(hit) {
+                noteUserCameraInput()
+                return true
+            }
+            return false
+        default:
+            return false
+        }
+    }
+
+    // MapKit's built-in camera widgets: the zoom stepper is an NSControl; the
+    // compass (and any pitch control) is matched by class name as a fallback.
+    private func isMapControl(_ view: NSView) -> Bool {
+        var v: NSView? = view
+        while let current = v, current !== self {
+            if current is NSControl { return true }
+            let name = String(describing: type(of: current)).lowercased()
+            if name.contains("zoom") || name.contains("compass") || name.contains("pitch") {
+                return true
+            }
+            v = current.superview
+        }
+        return false
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         guard event.modifierFlags.contains(.control),

@@ -38,15 +38,21 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v2.3.0 — AI/CLI surface & docs polish:**
+- **v2.4.0 — Map-surface re-architecture (idle CPU):**
+  [041 — Telemetry plane: frequency-partitioned simulation state](epics/041-telemetry-plane.md),
+  [037 — Map-surface re-architecture: MKMapView on the telemetry plane for idle CPU](epics/037-mkmapview-idle-cpu.md)
+  (build plan: [v2.4.0-design](v2.4.0-design.md); measurements: [v2.4.0-baseline](v2.4.0-baseline.md)).
+  Both were built and validated on `feat/037-integration` in July 2026; that PR (#69) closed
+  unmerged, so the work is re-scheduled here — see each epic's Decisions section.
+- **v2.3.0 — AI/CLI surface, test refresh & docs polish:**
   [023 — `trailmate` CLI + stdio MCP shim](epics/023-cli-mcp-shim.md),
-  [014 — README screenshots & GIF demo](epics/014-readme-screenshots.md).
-- **v2.2.0 — Coverage routing, CPU/perf, auto-update, reorder fix & test refresh:**
-  [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md),
   [033 — Refresh test & UI coverage for features shipped since v2.0.0](epics/033-refresh-test-coverage.md),
-  [037 — Migrate MapArea to MKMapView for idle CPU](epics/037-mkmapview-idle-cpu.md),
-  [038 — In-app auto-update (Sparkle)](epics/038-in-app-auto-update.md),
-  [039 — Fix saved-items drag-reorder](epics/039-fix-saved-items-reorder.md).
+  [039 — Fix saved-items drag-reorder](epics/039-fix-saved-items-reorder.md),
+  [040 — Isolate recording per session (fix shared-recorder mixed traces)](epics/040-per-session-recording.md),
+  [014 — README screenshots & GIF demo](epics/014-readme-screenshots.md).
+- **v2.2.0 — Area serpentine and auto-update:**
+  [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md),
+  [038 — In-app auto-update (Sparkle)](epics/038-in-app-auto-update.md).
   CPU-profiling wins already landed this cycle:
   [034 — Eliminate idle & playback CPU spikes](epics/034-cpu-idle-playback-spikes.md),
   [035 — Cap simulation-loop CPU during motion](epics/035-throttle-simulation-loop.md)

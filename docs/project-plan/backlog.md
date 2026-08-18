@@ -16,7 +16,14 @@ SORT status ASC, id ASC
 
 ## Static snapshot (for the GitHub reader)
 
-- **Ideas (carried over from [phases.md](phases.md) Phase 5):**
-  [014 — README screenshots & GIF](epics/014-readme-screenshots.md).
-- **Accepted, unscheduled:**
-  [023 — trailmate CLI + stdio MCP shim](epics/023-cli-mcp-shim.md) (AI-integration follow-up; issue #54).
+- **Accepted, unscheduled** — triaged 2026-08-18 from the 2026-08-07 inbox, deliberately left
+  without a milestone:
+  [042 — Survive a closed daemon pipe (SIGPIPE kills the whole app)](epics/042-survive-closed-daemon-pipe.md) (#75, bug),
+  [043 — Auto-reconnect after an abnormal disconnect](epics/043-auto-reconnect.md) (#72 — asks to
+  reverse the deliberate "the user clicks Connect" design; gated on that call),
+  [044 — macOS system notifications](epics/044-system-notifications.md) (#71),
+  [045 — "Keeping Mac awake" indicator while connected](epics/045-keep-awake-indicator.md) (#73),
+  [046 — Pin the sidebar Devices section while scrolling](epics/046-pin-sidebar-devices-section.md) (#70).
+- **Open inbox items with no epic yet:** #41 (share saved locations & routes — parked pending a
+  [scope.md](scope.md) decision on file-export vs cloud sync), #74 (extend the wake assertion to
+  offline simulation + a toggle).

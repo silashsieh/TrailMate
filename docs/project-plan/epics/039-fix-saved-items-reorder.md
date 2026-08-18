@@ -3,7 +3,7 @@ type: epic
 id: 039
 title: Fix saved-items drag-reorder (flicker + snap-back)
 status: open
-milestone: v2.2.0
+milestone: v2.3.0
 issue: 68
 opened: 2026-06-24
 shipped:

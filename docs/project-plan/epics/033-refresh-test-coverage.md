@@ -3,7 +3,7 @@ type: epic
 id: 033
 title: Refresh test & UI coverage for everything shipped since v2.0.0
 status: open
-milestone: v2.2.0
+milestone: v2.3.0
 issue:
 opened: 2026-06-21
 shipped:

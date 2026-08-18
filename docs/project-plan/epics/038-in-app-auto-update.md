@@ -104,6 +104,10 @@ signs the archive and publishes the appcast.
 
 ## Decisions made along the way
 
+- **Moved up into v2.2.0 (2026-08-18, owner's call).** Was v2.3.0; pairs with
+  [[030-area-coverage-routing]] to make the release "Area serpentine and auto-update", while
+  the map-surface work ([[037-mkmapview-idle-cpu]] / [[041-telemetry-plane]]) moves out to
+  v2.4.0. Shipping the updater earlier also means later releases can reach installed copies.
 - **EdDSA over Developer ID for update trust.** No paid account, so Apple-signature continuity isn't
   available; ed25519 on the archive is the verification path and needs no Apple enrollment.
 - **Accept that first-run Gatekeeper is unchanged.** Self-update is justified by smooth *subsequent*

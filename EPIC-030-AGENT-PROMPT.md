@@ -13,13 +13,20 @@ the user reports that you are finished.
 
 ## Objective
 
-Complete `docs/project-plan/epics/030-area-coverage-routing.md`: let the user select a rectangular
-area on the map and generate a continuous geometric boustrophedon/serpentine (“mow the lawn”)
-route within it. The path must be dense, deterministic, non-repeating, configurable by lane spacing,
-and usable by the existing playback, recording, save, and GPX-export flows.
+Complete `docs/project-plan/epics/030-area-coverage-routing.md` by extending the existing **Wander
+Nearby** window with two peer route-generation modes:
 
-This is geometric direct movement like **Go directly** and hand-drawn routes. Do not use
-`MKDirections`, do not snap to roads, and do not rewrite the routing engine or daemon protocol.
+1. **Random** — preserve the existing random, road-routed wander behavior.
+2. **Sweeping** — generate a continuous geometric boustrophedon/serpentine (“mow the lawn”)
+   route inside a square centered on the same selected map point.
+
+Both modes share the selected map point and radius. The sweeping square's side length is exactly
+`2 × radius`. Its path must be dense, deterministic, non-repeating, configurable by scan-line/lane
+spacing, and usable by the existing playback, recording, save, and GPX-export flows.
+
+Sweeping is geometric direct movement like **Go directly** and hand-drawn routes. Do not use
+`MKDirections` or snap Sweeping to roads. Preserve Random mode's current `MKDirections` behavior,
+and do not rewrite the routing engine or daemon protocol.
 
 ## Read before editing
 
@@ -32,12 +39,12 @@ rules. Read these current sources before choosing the implementation:
 - `docs/technical/architecture.md`
 - `docs/technical/decisions.md`
 - `docs/project-plan/testing.md`
-- `TrailMate/ContentView.swift` (`MapArea`, draw mode, destination actions, Wander sheet)
-- `TrailMate/StrokeGeometry.swift`
+- `TrailMate/ContentView.swift` (`WanderSheet`, destination actions, playback controls)
+- `TrailMate/WanderPresetPersistence.swift`
 - `TrailMate/WanderRouteBuilder.swift`
 - `TrailMate/DeviceSession.swift` (`wanderNearby`, `loadDrawnRoute`)
 - `TrailMate/AppState.swift` (route handoff and selected-session forwarding)
-- `TrailMateTests/StrokeGeometryTests.swift`
+- the current route/geometry tests under `TrailMateTests/`
 
 Build against current `main`, which still uses SwiftUI `Map` + `MapReader`. Epic 037’s unmerged
 `MKMapView` work is future architecture and is not a dependency. Keep pure geometry and UI state
@@ -45,58 +52,82 @@ separated enough that a later map-surface migration will not require rewriting t
 
 ## Product scope and expected interaction
 
-- Ship rectangle selection first. Polygon selection is explicitly future work.
-- Add a clear, macOS-native area-selection control near the existing Follow/Draw controls.
-- Selection mode must arbitrate gestures deliberately: while selecting, dragging defines the box
-  instead of panning the map; Escape cancels and restores normal map interaction.
-- Show a world-anchored rectangle preview while selecting. Reject click-sized/degenerate areas with
-  an understandable log or inline message rather than producing invalid coordinates.
-- After a valid selection, let the user choose/configure lane spacing in metres. Choose a sensible
-  small preset set and default, document the rationale in the epic, and persist the last selection
-  if that matches the existing Wander preference pattern.
-- Generate the route only after an explicit confirmation. Loading it should behave like a
-  hand-drawn route: update the selected session’s `routeCoordinates`, load it into the simulation
-  pipeline, and leave playback under the existing Play controls rather than auto-playing from
-  mouse-up.
-- Preserve all current map interactions and controls outside selection mode, including long-press,
-  right-click, Draw, Follow, joystick, multi-session overlays, and saved-route behavior.
+- Keep a single **Wander Nearby** sheet. Add a clear macOS-native mode selector inside it with
+  **Random** and **Sweeping** at the same hierarchy level; do not add a separate area-selection
+  window, map-drawing workflow, or standalone sweeping control.
+- Both modes use `appState.pendingWanderCenter`, i.e. the selected map point from which the user
+  invoked **Wander nearby…**. Do not replace it with the selected session's current simulated
+  red-dot coordinate.
+- Keep the radius control shared between both modes.
+  - In Random mode it retains the existing circular-wander meaning and current behavior.
+  - In Sweeping mode it defines a square centered on the selected map point, with side length
+    exactly `radius × 2` (radius is the center-to-edge half-side, not a corner distance).
+- Random mode must preserve the current duration presets/custom duration, distance preview, random
+  `WanderRouteBuilder`, road routing, and auto-play behavior. Its generated route begins at the
+  selected map point exactly as it does today.
+- Sweeping mode must hide/omit the user-editable duration control. Instead, expose a scan-line
+  spacing control in metres, defaulting to **70 m**, validate it as a finite positive value, and
+  persist the last valid selection using the existing Wander preference pattern.
+- While Sweeping is selected, show the route's estimated distance and time in the same sheet before
+  Start. Compute the estimate from the generated geometric route length and
+  `appState.effectiveBaseSpeedMPS`; duration is `length ÷ speed`. Do not ask the user for a duration.
+  Treat teleporting from the selected center to the first boundary point as instantaneous and do
+  not include that jump in route distance or estimated time.
+- Both modes use the sheet's existing explicit **Start** action and then auto-play through the
+  selected session, consistent with current Wander Nearby behavior.
+- A Sweeping route may—and should—start at a deterministic point on the square boundary. Loading it
+  with reset-start semantics must immediately move/teleport the simulated location from the
+  selected center to that first edge point before playback follows the sweep.
+- Preserve all current map interactions and controls, including long-press, right-click, Draw,
+  Follow, joystick, multi-session overlays, and saved-route behavior.
 - All new user-facing strings must be added to `TrailMate/Localizable.xcstrings` with English and
   Traditional Chinese coverage consistent with the project.
 
 ## Geometry requirements
 
 Create a focused pure helper (for example `CoverageRouteBuilder`) rather than embedding coordinate
-math in `ContentView.swift`.
+math in `ContentView.swift` or altering the random `WanderRouteBuilder`.
 
-- Accept the rectangle bounds and lane spacing in metres.
+- Accept the selected center, radius/half-side in metres, and lane spacing in metres.
+- Construct a north-up square centered on the selected map point with side length exactly
+  `2 × radius`. Polygon/rectangle drawing and arbitrary bounds are out of scope.
 - Work in a local metre-based projection and convert back to coordinates; do not treat longitude
   degrees as constant metres. Follow the known-reference testing rule in `CLAUDE.md`.
-- Keep every generated point inside/on the selected bounds (within a small floating-point
+- Keep every generated point inside/on the square bounds (within a small floating-point
   tolerance).
 - Traverse alternating lane endpoints so consecutive lanes reverse direction and no lane segment
   is repeated.
-- Prefer a sweep parallel to the rectangle’s longer physical dimension to reduce turns, unless a
-  simpler deterministic orientation has a stronger documented reason.
-- Produce at least a useful centre/edge sweep for an area narrower than the selected spacing.
-- Validate non-finite coordinates, inverted/degenerate bounds, non-positive spacing, and practical
-  route-size limits. Surface failures without crashing or silently swallowing them.
+- Use a deterministic sweep orientation and deterministic boundary start point so identical inputs
+  produce identical coordinates. The first route coordinate must lie on the square edge.
+- Produce at least a useful edge-to-edge sweep when the square is narrower than the selected
+  spacing.
+- Calculate route length from the emitted coordinates so the sheet can derive its live time
+  estimate from the effective base speed.
+- Validate non-finite center/radius/spacing, non-positive radius/spacing, zero/non-finite speed for
+  estimates, and practical route-size limits. Surface failures without crashing or silently
+  swallowing them.
 - No road routing, optimal coverage solver, polygon clipping, cloud service, or daemon changes.
 
 ## Integration and tests
 
-- Reuse or cleanly generalize the `loadDrawnRoute` handoff instead of duplicating the playback
-  pipeline. Keep selected-session routing correct under multi-device use.
+- Add a clean selected-session handoff for sweeping alongside `wanderNearby`; reuse the established
+  route-loading/playback pipeline instead of duplicating it. Keep selected-session routing correct
+  under multi-device use and preserve Random mode behavior.
 - Add Swift Testing unit coverage for the pure builder, including:
   - expected alternating serpentine order;
-  - containment inside the rectangle;
+  - a square centered on the selected point with side length exactly `2 × radius`;
+  - containment inside the square and a first point on its edge;
   - lane spacing in metres against a known CoreLocation reference;
-  - portrait and landscape rectangles / orientation choice;
-  - narrow rectangle and invalid-input edge cases;
+  - deterministic output and sweep orientation;
+  - narrow-square and invalid-input edge cases;
   - a guard against duplicate consecutive points or repeated lane segments;
-  - a practical point-count cap for very large/dense requests.
-- Add targeted UI/state coverage only where deterministic and proportionate. At minimum, ensure the
-  existing test suites compile and document a manual smoke check for gesture selection and route
-  playback/export.
+  - a practical point-count cap for very large/dense requests;
+  - route-length and `length ÷ speed` estimate accuracy.
+- Add targeted UI/state coverage for mode-specific controls where deterministic and proportionate:
+  Random shows duration and preserves its existing preview; Sweeping shows 70 m default spacing,
+  hides duration, and shows derived distance/time. At minimum, ensure the existing test suites
+  compile and document a manual smoke check for both modes, center/edge start behavior, playback,
+  save, record, and export.
 - Update `docs/technical/features.md`, `docs/project-plan/testing.md`, and Epic 030’s decisions,
   checked stories, acceptance criteria, status, and discovered follow-ups so documentation describes
   the implemented behavior. Do not hand-edit generated roadmap/backlog views.
@@ -135,4 +166,3 @@ cannot be established safely. Report exactly what was and was not run.
   PR diff contains only product, test, and project-documentation changes.
 - Do not push or merge. Leave the branch and worktree in a clean, committed state and give the user
   a concise summary of implementation, validation, and any remaining risks.
-

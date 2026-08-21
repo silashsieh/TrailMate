@@ -12,6 +12,8 @@ enum WanderPresetPersistence {
     private static let durationIsCustomKey = "WanderPresets.durationIsCustom"
     private static let durationSecondsKey = "WanderPresets.durationSeconds"
     private static let customDurationMinutesKey = "WanderPresets.customDurationMinutes"
+    private static let modeKey = "WanderPresets.mode"
+    private static let laneSpacingMetersKey = "WanderPresets.laneSpacingMeters"
 
     // First-run defaults: the middle preset on both axes (owner decision,
     // epic 018). Custom-field fallbacks continue past the largest preset,
@@ -20,6 +22,9 @@ enum WanderPresetPersistence {
     static let defaultDurationSeconds: TimeInterval = 60 * 60
     static let defaultCustomRadiusMeters: Double = 1000
     static let defaultCustomDurationMinutes: Double = 180
+    // Lane spacing default (owner decision, epic 030): tight enough that a
+    // sweep of a city block reads as coverage rather than a few passes.
+    static let defaultLaneSpacingMeters: Double = 70
 
     static var radiusIsCustom: Bool {
         get { UserDefaults.standard.bool(forKey: radiusIsCustomKey) }
@@ -49,5 +54,18 @@ enum WanderPresetPersistence {
     static var customDurationMinutes: Double {
         get { UserDefaults.standard.object(forKey: customDurationMinutesKey) as? Double ?? defaultCustomDurationMinutes }
         set { UserDefaults.standard.set(newValue, forKey: customDurationMinutesKey) }
+    }
+
+    // Mode and lane spacing persist on the same terms as radius and duration:
+    // written on every change so quitting with the sheet open still reopens it
+    // the way it was left.
+    static var mode: WanderMode {
+        get { WanderMode(persisted: UserDefaults.standard.string(forKey: modeKey)) }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: modeKey) }
+    }
+
+    static var laneSpacingMeters: Double {
+        get { UserDefaults.standard.object(forKey: laneSpacingMetersKey) as? Double ?? defaultLaneSpacingMeters }
+        set { UserDefaults.standard.set(newValue, forKey: laneSpacingMetersKey) }
     }
 }

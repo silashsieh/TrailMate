@@ -54,12 +54,14 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 | `CoordinateFormatTests` | Direct location entry (epic 027): decimal-degrees `lat, lon` parsing (whitespace/signs accepted, out-of-range and garbage rejected) and the paste-able clipboard formatting round-trip. |
 | `SavedItemsLibraryTests` | Saved-items library (epic 029): `LibraryOrder` drag-reorder/sort + category-assignment persistence, and `MapRegionMath` auto-pan framing for a selected saved location/route. Pure, nonisolated helpers. |
 | `TunnelBrokerReclaimTests` | Stale-tunneld reclaim loop (epic 031) via an injected probe/shutdown: skips when nothing's listening, reclaims then confirms the port frees, and reports failure when a tunneld won't die. No networking. |
+| `CoverageRouteBuilderTests` | Sweeping-mode serpentine geometry (epic 030): alternating lane order, a square centered on the selected point with side exactly `2 × radius`, containment plus a first point on the west edge, 70 m lane spacing against a CoreLocation reference, byte-identical output for identical inputs, the narrow-square single-lane case, invalid-input and point-cap failures, and `length ÷ speed` estimates. Distances are checked with `CLLocation.distance`, not the builder's own projection, so the suite is an independent oracle. Also covers `WanderMode(persisted:)`'s fallback to Random. Pure, nonisolated helper — no router, no map. |
+| `SweepAreaHandoffTests` | The other half of epic 030, in the same file: `AppState.sweepArea` reaches the selected session's `routeCoordinates`, and reset-start leaves the marker on the square's first edge point rather than the selected center (asserted as "within a tick of the edge point, ~a half-side away from the center"). An invalid sweep leaves the loaded route untouched and logs the failure. Device-free — the sweep drives the local red dot like any other route source. |
 
 ## UI Tests (implemented)
 
 `TrailMateUITests` is a smoke suite. Launch shows the main window with the Connection
 section and (untouched against a real device — it raises an admin dialog) Connect button.
-Coverage, current as of v2.1.0:
+Coverage:
 
 - **Sidebar log (epic 025).** The Log section exists; forced open via `--uitest-expand-log`
   it shows the View Full Log button. A separate test drives the real disclosure (the
@@ -84,6 +86,14 @@ Coverage, current as of v2.1.0:
   controls, and ⌘W closes it; settings persistence is real — the restore-on-launch toggle is
   flipped, the app fully relaunched, the value asserted, then flipped back; the language
   picker and Wander presets get the same relaunch round-trip.
+- **Wander modes (epic 030).** Opened via `--uitest-open-wander`: Random (the factory
+  default) shows the duration presets and no spacing field; selecting Sweeping hides duration,
+  reveals lane spacing at its 70 m default, keeps the shared radius, and leaves Start enabled
+  — which is itself the assertion that the geometry built, since Sweeping only enables Start
+  on a successful build. A typed spacing plus the mode survive a full relaunch, and the test
+  parks the sheet back on Random / 70 m. The segmented mode picker exposes its segments as
+  `radioButtons` (`sheet.radioButtons["Sweeping"]`); the sweep math itself is
+  `CoverageRouteBuilderTests`, not here.
 
 Every test leaves user preferences as it found them (UI tests run against the real
 `com.sh.TrailMate` defaults). Deliberately device-free and data-free otherwise, so the suite
@@ -103,7 +113,8 @@ passes identically on a clean CI user and a dev Mac.
 - `--uitest-open-wander` opens the Wander sheet at launch with a synthetic center, so the
   preset-persistence test (epic 018's contract — selection saved on every change, not just
   Start) can verify a full relaunch round-trip without driving the map long-press, which
-  trips XCUITest's alert-interruption handling on CI.
+  trips XCUITest's alert-interruption handling on CI. The epic 030 mode test reuses it — the
+  mode is persisted on the same terms, so it needs the same round-trip.
 - `--uitest-expand-log` forces the sidebar Log disclosure open at launch. Epic 025 made the
   log collapsed by default and persists the choice, so "View Full Log" only renders when
   expanded; the hook makes it deterministically present without mutating the persisted
@@ -150,6 +161,7 @@ Items the automated suites can't cover (UI-fragile or device-bound), so verify h
 1. Place search → Go (epic 027): type a place name, pick a result; the red dot teleports there and the map pans to frame it (needs live MapKit local search).
 1. Saved-items library (epic 029): drag to reorder a saved location and a saved route; assign each to a category via the row context menu; relaunch and confirm both order and category stick. Selecting a saved item auto-pans the map to frame it. (Reorder/auto-pan *math* is unit-tested in `SavedItemsLibraryTests`; the drag/context-menu UI is checked here.)
 1. Map-control overlap (epic 024): with the joystick active mid-route, confirm the map controls and off-route indicator don't occlude each other (layout/occlusion, asserted visually).
+1. Sweeping coverage (epic 030): right-click the map → **Wander nearby…** → **Sweeping**, 500 m at 70 m spacing; confirm the sheet's square-side/lane caption and distance-time estimate, press Start, and watch the marker jump to the west edge of the southernmost lane and then mow the square lane by lane. Then scrub, loop, Record, **Save Route…**, **Export GPX** on the same route, and switch back to **Random** to confirm its duration presets, road-routed output and auto-play are untouched. (Geometry is unit-tested in `CoverageRouteBuilderTests`; what's checked here is the on-device teleport-then-sweep and the shared route surfaces.)
 
 ## Implementation order for the remaining suites (suggested)
 

@@ -165,6 +165,16 @@
         }
       }
     },
+    "Can't sweep this area": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法在此區域產生掃描路線"
+          }
+        }
+      }
+    },
     "Cancel": {
       "localizations": {
         "zh-Hant": {
@@ -565,6 +575,16 @@
         }
       }
     },
+    "Lane spacing": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "掃描線間距"
+          }
+        }
+      }
+    },
     "Language": {
       "localizations": {
         "zh-Hant": {
@@ -637,6 +657,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "循環 %lld / %@"
+          }
+        }
+      }
+    },
+    "Mode": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模式"
           }
         }
       }
@@ -807,6 +837,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "半徑"
+          }
+        }
+      }
+    },
+    "Random": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隨機"
           }
         }
       }
@@ -1107,6 +1147,22 @@
         }
       }
     },
+    "Square side %.0f m · %d lanes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Square side %1$.0f m · %2$d lanes"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正方形邊長 %.0f 公尺，共 %d 條掃描線"
+          }
+        }
+      }
+    },
     "Start": {
       "localizations": {
         "zh-Hant": {
@@ -1167,6 +1223,16 @@
         }
       }
     },
+    "Sweeping": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "掃描"
+          }
+        }
+      }
+    },
     "System Default": {
       "localizations": {
         "zh-Hant": {
@@ -1203,6 +1269,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "終點"
+          }
+        }
+      }
+    },
+    "Too many lanes — increase the spacing": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "掃描線過多，請加大間距"
           }
         }
       }
@@ -1345,6 +1421,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "≈ %.1f 公里，%@（%.0f 公里/小時）"
+          }
+        }
+      }
+    },
+    "≈ %.1f km, ~%.0f min at %@ (%.0f km/h)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "≈ %1$.1f km, ~%2$.0f min at %3$@ (%4$.0f km/h)"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "≈ %.1f 公里、約 %.0f 分鐘，%@（%.0f 公里/小時）"
           }
         }
       }

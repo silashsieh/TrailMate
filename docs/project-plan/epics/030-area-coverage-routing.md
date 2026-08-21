@@ -105,10 +105,6 @@ configurable lane spacing, loadable like any other route (play, record, export).
 
 ## Acceptance criteria
 
-- [ ] Selecting an area produces a non-repeating coverage path that visibly sweeps it.
-- [ ] The path plays back and exports like a normal route.
-
-> Both ACs need the on-device smoke check (see the epic 030 item in [[testing]]) and get ticked
-> in a follow-up commit with the verification date, as in [[006-follow-current-position]]. The
-> geometry's unit coverage is green (`CoverageRouteBuilderTests`) and the mode-swap UI test
-> passes, but neither can see the marker sweep a real device.
+- [x] Selecting an area produces a non-repeating coverage path that visibly sweeps it
+      (verified 2026-08-21)
+- [x] The path plays back and exports like a normal route (verified 2026-08-21)

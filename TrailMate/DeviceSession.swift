@@ -476,6 +476,38 @@ final class DeviceSession: Identifiable {
         isCalculatingRoute = false
     }
 
+    // Geometric serpentine sweep of a square centered on the selected map point
+    // (Sweeping mode). Direct movement like travelDirectly — no MKDirections,
+    // nothing snaps to roads — so generation is instant and there's no routing
+    // spinner to raise. resetStart does the rest: it teleports the marker from
+    // the selected center out to the route's first edge point, and that jump is
+    // deliberately outside the route, so it costs no distance or time.
+    func sweepArea(center: CLLocationCoordinate2D, halfSideMeters: Double, laneSpacingMeters: Double) async {
+        let options = CoverageRouteBuilder.Options(
+            center: center,
+            halfSideMeters: halfSideMeters,
+            laneSpacingMeters: laneSpacingMeters
+        )
+
+        do {
+            let result = try CoverageRouteBuilder.build(options: options)
+            routeCoordinates = result.coordinates
+            let speed = manager.effectiveBaseSpeedMPS
+            await sim.loadRoute(coordinates: result.coordinates, baseSpeed: speed, resetStart: true)
+
+            let estMin = (CoverageRouteBuilder.estimatedSeconds(
+                distanceMeters: result.distanceMeters, speedMPS: speed
+            ) ?? 0) / 60
+            manager.addLog(String(
+                format: "Sweep route: %.1f km, %d lanes at %.0f m, ~%.0f min (%@)",
+                result.distanceMeters / 1000, result.laneCount, laneSpacingMeters, estMin, manager.transportLabel
+            ))
+            await sim.play(multiplier: manager.speedMultiplier)
+        } catch {
+            manager.addLog("Sweep failed: \(error.localizedDescription)")
+        }
+    }
+
     // Hand-drawn route from the map's draw mode. The stroke arrives already
     // smoothed and resampled by the view layer (StrokeGeometry guarantees no
     // degenerate segments); this is just the hand-off into the same playback

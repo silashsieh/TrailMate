@@ -19,4 +19,18 @@ enum RouteMath {
         }
         return a + b
     }
+
+    // Geodesic length of a polyline, in meters. CLLocation.distance per segment
+    // for the same reason joinSegments compares in meters — and because a
+    // geometric route's length is what the sheet's time estimate divides by the
+    // base speed (decision D6: geodesic for whole-route totals, flat per tick).
+    nonisolated static func totalLengthMeters(_ coordinates: [CLLocationCoordinate2D]) -> Double {
+        guard coordinates.count >= 2 else { return 0 }
+        var total = 0.0
+        for i in 1..<coordinates.count {
+            total += CLLocation(latitude: coordinates[i - 1].latitude, longitude: coordinates[i - 1].longitude)
+                .distance(from: CLLocation(latitude: coordinates[i].latitude, longitude: coordinates[i].longitude))
+        }
+        return total
+    }
 }

@@ -495,6 +495,11 @@ final class AppState {
     func wanderNearby(center: CLLocationCoordinate2D, radius: Double, duration: TimeInterval) async {
         await selectedSession.wanderNearby(center: center, radius: radius, duration: duration)
     }
+    func sweepArea(center: CLLocationCoordinate2D, halfSideMeters: Double, laneSpacingMeters: Double) async {
+        await selectedSession.sweepArea(
+            center: center, halfSideMeters: halfSideMeters, laneSpacingMeters: laneSpacingMeters
+        )
+    }
     func loadDrawnRoute(_ coords: [CLLocationCoordinate2D]) async { await selectedSession.loadDrawnRoute(coords) }
     func startPlayback() { selectedSession.startPlayback() }
     func pausePlayback() { selectedSession.pausePlayback() }

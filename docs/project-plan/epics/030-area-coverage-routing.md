@@ -95,10 +95,13 @@ configurable lane spacing, loadable like any other route (play, record, export).
 - **Six inline polyline-length loops remain** (`DeviceSession.loadDrawnRoute`,
   `StrokeGeometry.resampleUniform`, `WanderRouteBuilder.trimTail`, …) that could now adopt
   `RouteMath.totalLengthMeters`.
-- **Parallel `xcodebuild test` on the app-hosted target flaked twice** during this work, failing a
-  different pure-math test each time while the same tests passed in isolation and serially
-  (`-parallel-testing-enabled NO`: 130/130). Two subsequent parallel runs were clean. Likely
-  contention between the parallel app instances, not a test defect — worth watching in CI.
+- **`CLLocation.distance(from:)` is not bit-reproducible across calls.** Two builds from identical
+  inputs produced identical coordinates but lengths of 11217.7617 m and 11217.6318 m (~1e-5
+  relative) — found because the first determinism test asserted exact equality on the measured
+  total. The geometry is deterministic; the metre total derived from it is only stable to
+  CoreLocation's own wobble, so the tests use tolerances and `features.md` claims determinism of
+  the *coordinates*. Invisible in the UI (0.1 km display precision) and pre-existing wherever the
+  app sums `CLLocation.distance` — `NavigationEngine.totalDistance` included.
 
 ## Acceptance criteria
 

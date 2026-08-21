@@ -308,4 +308,58 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(window.waitForExistence(timeout: 15))
         XCTAssertFalse(viewFullLog().waitForExistence(timeout: 2))
     }
+
+    // Epic 030: the sheet's two modes share the center and the radius but swap
+    // what sits under them — Random keeps the duration presets, Sweeping trades
+    // them for a lane spacing and derives distance/time from the geometry — and
+    // the mode itself is a remembered preference, like the presets around it.
+    // The segmented Picker exposes its segments as RadioButtons.
+    @MainActor
+    func testWanderSweepingModeSwapsControlsAndPersists() throws {
+        app.launchArguments += ["--uitest-open-wander"]
+        app.launch()
+
+        // Random is the factory default: duration presets, no spacing field.
+        var sheet = wanderSheet()
+        XCTAssertTrue(sheet.buttons["wander.duration.30"].waitForExistence(timeout: 5))
+        XCTAssertFalse(sheet.textFields["wander.sweep.spacing"].exists)
+
+        sheet.radioButtons["Sweeping"].click()
+        let spacing = sheet.textFields["wander.sweep.spacing"]
+        XCTAssertTrue(spacing.waitForExistence(timeout: 5))
+        XCTAssertEqual(String(describing: spacing.value ?? ""), "70")
+        // No duration control when sweeping — the route's length fixes its time.
+        XCTAssertFalse(sheet.buttons["wander.duration.30"].waitForExistence(timeout: 2))
+        // Radius stays shared, and Start only enables once the geometry built.
+        XCTAssertTrue(sheet.buttons["wander.radius.500"].exists)
+        XCTAssertTrue(sheet.buttons["Start"].isEnabled)
+
+        // Type a distinctive spacing. Every change persists (epic 018), so Close
+        // starts no sweep and loses nothing.
+        spacing.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("120")
+        sheet.buttons["Close"].click()
+
+        // Relaunch: the sheet must reopen already in Sweeping, with that spacing.
+        app.terminate()
+        app.launch()
+        sheet = wanderSheet()
+        let sweeping = sheet.radioButtons["Sweeping"]
+        XCTAssertTrue(sweeping.waitForExistence(timeout: 15))
+        XCTAssertEqual(switchValue(sweeping), "1")
+        let restored = sheet.textFields["wander.sweep.spacing"]
+        XCTAssertTrue(restored.waitForExistence(timeout: 5))
+        XCTAssertEqual(String(describing: restored.value ?? ""), "120")
+
+        // Switch back: the duration presets return. Park the sheet on the factory
+        // defaults (Random, 70 m) so suite order can't inherit this test's state.
+        restored.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("70")
+        sheet.radioButtons["Random"].click()
+        XCTAssertTrue(sheet.buttons["wander.duration.30"].waitForExistence(timeout: 5))
+        XCTAssertFalse(sheet.textFields["wander.sweep.spacing"].exists)
+        sheet.buttons["Close"].click()
+    }
 }

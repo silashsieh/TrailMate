@@ -3,6 +3,7 @@
 ## For users
 
 - [Quick Start](quick-start.md) — install the DMG or build from source, pair an iPhone, first teleport
+- [Release Packaging](../packaging/README.md) — Developer ID signing, notarization, and GitHub release credentials
 
 ## Technical
 

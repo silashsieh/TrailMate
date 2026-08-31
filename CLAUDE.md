@@ -5,7 +5,7 @@ TrailMate is a native macOS app that simulates real-time GPS on a paired iOS 17+
 ## Project context
 
 - **Owner:** Harry, solo developer. Personal Mac (Apple Silicon, macOS 26.4) + personal iPhone (iOS 26.4).
-- **Apple Developer Program:** none. Everything runs locally; signing is ad-hoc or free-Apple-ID.
+- **Apple Developer Program:** paid membership, team `M8M8MCWC7X`. Public GitHub releases use Developer ID signing and notarization; local/PR builds may use the explicit ad-hoc path. There is no App Store distribution.
 - **Reference implementations to consult, in priority order:**
   1. [`pymobiledevice3`](https://github.com/doronz88/pymobiledevice3) source — authoritative for transport behavior.
   2. [`nexron171/SimVirtualLocation`](https://github.com/nexron171/SimVirtualLocation) — closest working OSS architecture (Swift + pymobiledevice3).
@@ -34,7 +34,7 @@ If a task touches the daemon protocol, coordinate math, or the concurrency split
 - **Single user, no cloud — multi-iPhone is in scope.** One Mac, one owner; simultaneous multi-device simulation is a goal since the 2026-06-01 [scope.md](docs/project-plan/scope.md) revision (epic 012). Still no multi-tenant features, telemetry, or cloud sync.
 - **No iOS app.** Everything runs on the Mac; no sideloaded code on the iPhone.
 - **iOS 17+ minimum.** No fallback paths for older iOS.
-- **One auth dialog per session is acceptable.** Don't propose schemes to eliminate it that require paid signing or a packaged helper unless explicitly asked.
+- **One auth dialog per session is acceptable.** A packaged privileged helper is separate work; do not expand a task into that migration unless explicitly asked.
 - **No anti-detection.** `CLLocationSourceInformation.isSimulatedBySoftware` is true and stays true.
 
 ## Project management
@@ -75,6 +75,8 @@ recipes (triage, ship, drop, scope-change ripple checklist) in
 - **PR body format follows the repo convention (PRs #4–#7).** Body is `## Summary` followed by bullet-only narrative — no separate "Test plan" / "How to verify" section. Close issues with a `Closes #N` keyword line in the body; title pattern is `<type>: <subject> (closes #N)` when applicable. Footer is the standard `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line — that IS the canonical attribution form for PRs on this repo, even when the closing issue is in Chinese; don't substitute a localized attribution on the PR body (that rule applies to issue/comment bodies, not the PR footer convention already in use here). (Stated 2026-05-28.)
 - **Interaction design follows Apple's conventions, not Google Maps'.** TrailMate is MapKit-based and macOS-native; default to HIG and MapKit built-in behaviors (user-tracking/follow, Settings scene, context menus) when designing interactions. Google Maps may be cited as a comparison, never as the design baseline. Canonical rationale: [decisions.md D9](docs/technical/decisions.md); origin: issue #19, declined. (Stated 2026-06-06.) Amended same day (epic 005): conventions set *defaults*; an explicit user preference may opt out of a convention-derived default.
 - **Project management is plain-text-in-git, single-collection model.** Every feature/idea is one epic file under `docs/project-plan/epics/`; `roadmap.md`/`backlog.md` are Dataview *projections* over them, never hand-maintained lists — so the views can't drift from reality. `phases.md` is frozen as a historical log (no new per-issue phases — continues commits `50b4557`/`2f72b4c`). GitHub Issues stay a ticket inbox only. Docs are Obsidian-flavored (frontmatter + `[[wikilinks]]` + Dataview); the GitHub-render degradation is accepted. *Why:* the project shifted from "build v1" to "maintain + iterate," and an overview/roadmap was missing (issue #8). Full rules in [process.md](docs/project-plan/process.md). (Stated 2026-05-29.)
+- **Validate Developer ID signing before adding Sparkle.** Public binaries should be Developer ID signed and notarized but remain distributed through GitHub Releases, not the App Store. Sparkle auto-update work waits until the signing pipeline is proven. (Stated 2026-09-01.)
+- **Use only GitHub-managed runners for GitHub Actions.** Do not add or retain self-hosted worker routing; macOS workflows target the managed `macos-26` arm64 image. (Stated 2026-09-01.)
 
 ## Coding conventions
 
@@ -133,6 +135,7 @@ pymobiledevice3 developer dvt simulate-location set --rsd <addr> <port> -- 25.03
 ./packaging/release.sh                       # full build (rebuilds PythonResources first)
 SKIP_PYTHON=1 ./packaging/release.sh         # reuse existing PythonResources/ (faster)
 VERSION=1.2 ./packaging/release.sh           # override the stamped version
+CERTIFICATE_P12_PATH=/path/to/cert.p12 NOTARIZE=0 ./packaging/release.sh  # Developer ID; prompts for password
 
 # Publish a release via GitHub Actions (manual workflow_dispatch).
 # Reads MARKETING_VERSION from the xcodeproj, builds, and uploads the DMG

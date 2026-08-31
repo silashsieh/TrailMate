@@ -174,15 +174,21 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - TrailMate ships a self-contained CPython interpreter + `pymobiledevice3` inside the `.app` bundle (`Contents/Resources/PythonResources/`). End users do not install Python, pip, or pymobiledevice3.
 - Built via `packaging/build.sh` from [python-build-standalone](https://github.com/indygreg/python-build-standalone); the tarball is cached under `packaging/.cache/` so subsequent builds are fast.
 - `PythonBundle.swift` resolves the interpreter and script paths at runtime so `tm_daemon.py`, `tm_tunneld.sh`, and `tm_list_devices.py` all run from the bundle in release builds (and from the same paths during `xcodebuild` debug builds). (`tm_tunnel.sh`, the pre-multi-device single-tunnel wrapper, is still bundled but no longer on the live path.)
-- Embedded binaries are re-signed by a `Re-sign embedded Python binaries` Run Script phase under the same identity as the host app (ad-hoc when no Developer ID is configured), with `--options runtime` so the Hardened Runtime accepts them.
+- Embedded binaries are re-signed by a `Re-sign embedded Python binaries` Run Script phase under the same identity as the host app, with Hardened Runtime options and a secure timestamp for Developer ID builds. A nested-code signing failure stops the build.
 - Pin point is the Python interpreter version (default 3.13.x) and the pymobiledevice3 release that `build.sh` installs into the bundle's site-packages; bumping either is a deliberate change with a smoke pass.
+
+### Release distribution
+
+- `packaging/release.sh` supports an explicit credential-free ad-hoc path for local/PR verification and a fail-closed Developer ID path for public releases.
+- Developer ID builds import a password-protected `.p12` into an ephemeral keychain, verify the certificate type and team, sign the nested Python code, app, and DMG, then verify the resulting signatures.
+- Optional notarization uses a team App Store Connect API key with `notarytool`, then staples and assesses the DMG. The GitHub `release` environment supplies these credentials only to the release job; Sparkle remains deferred to [[038-in-app-auto-update]].
 
 ## Deferred / dropped
 
 Items considered during planning that were dropped, deferred, or superseded.
 
 - **`trailmate` CLI and installable MCP shim (epic 019).** v2.0.0 shipped only the AF_UNIX command socket; agents drive it directly over `nc -U`. The planned `trailmate` CLI wrapper (swift-argument-parser, embedded in `Contents/Helpers/`) and the stdio MCP shim that would register into Claude Desktop / other MCP clients are not yet built. Tracked as epic 023 (GitHub issue #54).
-- **SMAppService privileged helper.** Still using `osascript … with administrator privileges`. One auth dialog per session is acceptable for personal use; a packaged helper is the right path but needs a paid Apple ID for signing.
+- **SMAppService privileged helper.** Still using `osascript … with administrator privileges`. One auth dialog per session is acceptable for personal use; Developer ID signing is now available, but designing and installing a privileged helper remains separate work.
 - **DDI auto-mounting.** User mounts via Xcode or `pymobiledevice3 mounter auto-mount` once per OS update.
 - **Reconnect button.** Replaced by automatic teardown on tunnel/daemon exit; user re-runs Connect manually.
 - **Mount-status indicator showing DDI / tunnel / DVT separately.** Collapsed into a single Connection status pill.

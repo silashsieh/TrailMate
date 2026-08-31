@@ -6,7 +6,7 @@ The bounds of what TrailMate is trying to be — and, more importantly, what it 
 
 TrailMate exists to give a single developer **live, real-time control of their own iPhones'
 GPS from their Mac** — teleport, route playback, and joystick steering over the iOS 17+ RSD
-tunnel — without a paid Apple Developer account, an iOS app, or any anti-detection trickery.
+tunnel — without an iOS app or any anti-detection trickery.
 It's the tool the owner wanted for testing location-aware apps against a *real* device (not the
 Simulator), built to a quality worth showing as a portfolio piece.
 
@@ -22,7 +22,8 @@ become work.
 - Real-time GPS simulation on a paired iOS 17+ device (validated on iOS 26.4).
 - Three coexisting controls: teleport, route, joystick.
 - Native macOS look-and-feel: SwiftUI, MapKit, standard NSWindow chrome.
-- Single Mac, single user, multi iPhone — build-from-source from a free Apple ID.
+- Single Mac, single user, multi iPhone — buildable locally and distributed as
+  a Developer ID-signed, notarized GitHub release.
 - Codebase suitable as a portfolio reference (clean architecture, documented decisions).
 
 ## Long-term goals
@@ -41,6 +42,8 @@ concrete work is picked up at triage.
 
 - **No iOS app component.** Everything runs on the Mac. No sideloading, no jailbreak.
 - **No anti-detection.** The device reports `CLLocation.sourceInformation.isSimulatedBySoftware == true`. Apps that check for this (e.g. Pokémon GO) will see through us. Not a goal to defeat.
-- **No App Store distribution.** Personal tool. Build from source, run unsigned.
+- **No App Store distribution.** Public binaries are distributed through
+  GitHub Releases with Developer ID signing and notarization; App Store Connect
+  is used only for notary credentials.
 - **No cross-platform.** macOS only. Windows users have LocWarp; Linux users have raw pymobiledevice3.
 - **No legacy iOS support.** iOS 17 introduced the personalized DDI + RSD tunnel; that's the minimum target. Users on iOS ≤16 should use Schlaubischlump's LocationSimulator.

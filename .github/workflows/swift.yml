@@ -9,13 +9,6 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# All jobs run on the self-hosted macOS runner. GitHub-hosted runners are not
-# usable while the account is billing-blocked (out of included minutes / $0
-# spending limit) — that block hits every hosted runner, including a cheap
-# ubuntu probe and any macos-* fallback target, so automatic "fall back to
-# hosted when self-hosted is offline" routing is not possible right now. When
-# minutes reset or a spending limit is set, the probe-based fallback can be
-# revived from PR #37's history.
 jobs:
   build:
     runs-on: macos-26

@@ -7,12 +7,13 @@
 |Map              |MapKit + MKDirections                                  |Free, no API key, built-in routing                     |
 |Joystick input   |GameController.framework                               |First-party, supports MFi / DualShock / Xbox / Joy-Cons|
 |IPC              |Process + pipe (stdin/stdout to the Python daemon)     |Standard, well-documented                              |
-|Privilege escalation|`osascript … with administrator privileges`         |One auth dialog per session; no paid signing. SMAppService helper deferred (see features.md)|
+|Privilege escalation|`osascript … with administrator privileges`         |One auth dialog per session; an SMAppService helper remains deferred (see features.md)|
 |Device transport |pymobiledevice3 (pinned, vendored)                     |Only mature library supporting iOS 17+ RSD tunnel      |
 |Python runtime   |python-build-standalone, bundled in app                |Self-contained; no system Python dependency            |
 |Project file     |Hand-managed `.xcodeproj`                              |No XcodeGen; the project is edited directly            |
 |Tests            |Swift Testing + XCTest                                 |Swift Testing for new code; XCTest for legacy interop  |
 |Localization     |String Catalog (`.xcstrings`), compiler-extracted      |en + zh-Hant; no `.strings` files, follows system language|
+|Distribution     |Developer ID + Hardened Runtime + Apple notarization   |Gatekeeper-compatible GitHub releases; no App Store submission|
 
 ## Versions Targeted
 

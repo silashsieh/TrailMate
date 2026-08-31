@@ -10,7 +10,7 @@ Each `pymobiledevice3` CLI invocation pays Python interpreter startup (~500ms-1s
 
 ## D3: Why a separate privileged helper instead of running the whole app as root?
 
-Two reasons. First, only the TUN interface creation needs root; everything else (UI, MapKit, GameController, daemon stdin/stdout) is fine as the regular user. Running the whole app as root would be a gratuitous security mistake. Second, isolating the privileged step keeps the root surface tiny: today only `tm_tunneld.sh` runs as root, brought up via `osascript … with administrator privileges`, while the app stays unprivileged. A packaged SMAppService helper is the documented modern path and would drop the per-session auth prompt, but it needs paid signing, so it's deferred (see features.md).
+Two reasons. First, only the TUN interface creation needs root; everything else (UI, MapKit, GameController, daemon stdin/stdout) is fine as the regular user. Running the whole app as root would be a gratuitous security mistake. Second, isolating the privileged step keeps the root surface tiny: today only `tm_tunneld.sh` runs as root, brought up via `osascript … with administrator privileges`, while the app stays unprivileged. A packaged SMAppService helper is the documented modern path and would drop the per-session auth prompt. Developer ID signing is now available, but helper design, installation, migration, and lifecycle remain separate deferred work (see features.md).
 
 ## D4: Why MapKit over Google Maps or OpenStreetMap?
 

@@ -2,16 +2,49 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      signing_only:
+        description: Verify Developer ID signing without notarizing or publishing
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
-    # Self-hosted runner (same as CI in swift.yml) — GitHub-hosted macOS runners
-    # are billed and were blocked by an account spending limit.
-    runs-on: [self-hosted, macOS, ARM64]
+    # Keep production signing credentials isolated in the protected release
+    # environment and import them into a temporary keychain for this job.
+    environment: release
+    runs-on: macos-26
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
+
+      - name: Materialize signing certificate
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+        run: |
+          test -n "$CERTIFICATE_P12_BASE64"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 -D > "$RUNNER_TEMP/Certificates.p12"
+
+      - name: Materialize notary credential
+        if: ${{ !inputs.signing_only }}
+        env:
+          NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+        run: |
+          test -n "$NOTARY_KEY_P8"
+          printf '%s\n' "$NOTARY_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Protect credential files
+        run: |
+          chmod 600 "$RUNNER_TEMP/Certificates.p12"
+          if [ -f "$RUNNER_TEMP/AuthKey.p8" ]; then
+            chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+          fi
 
       - name: Read MARKETING_VERSION from Xcode project
         id: version
@@ -19,10 +52,20 @@ jobs:
           VERSION=$(awk -F' = ' '/MARKETING_VERSION/{gsub(/[; ]/,"",$2); print $2; exit}' TrailMate.xcodeproj/project.pbxproj)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build
+      - name: Build and verify
+        env:
+          SIGNING_MODE: developer-id
+          CERTIFICATE_P12_PATH: ${{ runner.temp }}/Certificates.p12
+          CERTIFICATE_P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          NOTARIZE: ${{ inputs.signing_only && '0' || '1' }}
+          NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
         run: ./packaging/release.sh
 
       - name: Create release and upload DMG
+        if: ${{ !inputs.signing_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -31,3 +74,7 @@ jobs:
             "build/TrailMate-$VERSION.dmg" \
             --title "v$VERSION" \
             --generate-notes
+
+      - name: Remove credential files
+        if: always()
+        run: rm -f "$RUNNER_TEMP/Certificates.p12" "$RUNNER_TEMP/AuthKey.p8"

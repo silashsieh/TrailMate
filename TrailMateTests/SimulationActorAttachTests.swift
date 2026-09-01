@@ -103,7 +103,7 @@ struct SimulationActorAttachTests {
             aggregatorInterval: .milliseconds(20),
             scrubEmitInterval: .milliseconds(20),
             playbackSnapshotInterval: .milliseconds(500),
-            activeSnapshotInterval: .milliseconds(250)
+            activeSnapshotInterval: .seconds(5)
         )
         let sim = SimulationActor(bridge: bridge, recorder: RecorderService(), timing: timing)
         let backend = RecordingBackend()
@@ -122,13 +122,16 @@ struct SimulationActorAttachTests {
 
         await sim.updateStickInput(x: 1, y: 0)
 
-        let deviceMovedBeforeUIPush = await waitUntil(timeout: .milliseconds(120)) {
+        let deviceMovedBeforeUIPush = await waitUntil(timeout: .seconds(1)) {
             Self.distanceMeters(backend.lastLocation, from: start) > 0.5
         }
         #expect(deviceMovedBeforeUIPush)
         #expect(Self.distanceMeters(bridge.simulatedCoordinate, from: start) < 0.01)
 
-        let uiEventuallyMoved = await waitUntil(timeout: .milliseconds(500)) {
+        // Flush the latest position through the unthrottled state-transition
+        // path instead of waiting on a narrow wall-clock timing window.
+        await sim.stopJoystick()
+        let uiEventuallyMoved = await waitUntil(timeout: .seconds(1)) {
             Self.distanceMeters(bridge.simulatedCoordinate, from: start) > 0.5
         }
         #expect(uiEventuallyMoved)

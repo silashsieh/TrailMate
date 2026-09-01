@@ -32,6 +32,7 @@ ARCHIVE="$BUILD/TrailMate.xcarchive"
 EXPORT_DIR="$BUILD/export"
 EXPORT_PLIST="$BUILD/ExportOptions.plist"
 STAGE="$BUILD/dmg-stage"
+DEVELOPER_ID_INTERMEDIATE="$ROOT/packaging/certificates/DeveloperIDG2CA.pem"
 
 SCHEME="TrailMate"
 PROJECT="$ROOT/TrailMate.xcodeproj"
@@ -118,9 +119,14 @@ import_developer_id_certificate() {
     security create-keychain -p "$keychain_password" "$TEMP_KEYCHAIN"
     security set-keychain-settings -lut 21600 "$TEMP_KEYCHAIN"
     security unlock-keychain -p "$keychain_password" "$TEMP_KEYCHAIN"
+    [ -f "$DEVELOPER_ID_INTERMEDIATE" ] \
+        || die "Developer ID intermediate certificate not found: $DEVELOPER_ID_INTERMEDIATE"
+    security import "$DEVELOPER_ID_INTERMEDIATE" \
+        -t cert -f pemseq \
+        -k "$TEMP_KEYCHAIN" >/dev/null
     security import "$CERTIFICATE_P12_PATH" \
         -P "$CERTIFICATE_P12_PASSWORD" \
-        -t cert -f pkcs12 \
+        -t agg -f pkcs12 \
         -T /usr/bin/codesign \
         -k "$TEMP_KEYCHAIN" >/dev/null
     security set-key-partition-list \

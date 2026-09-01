@@ -43,13 +43,15 @@
 
 ## Recipe: ship a release
 
-1. `gh workflow run release.yml --ref main` — builds, tags `v<MARKETING_VERSION>`, uploads the
-   DMG.
-2. Every epic in the release: `status: done`, `shipped: YYYY-MM-DD`.
-3. Close the GitHub milestone; create the next one:
+1. `gh workflow run release.yml --ref main -f dry_run=true` — builds, signs, notarizes, and
+   uploads a seven-day workflow artifact without creating a public release.
+2. After the dry run passes, `gh workflow run release.yml --ref main -f dry_run=false` — tags
+   `v<MARKETING_VERSION>` and uploads the notarized DMG to the GitHub release.
+3. Every epic in the release: `status: done`, `shipped: YYYY-MM-DD`.
+4. Close the GitHub milestone; create the next one:
    `gh api repos/silashsieh/TrailMate/milestones -f title="vX.Y.Z" -f description="…"`.
-4. Refresh the static snapshots: move shipped items in [[roadmap]], prune [[backlog]].
-5. Quick triage pass over anything that arrived during the release (first recipe).
+5. Refresh the static snapshots: move shipped items in [[roadmap]], prune [[backlog]].
+6. Quick triage pass over anything that arrived during the release (first recipe).
 
 ## Recipe: a bug is reported against shipped work
 

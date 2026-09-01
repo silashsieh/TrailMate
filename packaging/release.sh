@@ -119,6 +119,8 @@ import_developer_id_certificate() {
     security create-keychain -p "$keychain_password" "$TEMP_KEYCHAIN"
     security set-keychain-settings -lut 21600 "$TEMP_KEYCHAIN"
     security unlock-keychain -p "$keychain_password" "$TEMP_KEYCHAIN"
+    # Clean hosted runners may not carry the G2 intermediate for newly issued
+    # Developer ID certificates, which makes an imported key appear invalid.
     [ -f "$DEVELOPER_ID_INTERMEDIATE" ] \
         || die "Developer ID intermediate certificate not found: $DEVELOPER_ID_INTERMEDIATE"
     security import "$DEVELOPER_ID_INTERMEDIATE" \
@@ -126,7 +128,7 @@ import_developer_id_certificate() {
         -k "$TEMP_KEYCHAIN" >/dev/null
     security import "$CERTIFICATE_P12_PATH" \
         -P "$CERTIFICATE_P12_PASSWORD" \
-        -t agg -f pkcs12 \
+        -t cert -f pkcs12 \
         -T /usr/bin/codesign \
         -k "$TEMP_KEYCHAIN" >/dev/null
     security set-key-partition-list \

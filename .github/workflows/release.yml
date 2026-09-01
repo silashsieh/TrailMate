@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Build, sign, and notarize without creating a GitHub Release
+        description: Build, sign, notarize, and generate the appcast without publishing
         required: true
         default: true
         type: boolean
@@ -15,12 +15,14 @@ concurrency:
 
 jobs:
   release:
-    # Keep production signing credentials isolated in the protected release
-    # environment and import them into a temporary keychain for this job.
+    # Production signing credentials and the Sparkle key are isolated in the
+    # protected release environment and exist only for this job.
     environment: release
     runs-on: macos-26
     permissions:
       contents: write
+    outputs:
+      pages_artifact_name: ${{ steps.version.outputs.pages_artifact_name }}
     steps:
       - uses: actions/checkout@v6
 
@@ -41,17 +43,24 @@ jobs:
       - name: Protect credential files
         run: |
           chmod 600 "$RUNNER_TEMP/Certificates.p12"
-          if [ -f "$RUNNER_TEMP/AuthKey.p8" ]; then
-            chmod 600 "$RUNNER_TEMP/AuthKey.p8"
-          fi
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
 
-      - name: Read MARKETING_VERSION from Xcode project
+      - name: Read app version from Xcode project
         id: version
         run: |
           VERSION=$(awk -F' = ' '/MARKETING_VERSION/{gsub(/[; ]/,"",$2); print $2; exit}' TrailMate.xcodeproj/project.pbxproj)
+          BUILD_NUMBER=$(awk -F' = ' '/CURRENT_PROJECT_VERSION/{gsub(/[; ]/,"",$2); print $2; exit}' TrailMate.xcodeproj/project.pbxproj)
+          test -n "$VERSION"
+          test -n "$BUILD_NUMBER"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "pages_artifact_name=trailmate-update-site-$VERSION-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Build and verify
+      - name: Require main for a public release
+        if: ${{ !inputs.dry_run }}
+        run: test "$GITHUB_REF" = "refs/heads/main"
+
+      - name: Build, sign, notarize, and verify
         env:
           SIGNING_MODE: developer-id
           CERTIFICATE_P12_PATH: ${{ runner.temp }}/Certificates.p12
@@ -63,26 +72,66 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
         run: ./packaging/release.sh
 
-      - name: Upload dry-run DMG
+      - name: Generate signed Sparkle appcast
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: ./packaging/generate-appcast.sh
+
+      - name: Upload dry-run update artifacts
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@v7
         with:
           name: TrailMate-${{ steps.version.outputs.version }}-dry-run
-          path: build/TrailMate-${{ steps.version.outputs.version }}.dmg
+          path: |
+            build/TrailMate-${{ steps.version.outputs.version }}.dmg
+            build/appcast/appcast.xml
+            build/appcast/*.delta
+            build/update-site/
           if-no-files-found: error
           retention-days: 7
 
-      - name: Create release and upload DMG
+      - name: Create draft release and upload update assets
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           gh release create "v$VERSION" \
             "build/TrailMate-$VERSION.dmg" \
+            "build/appcast/appcast.xml" \
+            --target "$GITHUB_SHA" \
             --title "v$VERSION" \
-            --generate-notes
+            --generate-notes \
+            --draft
+
+          while IFS= read -r delta; do
+            gh release upload "v$VERSION" "$delta"
+          done < <(find build/appcast -maxdepth 1 -type f -name '*.delta' -print)
+
+          gh release edit "v$VERSION" --draft=false
+
+      - name: Upload Pages source
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.version.outputs.pages_artifact_name }}
+          path: build/update-site/
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Remove credential files
         if: always()
         run: rm -f "$RUNNER_TEMP/Certificates.p12" "$RUNNER_TEMP/AuthKey.p8"
+
+  deploy-pages:
+    if: ${{ !inputs.dry_run }}
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/static.yml
+    with:
+      artifact_name: ${{ needs.release.outputs.pages_artifact_name }}

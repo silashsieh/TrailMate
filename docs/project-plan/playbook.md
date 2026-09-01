@@ -43,10 +43,12 @@
 
 ## Recipe: ship a release
 
-1. `gh workflow run release.yml --ref main -f dry_run=true` — builds, signs, notarizes, and
-   uploads a seven-day workflow artifact without creating a public release.
-2. After the dry run passes, `gh workflow run release.yml --ref main -f dry_run=false` — tags
-   `v<MARKETING_VERSION>` and uploads the notarized DMG to the GitHub release.
+1. `gh workflow run release.yml --ref main -f dry_run=true` — builds, signs, notarizes,
+   generates the signed Sparkle feed/deltas, and uploads seven-day workflow artifacts without
+   creating a release or changing Pages.
+2. After the dry run passes, `gh workflow run release.yml --ref main -f dry_run=false` — creates
+   `v<MARKETING_VERSION>`, uploads the notarized DMG plus Sparkle assets while the release is a
+   draft, publishes it, and then deploys the stable appcast to GitHub Pages.
 3. Every epic in the release: `status: done`, `shipped: YYYY-MM-DD`.
 4. Close the GitHub milestone; create the next one:
    `gh api repos/silashsieh/TrailMate/milestones -f title="vX.Y.Z" -f description="…"`.

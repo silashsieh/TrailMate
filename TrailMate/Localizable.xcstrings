@@ -155,6 +155,26 @@
         }
       }
     },
+    "Automatically check for updates": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動檢查更新"
+          }
+        }
+      }
+    },
+    "Automatically download updates": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動下載更新"
+          }
+        }
+      }
+    },
     "Calculate Route": {
       "localizations": {
         "zh-Hant": {
@@ -191,6 +211,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "類別"
+          }
+        }
+      }
+    },
+    "Check for Updates…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檢查更新⋯"
           }
         }
       }
@@ -1286,12 +1316,32 @@
     "TrailMate": {
       "shouldTranslate": false
     },
+    "TrailMate asks before installing an update and relaunching.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TrailMate 會在安裝更新並重新啟動前詢問你。"
+          }
+        }
+      }
+    },
     "Transport": {
       "localizations": {
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "交通方式"
+          }
+        }
+      }
+    },
+    "Updates": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新"
           }
         }
       }

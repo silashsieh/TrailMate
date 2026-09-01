@@ -1,10 +1,11 @@
 # Third-Party Licenses
 
-TrailMate's **release builds** (the `.dmg`) bundle a CPython runtime and a set
-of Python libraries inside the app. This file inventories every bundled
-component and its license. The full license text of each package travels with
-it inside the app bundle (in the package's `*.dist-info/` metadata under
-`Contents/Resources/PythonResources/python-libs/`).
+TrailMate's **release builds** (the `.dmg`) bundle Sparkle, a CPython runtime,
+and a set of Python libraries inside the app. This file inventories every
+bundled component and its license. Python package license text travels in the
+app bundle's `*.dist-info/` metadata under
+`Contents/Resources/PythonResources/python-libs/`; Sparkle's full notice is
+published upstream with the exact pinned source package.
 
 This inventory does not apply to the source repository alone — the bundled
 libraries (`PythonResources/`) are assembled at build time by
@@ -12,6 +13,12 @@ libraries (`PythonResources/`) are assembled at build time by
 
 See [`LICENSING.md`](LICENSING.md) for how these combine and why a binary
 distribution as a whole is conveyed under GPL-3.0-or-later.
+
+## Native framework
+
+| Component | Version | License |
+|-----------|---------|---------|
+| Sparkle | 2.9.6 | MIT with bundled permissive notices |
 
 ## Runtime
 

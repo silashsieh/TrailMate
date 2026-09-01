@@ -14,6 +14,7 @@
 |Tests            |Swift Testing + XCTest                                 |Swift Testing for new code; XCTest for legacy interop  |
 |Localization     |String Catalog (`.xcstrings`), compiler-extracted      |en + zh-Hant; no `.strings` files, follows system language|
 |Distribution     |Developer ID + Hardened Runtime + Apple notarization   |Gatekeeper-compatible GitHub releases; no App Store submission|
+|Updates          |Sparkle 2.9.6 + EdDSA-signed GitHub Pages appcast      |Native in-app updates from notarized GitHub Release DMGs|
 
 ## Versions Targeted
 
@@ -21,6 +22,7 @@
 - iOS 26.4 on a paired iPhone with Developer Mode enabled
 - Xcode 26.x
 - Python 3.13 (bundled), pymobiledevice3 9.30.1 (pinned in `packaging/build.sh`)
+- Sparkle 2.9.6 (exact Swift Package pin)
 
 ## References
 
@@ -40,3 +42,4 @@ Underlying libraries, frameworks, and platform documentation TrailMate builds on
 **Runtime packaging**
 
 - [python-build-standalone](https://github.com/indygreg/python-build-standalone) — self-contained Python distribution we bundle into the app
+- [Sparkle](https://github.com/sparkle-project/Sparkle) — update checks, EdDSA verification, installation, relaunch, and appcast tooling

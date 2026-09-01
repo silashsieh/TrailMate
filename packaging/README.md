@@ -5,8 +5,10 @@ runtime plus `pymobiledevice3`. `packaging/release.sh` archives the macOS app,
 exports it, verifies its signature, and packages it as
 `build/TrailMate-<version>.dmg`.
 
-Sparkle is intentionally not part of this pipeline yet. Developer ID signing
-and notarization must be working first.
+After the DMG has been signed, notarized, and stapled,
+`packaging/generate-appcast.sh` uses Sparkle's release tool to create an
+EdDSA-signed appcast and any useful deltas. The public workflow publishes the
+archives on GitHub Releases and the stable appcast on GitHub Pages.
 
 ## Prerequisites
 
@@ -134,8 +136,10 @@ chmod 600 /Users/harry/Documents/cert/AuthKey_MFY89S6CBP.p8
 The `release.yml` workflow runs only on GitHub's managed `macos-26` arm64
 runner. It uses a protected environment named `release`, recreates the `.p12`
 and `.p8` under `RUNNER_TEMP`, and imports the certificate into the same
-temporary-keychain path as local builds. No certificate or private key belongs
-in git, an artifact, a cache, or a workflow log.
+temporary-keychain path as local builds. The Sparkle private key stays in the
+same environment and is piped directly to `generate_appcast`; it is never
+materialized in the checkout. No certificate or private key belongs in git, an
+artifact, a cache, or a workflow log.
 
 Fresh hosted runners may not contain the intermediate needed to validate a
 new Developer ID G2 identity. The repository therefore pins Apple's public
@@ -157,6 +161,8 @@ base64 -i /Users/harry/Documents/cert/Certificates.p12 \
 gh secret set MACOS_CERTIFICATE_PASSWORD --env release
 gh secret set APPLE_NOTARY_KEY_P8 --env release \
   < /Users/harry/Documents/cert/AuthKey_MFY89S6CBP.p8
+gh secret set SPARKLE_ED_PRIVATE_KEY --env release \
+  < /Users/harry/Documents/cert/TrailMate-Sparkle-EdDSA.key
 
 gh variable set APPLE_TEAM_ID --env release --body M8M8MCWC7X
 gh variable set APPLE_NOTARY_KEY_ID --env release --body MFY89S6CBP
@@ -164,10 +170,15 @@ gh variable set APPLE_NOTARY_ISSUER_ID --env release --body <team-issuer-uuid>
 ```
 
 `gh secret set MACOS_CERTIFICATE_PASSWORD` prompts securely when no input is
-piped. First prove that the runner can import the `.p12`, reproduce the
-Developer ID signature, notarize and staple the DMG, and verify the finished
-artifact. Dry-run mode is the safe default: it uploads the DMG as a workflow
-artifact retained for seven days, but does not create a GitHub release.
+piped. Keep the local Sparkle recovery export mode `600`; losing it prevents
+signing future updates for installed copies, while leaking it compromises the
+update channel.
+
+First prove that the runner can import the `.p12`, reproduce the Developer ID
+signature, notarize and staple the DMG, verify the finished artifact, and
+generate a signed appcast. Dry-run mode is the safe default: it uploads the
+DMG, appcast, deltas, and Pages payload as a workflow artifact retained for
+seven days, but creates no GitHub release and deploys nothing to Pages.
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -188,9 +199,23 @@ Both paths fail closed when a secret, variable, signature, notarization, or
 stapling step is missing or invalid; the publishing path will not create an
 ad-hoc or unnotarized fallback release.
 
+For a public run, the release first remains a draft while the DMG, appcast, and
+delta assets upload. It becomes public only after every upload succeeds; the
+Pages deployment then publishes that exact appcast at
+`https://silashsieh.github.io/TrailMate/appcast.xml`. To restore Pages from a
+published release without rebuilding or resigning anything:
+
+```sh
+gh workflow run static.yml --ref main -f release_tag=v2.1.2
+```
+
+v2.1.2 is the bootstrap Sparkle release. It will not offer an update to itself;
+its first full updater test is installing a later v2.2.0 release.
+
 ## Primary references
 
 - [Apple: Create Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/)
 - [Apple: Notarizing macOS software before distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 - [GitHub: Install an Apple certificate on macOS runners](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)
 - [GitHub: Deployment environments and protected secrets](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+- [Sparkle: Publishing an update](https://sparkle-project.org/documentation/publishing/)

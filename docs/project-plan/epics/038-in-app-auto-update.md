@@ -2,7 +2,7 @@
 type: epic
 id: 038
 title: In-app auto-update (Sparkle on Developer ID releases)
-status: open
+status: in-progress
 milestone: v2.2.0
 issue: 39
 opened: 2026-06-24
@@ -60,29 +60,20 @@ version.
 - [ ] Validate a downloaded GitHub DMG end to end: Developer ID identity,
       secure timestamps, Hardened Runtime, nested Python signatures, accepted
       notarization, stapled ticket, Gatekeeper assessment, and launch.
-- [ ] Add Sparkle 2 via SPM; wire the SwiftUI-native path—`SPUUpdater` plus
-      `SPUStandardUserDriver`—and expose a "Check for Updates…" action.
-- [ ] Generate the Sparkle EdDSA keypair once; keep the private key out of git
+- [x] Add Sparkle 2 via SPM; wire `SPUStandardUpdaterController` into SwiftUI
+      and expose a "Check for Updates…" action.
+- [x] Generate the Sparkle EdDSA keypair once; keep the private key out of git
       and add `SUFeedURL` plus `SUPublicEDKey` to the app configuration.
-- [ ] Extend `packaging/release.sh` and `release.yml` to generate and publish a
+- [x] Extend `packaging/release.sh` and `release.yml` to generate and publish a
       signed appcast and update archive only after notarization succeeds.
-- [ ] Localize updater UI (English and Traditional Chinese) and expose the
+- [x] Localize updater UI (English and Traditional Chinese) and expose the
       automatic-check preference in Settings.
-- [ ] Document update behavior and recovery in `docs/quick-start.md`.
+- [x] Document update behavior and recovery in `docs/quick-start.md`.
 
 ## Open questions
 
-- **Stable appcast location.** GitHub release asset URLs are versioned; choose
-  GitHub Pages or another fixed HTTPS URL before setting `SUFeedURL`.
-- **Archive format.** Decide whether Sparkle consumes a notarized ZIP of the
-  app while the DMG stays the manual-install artifact, or whether the selected
-  Sparkle tooling supports the desired DMG feed cleanly.
 - **Delta health across Python bumps.** A bundled-runtime change invalidates
   most of a delta; verify the appcast safely falls back to a full update.
-- **Automatic-check default and cadence.** Choose an HIG-consistent default
-  suitable for a single-user tool.
-- **Key handling in CI.** Decide how the Sparkle EdDSA private key is backed up,
-  rotated, and exposed only to the protected release environment.
 
 ## Decisions made along the way
 
@@ -96,6 +87,19 @@ version.
   credentials do not imply App Store submission.
 - **Keep both trust layers.** Apple signing/notarization establishes platform
   trust; Sparkle EdDSA authenticates the update feed and archive.
+- **Bootstrap in v2.1.2 (2026-09-02, owner's call).** v2.1.2 is the first
+  Sparkle-aware build so the update into v2.2.0 can be tested end to end.
+- **GitHub Pages feed, GitHub Release DMGs.** The stable feed is
+  `https://silashsieh.github.io/TrailMate/appcast.xml`; its signed enclosures
+  point to versioned `.dmg` assets on GitHub Releases.
+- **Use Sparkle's DMG support.** The same notarized DMG supports manual installs
+  and full Sparkle updates. `generate_appcast` also creates deltas when useful.
+- **Consent-first automation.** Sparkle owns first-run update-check consent.
+  Settings exposes automatic checks and downloads; neither bypasses Sparkle's
+  confirmation before installation and relaunch.
+- **Protected EdDSA key.** CI receives the private key only through the
+  protected `release` environment. The mode-`600` recovery export remains
+  outside the repository; the app and repository contain only the public key.
 
 ## Bugs / follow-ups found while building
 

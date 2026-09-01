@@ -7,6 +7,7 @@ TrailMate/
 ├── README.md
 ├── CLAUDE.md                          # entry point for Claude Code sessions
 ├── LICENSE.md
+├── Info.plist                         # Sparkle feed URL and public trust key
 ├── .gitignore
 │
 ├── TrailMate/                         # Swift sources (flat layout)
@@ -20,6 +21,8 @@ TrailMate/
 │   ├── CommandServer.swift            # AF_UNIX command socket (off by default; inverse of DaemonBridge)
 │   ├── SocketPath.swift               # ai.sock path + permission/length guards
 │   ├── AISettingsSection.swift        # Settings "AI control" toggle subview
+│   ├── UpdaterController.swift        # Sparkle lifecycle + observable update preferences
+│   ├── CheckForUpdatesView.swift      # application-menu update command
 │   ├── MenuBarStatusView.swift        # MenuBarExtra content: live status + quick actions
 │   ├── RoutingService.swift           # routing kernel protocol + MapKitRoutingService (D4 seam)
 │   ├── GPXService.swift               # GPX import (XMLParser) and export
@@ -56,7 +59,7 @@ TrailMate/
 │   └── tm_tunneld.sh                  # root-only `remote tunneld` launcher (parent-watches the host, N tunnels)
 │
 ├── PythonResources/                   # bundled CPython runtime (gitignored; built by packaging/build.sh)
-├── packaging/                         # build.sh (Python runtime), release.sh (DMG)
+├── packaging/                         # Python bundle, DMG, and signed-appcast scripts
 │
 └── docs/                              # all detailed documentation
     ├── README.md                      # table of contents
@@ -77,6 +80,19 @@ TrailMate/
         ├── features.md                # what ships today, plus dropped/deferred items
         └── decisions.md               # key technical decisions and why
 ```
+
+`UpdaterController` is an app-global `@MainActor @Observable` service owned by
+`TrailMateApp`. It owns the single `SPUStandardUpdaterController`, projects
+Sparkle's KVO preferences into Swift Observation for Settings, and backs the
+application-menu update command. Its trust configuration lives in
+`Info.plist`: a fixed HTTPS feed URL, a pinned EdDSA public key, and a required
+signed feed. The private key exists only outside the app in release operations.
+
+The release data flow is deliberately ordered: `release.sh` produces and
+notarizes the Developer ID DMG; `generate-appcast.sh` signs its Sparkle entry;
+the workflow uploads all assets to a draft release; it publishes that release;
+and only then does the reusable Pages workflow deploy the immutable appcast.
+The appcast points at GitHub Release assets, so Pages contains no executables.
 
 ## Layer Diagram
 

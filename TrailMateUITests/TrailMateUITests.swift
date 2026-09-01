@@ -107,6 +107,11 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(settings.sliders.firstMatch.exists)
         XCTAssertTrue(staticText(withValue: "Restore last location on launch", in: settings).exists)
         XCTAssertTrue(settings.switches.firstMatch.exists)
+        XCTAssertTrue(
+            settings.switches["settings.updates.automaticChecks"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(settings.switches["settings.updates.automaticDownloads"].exists)
 
         app.typeKey("w", modifierFlags: .command)
         XCTAssertFalse(settings.waitForExistence(timeout: 2))

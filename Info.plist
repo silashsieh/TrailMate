@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://silashsieh.github.io/TrailMate/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>YNhJnCcrXtJMOeU/BzJ9CJdlkoUr7loHM9BCVAOb8h0=</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+</dict>
+</plist>

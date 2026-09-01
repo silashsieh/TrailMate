@@ -61,9 +61,9 @@ final class UpdaterController {
 
     private static var shouldStartUpdater: Bool {
 #if DEBUG
-        // Sparkle's permission/update windows are outside TrailMate's UI-test
-        // surface and can otherwise interrupt deterministic XCUITest launches.
-        !UITestSupport.isUITesting
+        // Sparkle's permission/update windows are outside TrailMate's test
+        // surface and can otherwise interrupt a clean XCTest host or XCUITest.
+        !UITestSupport.isTesting
 #else
         true
 #endif

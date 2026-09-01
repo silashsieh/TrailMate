@@ -137,6 +137,13 @@ and `.p8` under `RUNNER_TEMP`, and imports the certificate into the same
 temporary-keychain path as local builds. No certificate or private key belongs
 in git, an artifact, a cache, or a workflow log.
 
+Fresh hosted runners may not contain the intermediate needed to validate a
+new Developer ID G2 identity. The repository therefore pins Apple's public
+`Developer ID Certification Authority (G2)` certificate under
+`packaging/certificates/`; `release.sh` imports it into the ephemeral keychain
+before importing the private identity. Its SHA-256 fingerprint is
+`F16CD3C54C7F83CEA4BF1A3E6A0819C8AAA8E4A1528FD144715F350643D2DF3A`.
+
 GitHub currently lists the `macos-26` arm64 image as public preview in its
 [hosted-runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 
@@ -157,28 +164,29 @@ gh variable set APPLE_NOTARY_ISSUER_ID --env release --body <team-issuer-uuid>
 ```
 
 `gh secret set MACOS_CERTIFICATE_PASSWORD` prompts securely when no input is
-piped. First prove that the runner can import the `.p12` and reproduce the
-Developer ID signature. Signing-only is the safe default: it neither requires
-the notary values nor creates a GitHub release.
+piped. First prove that the runner can import the `.p12`, reproduce the
+Developer ID signature, notarize and staple the DMG, and verify the finished
+artifact. Dry-run mode is the safe default: it uploads the DMG as a workflow
+artifact retained for seven days, but does not create a GitHub release.
 
 ```sh
 gh workflow run release.yml --ref main \
-  -f signing_only=true
+  -f dry_run=true
 gh run watch
 ```
 
-After the team issuer ID is configured, request the full release explicitly:
+After the dry run passes, request the public release explicitly:
 
 ```sh
 gh workflow run release.yml --ref main \
-  -f signing_only=false
+  -f dry_run=false
 ```
 
 Configure required reviewers for the `release` environment if the repository
 plan supports them, and dispatch full releases only from a reviewed `main`.
-The full path fails closed when a secret, variable, signature, notarization, or
-stapling step is missing or invalid; it will not publish an ad-hoc or
-unnotarized fallback.
+Both paths fail closed when a secret, variable, signature, notarization, or
+stapling step is missing or invalid; the publishing path will not create an
+ad-hoc or unnotarized fallback release.
 
 ## Primary references
 

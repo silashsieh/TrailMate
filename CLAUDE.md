@@ -137,10 +137,12 @@ SKIP_PYTHON=1 ./packaging/release.sh         # reuse existing PythonResources/ (
 VERSION=1.2 ./packaging/release.sh           # override the stamped version
 CERTIFICATE_P12_PATH=/path/to/cert.p12 NOTARIZE=0 ./packaging/release.sh  # Developer ID; prompts for password
 
-# Publish a release via GitHub Actions (manual workflow_dispatch).
-# Reads MARKETING_VERSION from the xcodeproj, builds, and uploads the DMG
-# to a new `v<version>` GitHub release.
-gh workflow run release.yml --ref main
+# Dry-run a release via GitHub Actions (build, sign, notarize, no GitHub Release).
+gh workflow run release.yml --ref main -f dry_run=true
+
+# Publish a release after the dry run passes. Reads MARKETING_VERSION from the
+# xcodeproj and uploads the notarized DMG to a new `v<version>` GitHub release.
+gh workflow run release.yml --ref main -f dry_run=false
 ```
 
 ## When the docs and code disagree

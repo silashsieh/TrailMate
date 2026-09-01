@@ -3,8 +3,8 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      signing_only:
-        description: Verify Developer ID signing without notarizing or publishing
+      dry_run:
+        description: Build, sign, and notarize without creating a GitHub Release
         required: true
         default: true
         type: boolean
@@ -32,7 +32,6 @@ jobs:
           printf '%s' "$CERTIFICATE_P12_BASE64" | base64 -D > "$RUNNER_TEMP/Certificates.p12"
 
       - name: Materialize notary credential
-        if: ${{ !inputs.signing_only }}
         env:
           NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
         run: |
@@ -58,14 +57,23 @@ jobs:
           CERTIFICATE_P12_PATH: ${{ runner.temp }}/Certificates.p12
           CERTIFICATE_P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          NOTARIZE: ${{ inputs.signing_only && '0' || '1' }}
+          NOTARIZE: "1"
           NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
         run: ./packaging/release.sh
 
+      - name: Upload dry-run DMG
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrailMate-${{ steps.version.outputs.version }}-dry-run
+          path: build/TrailMate-${{ steps.version.outputs.version }}.dmg
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Create release and upload DMG
-        if: ${{ !inputs.signing_only }}
+        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

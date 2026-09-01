@@ -16,7 +16,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Cache python-build-standalone download
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: packaging/.cache
         key: pbs-${{ hashFiles('packaging/build.sh') }}
@@ -29,7 +29,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Cache python-build-standalone download
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: packaging/.cache
         key: pbs-${{ hashFiles('packaging/build.sh') }}
@@ -54,7 +54,7 @@ jobs:
     # zip round-trip (upload-artifact roots the artifact at the matched path).
     - name: Upload result bundle on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: test-results
         path: build
@@ -67,7 +67,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Cache python-build-standalone download
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: packaging/.cache
         key: pbs-${{ hashFiles('packaging/build.sh') }}
@@ -87,7 +87,7 @@ jobs:
           CODE_SIGNING_REQUIRED=NO
     - name: Upload result bundle on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ui-test-results
         path: build

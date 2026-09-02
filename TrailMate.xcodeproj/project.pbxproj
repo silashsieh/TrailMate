@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		4A1CEE922FBC5FE300672138 /* PythonResources in Resources */ = {isa = PBXBuildFile; fileRef = 4A1CEE912FBC5FE300672138 /* PythonResources */; };
+		4A5A00012FD0000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 4A5A00022FD0000000000002 /* Sparkle */; };
 		4A94F2102FB4CFAF00221C1B /* TrailMate.icon in Resources */ = {isa = PBXBuildFile; fileRef = 4A94F20F2FB4CFAF00221C1B /* TrailMate.icon */; };
 /* End PBXBuildFile section */
 
@@ -61,6 +62,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4A5A00012FD0000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -126,6 +128,7 @@
 			);
 			name = TrailMate;
 			packageProductDependencies = (
+				4A5A00022FD0000000000002 /* Sparkle */,
 			);
 			productName = TrailMate;
 			productReference = 4AADFA8A2FB4451A00B2AA6A /* TrailMate.app */;
@@ -212,6 +215,9 @@
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4AADFA8B2FB4451A00B2AA6A /* Products */;
+			packageReferences = (
+				4A5A00032FD0000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -305,6 +311,25 @@
 			targetProxy = 4AADFAA42FB4451C00B2AA6A /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4A5A00032FD0000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4A5A00022FD0000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4A5A00032FD0000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4AADFAAB2FB4451C00B2AA6A /* Debug */ = {
@@ -437,7 +462,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = M8M8MCWC7X;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -449,6 +474,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -472,7 +498,7 @@
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/qh3",
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/cryptography/hazmat/bindings",
 				);
-				MARKETING_VERSION = 2.1.1;
+				MARKETING_VERSION = 2.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.shihlien.TrailMate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -501,7 +527,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = M8M8MCWC7X;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -513,6 +539,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -536,7 +563,7 @@
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/qh3",
 					"$(PROJECT_DIR)/TrailMate/PythonResources/python-libs/cryptography/hazmat/bindings",
 				);
-				MARKETING_VERSION = 2.1.1;
+				MARKETING_VERSION = 2.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.shihlien.TrailMate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

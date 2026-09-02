@@ -78,3 +78,21 @@ Three shape decisions worth recording, all made to keep the output predictable r
 - **Two coordinates per lane, no intermediate vertices.** `NavigationEngine` advances by arc length and interpolates within a segment, so vertex density buys nothing for playback or for the drawn polyline; the hand-drawn path resamples only because a *hand* stroke needs smoothing. Keeping lane endpoints also makes the reported length exact rather than a sum of rounded samples.
 
 Because the route starts on the boundary and not at the point the user clicked, loading it with `resetStart: true` teleports the marker from the center out to that first edge point. That jump is deliberately outside the route: it contributes no distance and no time, so the sheet's estimate is the sweep itself. A practical point cap (4 000 points) fails absurd radius/spacing combinations up front instead of allocating them.
+
+## D13: Why a signed GitHub Pages appcast pointing to GitHub Release DMGs?
+
+TrailMate remains a direct-download app, so the updater needs one stable HTTPS
+feed without turning the repository itself into a website. GitHub Pages hosts
+only `appcast.xml` and a tiny landing page; every executable stays as an
+immutable, versioned GitHub Release asset. Sparkle can update from a DMG
+directly, which lets one Developer ID-signed, notarized artifact serve both the
+manual install and full-update paths.
+
+There are two independent trust layers by design. Apple code signing and
+notarization establish platform identity and Gatekeeper acceptance. Sparkle's
+pinned EdDSA public key authenticates the appcast archive before installation.
+The corresponding private key is a protected release-environment secret with
+an offline recovery export; the app contains only the public key. A public run
+keeps the GitHub Release in draft state until all assets are uploaded, publishes
+it, and deploys the appcast last, so the stable feed cannot advertise an asset
+that is still private or missing.

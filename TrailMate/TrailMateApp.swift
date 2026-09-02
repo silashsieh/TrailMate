@@ -5,6 +5,7 @@ import AppKit
 struct TrailMateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var appState = AppState()
+    @State private var updaterController = UpdaterController()
 
     // Menu bar item visibility (epic 021). Default true; persisted so the menu
     // bar presence survives relaunch. Bound to MenuBarExtra's isInserted.
@@ -20,13 +21,18 @@ struct TrailMateApp: App {
                 .modifier(MainWindowConfigurator(delegate: delegate, appState: appState))
         }
         .defaultSize(width: 1100, height: 700)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updaterController: updaterController)
+            }
+        }
 
         // Set-and-forget preferences (⌘, — epic 017). Must share the same
         // AppState instance as the main window: the bindings' didSet paths
         // (noise σ → SimulationActor, restore toggle → UserDefaults) are what
         // keep the relocated controls behaving identically.
         Settings {
-            SettingsView()
+            SettingsView(updaterController: updaterController)
                 .environment(appState)
         }
 

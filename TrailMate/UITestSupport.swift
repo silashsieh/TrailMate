@@ -4,6 +4,13 @@ import Foundation
 // Launch-argument switches for UI tests, DEBUG-only so release builds carry
 // no test hooks.
 enum UITestSupport {
+    // Unit tests host their bundle in TrailMate.app. Starting Sparkle there can
+    // present its first-run consent window on a clean runner and keep the host
+    // alive after the suite finishes. UI tests carry an explicit launch flag;
+    // hosted unit tests carry Xcode's XCTest configuration environment value.
+    static let isTesting = isUITesting
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     // True for any UI-test launch (every flag below starts with --uitest, and
     // the harness also passes a bare --uitest). Used to skip the real device
     // lister so its Bonjour/usbmux scan never raises the macOS Local Network

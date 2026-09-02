@@ -28,6 +28,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build"
+DERIVED_DATA="$BUILD/DerivedData"
 ARCHIVE="$BUILD/TrailMate.xcarchive"
 EXPORT_DIR="$BUILD/export"
 EXPORT_PLIST="$BUILD/ExportOptions.plist"
@@ -178,6 +179,7 @@ BUILD_SETTINGS="$(xcodebuild \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -configuration Release \
+    -derivedDataPath "$DERIVED_DATA" \
     -destination 'generic/platform=macOS' \
     -showBuildSettings)"
 
@@ -259,6 +261,7 @@ if [ "$SIGNING_MODE" = "developer-id" ]; then
         -project "$PROJECT" \
         -scheme "$SCHEME" \
         -configuration Release \
+        -derivedDataPath "$DERIVED_DATA" \
         -archivePath "$ARCHIVE" \
         -destination 'generic/platform=macOS' \
         CODE_SIGN_STYLE=Manual \
@@ -274,6 +277,7 @@ else
         -project "$PROJECT" \
         -scheme "$SCHEME" \
         -configuration Release \
+        -derivedDataPath "$DERIVED_DATA" \
         -archivePath "$ARCHIVE" \
         -destination 'generic/platform=macOS' \
         CODE_SIGN_STYLE=Manual \

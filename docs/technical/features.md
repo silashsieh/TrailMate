@@ -181,7 +181,10 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 - `packaging/release.sh` supports an explicit credential-free ad-hoc path for local/PR verification and a fail-closed Developer ID path for public releases.
 - Developer ID builds import a password-protected `.p12` into an ephemeral keychain, verify the certificate type and team, sign the nested Python code, app, and DMG, then verify the resulting signatures.
-- Optional notarization uses a team App Store Connect API key with `notarytool`, then staples and assesses the DMG. The GitHub `release` environment supplies these credentials only to the release job; Sparkle remains deferred to [[038-in-app-auto-update]].
+- Optional notarization uses a team App Store Connect API key with `notarytool`, then staples and assesses the DMG. The GitHub `release` environment supplies these credentials only to the release job.
+- **In-app updates (epic 038).** Sparkle 2.9.6 provides the application-menu **Check for Updates…** action plus automatic-check and automatic-download preferences in Settings. The user still confirms installation and relaunch.
+- The app trusts the stable GitHub Pages appcast with a pinned EdDSA public key. Public releases generate the signed feed only after notarization, publish the DMG and any deltas on GitHub Releases, then deploy the exact appcast to Pages. Dry runs create equivalent private workflow artifacts without publishing.
+- v2.1.2 is the bootstrap updater build; its first intended end-to-end update target is v2.2.0.
 
 ## Deferred / dropped
 

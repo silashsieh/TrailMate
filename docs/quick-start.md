@@ -22,6 +22,20 @@ For users who just want to run TrailMate.
    should pass Gatekeeper once the release workflow has been configured with
    its production credentials.
 
+### Updating TrailMate
+
+Starting with v2.1.2, choose **TrailMate → Check for Updates…** to check the
+signed update feed. Automatic checks and downloads are controlled separately
+under **TrailMate → Settings… → Updates**. TrailMate verifies the Sparkle EdDSA
+signature and Apple's code signature, then asks before installing and
+relaunching. v2.1.2 is the bootstrap build intended to test the later update to
+v2.2.0, so it will not find a newer version until that release exists.
+
+If the in-app check cannot reach the feed, download the latest notarized DMG
+from GitHub Releases and replace the app manually. If GitHub Pages is down but
+Releases is available, this manual path remains valid. Never install an update
+from an appcast or DMG hosted outside the official TrailMate GitHub project.
+
 ### 2. Pair your iPhone (one-time)
 
 1. **Enable Developer Mode** on the iPhone: Settings → Privacy & Security → Developer Mode → toggle on → reboot → confirm with passcode.

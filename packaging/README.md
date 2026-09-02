@@ -182,16 +182,24 @@ seven days, but creates no GitHub release and deploys nothing to Pages.
 
 ```sh
 gh workflow run release.yml --ref main \
-  -f dry_run=true
+  -f dry_run=true \
+  -f beta=true
 gh run watch
 ```
 
-After the dry run passes, request the public release explicitly:
+After the dry run passes, request a public beta release explicitly:
 
 ```sh
 gh workflow run release.yml --ref main \
-  -f dry_run=false
+  -f dry_run=false \
+  -f beta=true
 ```
+
+Use `-f beta=false` for a stable release. The beta option marks the GitHub
+release as a pre-release and adds `Beta` to its title; it deliberately keeps
+the tag as `v<MARKETING_VERSION>` so appcast archive URLs remain unchanged.
+This is release metadata, not a separate Sparkle channel: once its appcast is
+deployed, clients using the stable feed can discover the beta release.
 
 Configure required reviewers for the `release` environment if the repository
 plan supports them, and dispatch full releases only from a reviewed `main`.
@@ -200,8 +208,8 @@ stapling step is missing or invalid; the publishing path will not create an
 ad-hoc or unnotarized fallback release.
 
 For a public run, the release first remains a draft while the DMG, appcast, and
-delta assets upload. It becomes public only after every upload succeeds; the
-Pages deployment then publishes that exact appcast at
+delta assets upload. It becomes public (as a pre-release when `beta=true`) only
+after every upload succeeds; the Pages deployment then publishes that exact appcast at
 `https://silashsieh.github.io/TrailMate/appcast.xml`. To restore Pages from a
 published release without rebuilding or resigning anything:
 

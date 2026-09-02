@@ -8,6 +8,11 @@ on:
         required: true
         default: true
         type: boolean
+      beta:
+        description: Mark a published release as a GitHub pre-release (ignored for dry runs)
+        required: true
+        default: true
+        type: boolean
 
 concurrency:
   group: release
@@ -97,14 +102,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          BETA: ${{ inputs.beta }}
         run: |
+          release_flags=(--draft)
+          release_title="v$VERSION"
+          if [[ "$BETA" == "true" ]]; then
+            release_flags+=(--prerelease)
+            release_title="$release_title Beta"
+          fi
+
           gh release create "v$VERSION" \
             "build/TrailMate-$VERSION.dmg" \
             "build/appcast/appcast.xml" \
             --target "$GITHUB_SHA" \
-            --title "v$VERSION" \
+            --title "$release_title" \
             --generate-notes \
-            --draft
+            "${release_flags[@]}"
 
           while IFS= read -r delta; do
             gh release upload "v$VERSION" "$delta"

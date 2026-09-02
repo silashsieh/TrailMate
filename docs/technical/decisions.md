@@ -96,3 +96,10 @@ an offline recovery export; the app contains only the public key. A public run
 keeps the GitHub Release in draft state until all assets are uploaded, publishes
 it, and deploys the appcast last, so the stable feed cannot advertise an asset
 that is still private or missing.
+
+Sparkle's signed-feed policy is paired with pre-extraction verification. The
+release pipeline also treats the app mounted from the finished DMG—not the
+pre-staging export—as the integrity boundary. It stages bundles with `ditto`
+and fails if either the staged copy or the final packaged copy no longer passes
+deep, strict Developer ID verification. This closes the two gaps discovered in
+the v2.1.2 bootstrap pre-release (epic 047).

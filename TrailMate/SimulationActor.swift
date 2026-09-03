@@ -47,8 +47,8 @@ nonisolated struct SimulationTiming: Sendable {
 // hop into separate isolation domains.
 actor SimulationActor {
     private let bridge: SimulationStateBridge
-    private let recorderRef: RecorderService
     private let timing: SimulationTiming
+    private var recordingCapture: RecordingCapture
 
     private let nav = NavigationEngine()
     private let joy = JoystickEngine()
@@ -68,11 +68,6 @@ actor SimulationActor {
 
     private var lastEmittedCoordinate: CLLocationCoordinate2D?
 
-    // Pending point count + recording flag — owned here so the snapshot push
-    // doesn't need to read RecorderService across actor boundaries.
-    private var isRecordingActive = false
-    private var pendingPointCount = 0
-
     private static let deviationAbortMeters: Double = 200
     private static let deviationAbortSeconds: TimeInterval = 10
 
@@ -80,10 +75,15 @@ actor SimulationActor {
     nonisolated let events: AsyncStream<SimulationEvent>
     nonisolated private let eventsContinuation: AsyncStream<SimulationEvent>.Continuation
 
-    init(bridge: SimulationStateBridge, recorder: RecorderService, timing: SimulationTiming = .production) {
+    init(
+        bridge: SimulationStateBridge,
+        monotonicTime: MonotonicTimeSource = .continuous,
+        wallNow: @escaping @Sendable () -> Date = { Date() },
+        timing: SimulationTiming = .production
+    ) {
         self.bridge = bridge
-        self.recorderRef = recorder
         self.timing = timing
+        self.recordingCapture = RecordingCapture(monotonicTime: monotonicTime, wallNow: wallNow)
         var continuation: AsyncStream<SimulationEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
         self.eventsContinuation = continuation
@@ -128,6 +128,7 @@ actor SimulationActor {
         lastDisplayPush = nil
         deviationStartedAt = nil
         isScrubbing = false
+        recordingCapture.discard()
         backend = nil
         if let token = activityToken {
             ProcessInfo.processInfo.endActivity(token as! NSObjectProtocol)
@@ -354,22 +355,25 @@ actor SimulationActor {
     // MARK: - Recording
 
     func startRecording() async {
-        guard !isRecordingActive else { return }
-        isRecordingActive = true
-        pendingPointCount = 0
-        let recorder = recorderRef
-        await MainActor.run { recorder.start() }
+        recordingCapture.start()
         await pushSnapshotNow()
     }
 
-    func stopRecording() async throws -> URL? {
-        guard isRecordingActive else { return nil }
-        isRecordingActive = false
-        pendingPointCount = 0
-        let recorder = recorderRef
-        let url = try await MainActor.run { try recorder.stop() }
+    func stopRecording() async -> RecordingCapture.Draft? {
+        let draft = recordingCapture.stop()
         await pushSnapshotNow()
-        return url
+        return draft
+    }
+
+    func discardRecording() async {
+        recordingCapture.discard()
+        await pushSnapshotNow()
+    }
+
+    // Read-only projection used by lifecycle/reconnect code and tests. The
+    // capture remains the sole owner of the active flag, buffer, and count.
+    func recordingStatus() -> RecordingCapture.Status {
+        recordingCapture.status
     }
 
     // MARK: - Loops
@@ -493,11 +497,7 @@ actor SimulationActor {
         lastEmittedCoordinate = clean
         let noisy = noise.apply(to: clean)
         backend?.setLocationQuiet(latitude: noisy.latitude, longitude: noisy.longitude)
-        if isRecordingActive {
-            pendingPointCount &+= 1
-            let recorder = recorderRef
-            Task { @MainActor in recorder.append(clean) }
-        }
+        recordingCapture.append(clean)
     }
 
     private func makeSnapshot(routeDeviationMeters: Double) -> SimSnapshot {
@@ -511,8 +511,8 @@ actor SimulationActor {
             joystickIsActive: joy.isActive,
             joystickControllerName: joy.connectedControllerName,
             routeDeviationMeters: routeDeviationMeters,
-            recordingPointCount: pendingPointCount,
-            isRecording: isRecordingActive
+            recordingPointCount: recordingCapture.pointCount,
+            isRecording: recordingCapture.isActive
         )
     }
 

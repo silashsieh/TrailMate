@@ -16,7 +16,7 @@ struct AppRuntimePathsTests {
         #expect(paths.tunnelControlDirectory == root.appendingPathComponent("tunnels", isDirectory: true))
         #expect(paths.aiSocketURL == root.appendingPathComponent("ai.sock", isDirectory: false))
         #expect(SavedRoutesStore.baseURL == paths.savedRoutesDirectory)
-        #expect(RecorderService.baseURL == paths.recordingsDirectory)
+        #expect(RecordingsLibrary.baseURL == paths.recordingsDirectory)
     }
 
     @Test func appHostedTestProcessUsesAnIsolatedConfiguration() {
@@ -37,7 +37,7 @@ struct AppRuntimePathsTests {
 
         #expect(app.defaults === runtime.defaults)
         #expect(app.runtimePaths == runtime.runtimePaths)
-        #expect(app.recorder.baseURL == runtime.runtimePaths.recordingsDirectory)
+        #expect(app.recordingsLibrary.baseURL == runtime.runtimePaths.recordingsDirectory)
         #expect(app.savedRoutes.baseURL == runtime.runtimePaths.savedRoutesDirectory)
         #expect(app.tunnelBroker.controlDirectory == runtime.runtimePaths.tunnelControlDirectory)
         #expect(app.customSpeedKmh == 37.0)

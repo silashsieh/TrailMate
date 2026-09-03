@@ -85,7 +85,7 @@ private struct SidebarView: View {
                 SavedRoutesSection()
             }
 
-            if !appState.recorder.recordings.isEmpty {
+            if !appState.recordingsLibrary.recordings.isEmpty {
                 RecordingsSection()
             }
 
@@ -943,7 +943,7 @@ private struct RecordingsSection: View {
 
     var body: some View {
         Section("Recordings") {
-            ForEach(appState.recorder.recordings) { session in
+            ForEach(appState.recordingsLibrary.recordings) { session in
                 RecordingRow(session: session)
             }
         }
@@ -951,7 +951,7 @@ private struct RecordingsSection: View {
 }
 
 private struct RecordingRow: View {
-    let session: RecorderService.Session
+    let session: RecordingsLibrary.Session
     @Environment(AppState.self) private var appState
     @State private var showSaveRoutePrompt = false
     @State private var routeName = ""

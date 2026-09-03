@@ -67,27 +67,27 @@ session's capture, but deliberately hides its recording state until the user swi
 
 ## Stories
 
-- [ ] Extract `RecordingCapture`: a per-session, actor-owned buffer with `start()`, synchronous
+- [x] Extract `RecordingCapture`: a per-session, actor-owned buffer with `start()`, synchronous
       `append(_:)`, `stop()`, and `discard()`. `start()` captures a wall-clock `Date` anchor and a
       `ContinuousClock.Instant`; each append stamps the point at emission as
       `wallStart + (continuousNow - continuousStart)`. The hot path performs no MainActor task and
       never samples wall time again. `stop()` returns an immutable `Sendable` draft (id, startedAt,
       points); `discard()` clears the active draft without returning anything.
-- [ ] Replace `RecorderService` with the app-wide `RecordingsLibrary`: GPX persistence, index loading,
+- [x] Replace `RecorderService` with the app-wide `RecordingsLibrary`: GPX persistence, index loading,
       delete — no live capture state. Give it an injected base directory, defaulting to TrailMate's
       production Application Support recordings directory, so tests can use a temporary directory
       without touching the user's recordings.
-- [ ] `SimulationActor` owns its `RecordingCapture`; the actor-side `isRecordingActive` /
+- [x] `SimulationActor` owns its `RecordingCapture`; the actor-side `isRecordingActive` /
       `pendingPointCount` become derived from the capture (single source of truth per session).
-- [ ] An explicit Stop hands the draft to `RecordingsLibrary` for persistence; snapshot fields
+- [x] An explicit Stop hands the draft to `RecordingsLibrary` for persistence; snapshot fields
       (`recordingPointCount`, `isRecording`) continue flowing to the bridge unchanged. App quit and
       session removal call `discard()` instead: an in-progress capture is not implicitly saved and
       no new GPX/index entry is created.
-- [ ] Keep recording UI selected-session-only. Switching from A to B leaves A's capture running but
+- [x] Keep recording UI selected-session-only. Switching from A to B leaves A's capture running but
       shows only B's recording flag/count and Record button state; switching back to A reveals A's
       still-active capture and current count. Do not add a recording badge to the device switcher or
       an app-global "recording elsewhere" indicator.
-- [ ] Unit tests: two actors recording concurrently produce two disjoint drafts; stop order
+- [x] Unit tests: two actors recording concurrently produce two disjoint drafts; stop order
       doesn't matter; points appended after one session stops still land in the other's draft;
       counter matches persisted points; timestamps advance from injected `ContinuousClock` instants;
       switching the selected session does not stop either capture; shutdown discards active drafts;

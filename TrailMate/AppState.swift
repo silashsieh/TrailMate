@@ -162,7 +162,7 @@ final class AppState {
     // devices, one auth prompt per session. Sessions resolve their RSD endpoint
     // through it on connect; torn down only at app quit.
     let tunnelBroker: TunnelBroker
-    let recorder: RecorderService
+    let recordingsLibrary: RecordingsLibrary
     let savedRoutes: SavedRoutesStore
     let savedWaypointsStore: SavedWaypointsStore
 
@@ -216,7 +216,7 @@ final class AppState {
         self.runtimePaths = runtimePaths
         self.monotonicTime = monotonicTime
         self.tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
-        self.recorder = RecorderService(baseURL: runtimePaths.recordingsDirectory)
+        self.recordingsLibrary = RecordingsLibrary(baseURL: runtimePaths.recordingsDirectory)
         self.savedRoutes = SavedRoutesStore(baseURL: runtimePaths.savedRoutesDirectory)
         self.savedWaypointsStore = SavedWaypointsStore(defaults: defaults)
         self.restoreLastSimulatedLocation = SimulatedPositionPersistence.restoreOnLaunch(in: defaults)
@@ -267,7 +267,7 @@ final class AppState {
         } catch {
             addLog("Could not load saved locations: \(error.localizedDescription)")
         }
-        recorder.loadIndex()
+        recordingsLibrary.loadIndex()
         savedRoutes.load()
 
         // The aiControlEnabled didSet doesn't fire for the in-init default, so
@@ -521,7 +521,7 @@ final class AppState {
     func importGPX() { selectedSession.importGPX() }
     func exportGPX() { selectedSession.exportGPX() }
     func toggleRecording() { selectedSession.toggleRecording() }
-    func replayRecording(_ recording: RecorderService.Session) { selectedSession.replayRecording(recording) }
+    func replayRecording(_ recording: RecordingsLibrary.Session) { selectedSession.replayRecording(recording) }
 
     // MARK: - AI command dispatch (epic 019)
 
@@ -890,7 +890,7 @@ final class AppState {
 
     // MARK: - Recording library
 
-    func exportRecording(_ recording: RecorderService.Session) {
+    func exportRecording(_ recording: RecordingsLibrary.Session) {
         guard let src = recording.fileURL else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "gpx") ?? .xml]
@@ -908,8 +908,8 @@ final class AppState {
         }
     }
 
-    func deleteRecording(_ recording: RecorderService.Session) {
-        recorder.delete(recording)
+    func deleteRecording(_ recording: RecordingsLibrary.Session) {
+        recordingsLibrary.delete(recording)
     }
 
     // MARK: - Saved Routes (app-global library; reaches into the active session)
@@ -1043,7 +1043,7 @@ final class AppState {
         }
     }
 
-    func saveRecordingAsRoute(_ recording: RecorderService.Session, name: String) {
+    func saveRecordingAsRoute(_ recording: RecordingsLibrary.Session, name: String) {
         let coords = recording.points.map { SavedRoute.Coord(lat: $0.latitude, lon: $0.longitude) }
         let route = SavedRoute(
             id: UUID(),

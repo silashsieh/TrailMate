@@ -70,7 +70,7 @@ final class DeviceSession: Identifiable {
     init(manager: AppState) {
         self.manager = manager
         self.simState = SimulationStateBridge(defaults: manager.defaults)
-        self.sim = SimulationActor(bridge: simState, recorder: manager.recorder)
+        self.sim = SimulationActor(bridge: simState, monotonicTime: manager.monotonicTime)
 
         // Consume simulation events (route abort) for log writes.
         let stream = sim.events
@@ -669,7 +669,8 @@ final class DeviceSession: Identifiable {
         if simState.isRecording {
             Task {
                 do {
-                    if let url = try await sim.stopRecording() {
+                    if let draft = await sim.stopRecording(),
+                       let url = try manager.recordingsLibrary.persist(draft) {
                         manager.addLog("Recording saved: \(url.lastPathComponent)")
                     } else {
                         manager.addLog("Recording stopped (no points captured).")
@@ -686,7 +687,7 @@ final class DeviceSession: Identifiable {
         }
     }
 
-    func replayRecording(_ recording: RecorderService.Session) {
+    func replayRecording(_ recording: RecordingsLibrary.Session) {
         guard connectionStatus.isConnected else {
             manager.addLog("Connect to a device before replaying.")
             return

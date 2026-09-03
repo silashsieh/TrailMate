@@ -38,6 +38,8 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
+- **v2.1.3 — Sparkle bootstrap hotfix:**
+  [047 — Repair the Sparkle bootstrap and DMG integrity checks](epics/047-repair-sparkle-bootstrap.md).
 - **v2.4.0 — Map-surface re-architecture (idle CPU):**
   [041 — Telemetry plane: frequency-partitioned simulation state](epics/041-telemetry-plane.md),
   [037 — Map-surface re-architecture: MKMapView on the telemetry plane for idle CPU](epics/037-mkmapview-idle-cpu.md)

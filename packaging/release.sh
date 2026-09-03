@@ -53,6 +53,8 @@ TEMP_KEYCHAIN=""
 SIGNING_TEMP_DIR=""
 ORIGINAL_KEYCHAINS=()
 EXPORT_METHOD=""
+VERIFY_MOUNT_POINT=""
+VERIFY_MOUNTED=0
 
 die() {
     echo "✗ $*" >&2
@@ -71,7 +73,53 @@ cleanup_signing_keychain() {
     fi
 }
 
-trap cleanup_signing_keychain EXIT
+cleanup_release() {
+    if [ "$VERIFY_MOUNTED" = 1 ] && [ -n "$VERIFY_MOUNT_POINT" ]; then
+        hdiutil detach "$VERIFY_MOUNT_POINT" >/dev/null 2>&1 || true
+    fi
+    if [ -n "$VERIFY_MOUNT_POINT" ] && [ -d "$VERIFY_MOUNT_POINT" ]; then
+        rmdir "$VERIFY_MOUNT_POINT" >/dev/null 2>&1 || true
+    fi
+    cleanup_signing_keychain
+}
+
+trap cleanup_release EXIT
+
+verify_sparkle_security_configuration() {
+    local app="$1"
+    local info_plist="$app/Contents/Info.plist"
+    local require_signed_feed
+    local verify_before_extraction
+
+    require_signed_feed="$(plutil -extract SURequireSignedFeed raw -o - "$info_plist" 2>/dev/null || true)"
+    verify_before_extraction="$(plutil -extract SUVerifyUpdateBeforeExtraction raw -o - "$info_plist" 2>/dev/null || true)"
+
+    [ "$require_signed_feed" = true ] || die "The built app must require a signed Sparkle feed"
+    [ "$verify_before_extraction" = true ] \
+        || die "SUVerifyUpdateBeforeExtraction must be enabled with SURequireSignedFeed"
+}
+
+verify_app_inside_dmg() {
+    local packaged_app
+
+    VERIFY_MOUNT_POINT="$(mktemp -d "${TMPDIR:-/tmp}/trailmate-dmg-verify.XXXXXX")"
+    hdiutil attach \
+        -readonly \
+        -nobrowse \
+        -mountpoint "$VERIFY_MOUNT_POINT" \
+        "$DMG" >/dev/null
+    VERIFY_MOUNTED=1
+
+    packaged_app="$VERIFY_MOUNT_POINT/TrailMate.app"
+    [ -d "$packaged_app" ] || die "Finished DMG does not contain TrailMate.app"
+    verify_sparkle_security_configuration "$packaged_app"
+    codesign --verify --deep --strict --verbose=2 "$packaged_app"
+
+    hdiutil detach "$VERIFY_MOUNT_POINT" >/dev/null
+    VERIFY_MOUNTED=0
+    rmdir "$VERIFY_MOUNT_POINT"
+    VERIFY_MOUNT_POINT=""
+}
 
 warn_if_private_file_is_exposed() {
     local path="$1"
@@ -309,6 +357,7 @@ xcodebuild -exportArchive \
 
 APP="$EXPORT_DIR/TrailMate.app"
 [ -d "$APP" ] || die "Export did not produce $APP"
+verify_sparkle_security_configuration "$APP"
 
 if [ "$SIGNING_MODE" = "developer-id" ]; then
     echo "→ Verifying Developer ID signatures"
@@ -320,8 +369,13 @@ fi
 # 4. Stage and create the drag-to-install DMG.
 echo "→ Staging DMG contents"
 mkdir -p "$STAGE"
-cp -R "$APP" "$STAGE/"
+ditto --rsrc --extattr "$APP" "$STAGE/TrailMate.app"
 ln -s /Applications "$STAGE/Applications"
+
+if [ "$SIGNING_MODE" = "developer-id" ]; then
+    echo "→ Verifying staged app signature"
+    codesign --verify --deep --strict --verbose=2 "$STAGE/TrailMate.app"
+fi
 
 echo "→ Creating $DMG"
 hdiutil create \
@@ -354,6 +408,11 @@ if [ "$NOTARIZE" = 1 ]; then
         --context context:primary-signature \
         --verbose=4 \
         "$DMG"
+fi
+
+if [ "$SIGNING_MODE" = "developer-id" ]; then
+    echo "→ Verifying app inside finished DMG"
+    verify_app_inside_dmg
 fi
 
 echo

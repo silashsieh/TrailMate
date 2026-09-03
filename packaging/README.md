@@ -2,8 +2,13 @@
 
 `packaging/build.sh` produces `PythonResources/`, a self-contained CPython
 runtime plus `pymobiledevice3`. `packaging/release.sh` archives the macOS app,
-exports it, verifies its signature, and packages it as
+exports it, verifies its signature, stages it with metadata-preserving `ditto`,
+and packages it as
 `build/TrailMate-<version>.dmg`.
+
+Developer ID builds also verify the staged app and the exact app mounted from
+the finished DMG. The packaged copy is the release integrity boundary: a valid
+export is not enough if staging changes nested bundle metadata.
 
 After the DMG has been signed, notarized, and stapled,
 `packaging/generate-appcast.sh` uses Sparkle's release tool to create an
@@ -103,7 +108,8 @@ only the password.
 
 The script rejects a certificate that is not a usable Developer ID Application
 identity or does not belong to `APPLE_TEAM_ID` (defaulted from the Xcode
-project). It then verifies the exported app and DMG with `codesign`.
+project). It then verifies the exported app, staged app, DMG, and app mounted
+from the finished DMG with `codesign`.
 
 ## Notarize the DMG
 
@@ -214,11 +220,13 @@ after every upload succeeds; the Pages deployment then publishes that exact appc
 published release without rebuilding or resigning anything:
 
 ```sh
-gh workflow run static.yml --ref main -f release_tag=v2.1.2
+gh workflow run static.yml --ref main -f release_tag=v2.1.3
 ```
 
-v2.1.2 is the bootstrap Sparkle release. It will not offer an update to itself;
-its first full updater test is installing a later v2.2.0 release.
+v2.1.3 is the corrected bootstrap Sparkle release. It will not offer an update
+to itself; its first full updater test is installing a later v2.2.0 release.
+The public v2.1.2 pre-release cannot start its updater safely and its packaged
+app has damaged nested signatures, so replace it manually with v2.1.3 once.
 
 ## Primary references
 

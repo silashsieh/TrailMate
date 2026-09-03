@@ -85,11 +85,15 @@ TrailMate/
 `TrailMateApp`. It owns the single `SPUStandardUpdaterController`, projects
 Sparkle's KVO preferences into Swift Observation for Settings, and backs the
 application-menu update command. Its trust configuration lives in
-`Info.plist`: a fixed HTTPS feed URL, a pinned EdDSA public key, and a required
-signed feed. The private key exists only outside the app in release operations.
+`Info.plist`: a fixed HTTPS feed URL, a pinned EdDSA public key, a required
+signed feed, and verification before archive extraction. Sparkle requires the
+last setting whenever a signed feed is mandatory. The private key exists only
+outside the app in release operations.
 
-The release data flow is deliberately ordered: `release.sh` produces and
-notarizes the Developer ID DMG; `generate-appcast.sh` signs its Sparkle entry;
+The release data flow is deliberately ordered: `release.sh` exports and verifies
+the app, stages it with `ditto` so bundle metadata survives, verifies the staged
+copy, produces and notarizes the Developer ID DMG, then mounts that finished DMG
+and verifies the exact packaged app; `generate-appcast.sh` signs its Sparkle entry;
 the workflow uploads all assets to a draft release; it publishes that release;
 and only then does the reusable Pages workflow deploy the immutable appcast.
 The appcast points at GitHub Release assets, so Pages contains no executables.

@@ -24,12 +24,16 @@ For users who just want to run TrailMate.
 
 ### Updating TrailMate
 
-Starting with v2.1.2, choose **TrailMate → Check for Updates…** to check the
+Starting with v2.1.3, choose **TrailMate → Check for Updates…** to check the
 signed update feed. Automatic checks and downloads are controlled separately
 under **TrailMate → Settings… → Updates**. TrailMate verifies the Sparkle EdDSA
 signature and Apple's code signature, then asks before installing and
-relaunching. v2.1.2 is the bootstrap build intended to test the later update to
+relaunching. v2.1.3 is the corrected bootstrap build intended to test the later update to
 v2.2.0, so it will not find a newer version until that release exists.
+
+The public v2.1.2 pre-release has a broken updater configuration and damaged
+nested signatures in its packaged app. Replace it manually with v2.1.3 once;
+v2.1.2 cannot repair itself through Sparkle.
 
 If the in-app check cannot reach the feed, download the latest notarized DMG
 from GitHub Releases and replace the app manually. If GitHub Pages is down but

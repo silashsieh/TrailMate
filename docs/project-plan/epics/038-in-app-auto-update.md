@@ -89,6 +89,9 @@ version.
   trust; Sparkle EdDSA authenticates the update feed and archive.
 - **Bootstrap in v2.1.2 (2026-09-02, owner's call).** v2.1.2 is the first
   Sparkle-aware build so the update into v2.2.0 can be tested end to end.
+- **Corrected bootstrap in v2.1.3 (2026-09-03).** Public v2.1.2 exposed two
+  release defects and cannot self-update. Epic 047 repairs the configuration
+  and packaged signature; v2.1.3 replaces it as the v2.2.0 test source.
 - **GitHub Pages feed, GitHub Release DMGs.** The stable feed is
   `https://silashsieh.github.io/TrailMate/appcast.xml`; its signed enclosures
   point to versioned `.dmg` assets on GitHub Releases.
@@ -102,6 +105,10 @@ version.
   outside the repository; the app and repository contain only the public key.
 
 ## Bugs / follow-ups found while building
+
+- [[047-repair-sparkle-bootstrap]] — v2.1.2 omitted Sparkle's required
+  pre-extraction verification setting and damaged the app signature while
+  staging the DMG.
 
 ## Acceptance criteria
 

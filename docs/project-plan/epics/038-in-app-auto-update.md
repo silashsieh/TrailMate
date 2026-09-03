@@ -99,7 +99,8 @@ version.
   `https://silashsieh.github.io/TrailMate/appcast.xml`; its signed enclosures
   point to versioned `.dmg` assets on GitHub Releases.
 - **Use Sparkle's DMG support.** The same notarized DMG supports manual installs
-  and full Sparkle updates. `generate_appcast` also creates deltas when useful.
+  and full Sparkle updates. Delta generation is disabled until the pipeline can
+  preserve per-version GitHub Release URLs while loading historical archives.
 - **Consent-first automation.** Sparkle owns first-run update-check consent.
   Settings exposes automatic checks and downloads; neither bypasses Sparkle's
   confirmation before installation and relaunch.
@@ -113,8 +114,9 @@ version.
   pre-extraction verification setting and damaged the app signature while
   staging the DMG.
 - The public v2.1.3 bootstrap was successfully installed and reached the signed
-  Pages feed on 2026-09-03. Publishing v2.2.0 is the remaining end-to-end
-  download, installation, and relaunch test.
+  Pages feed on 2026-09-03. Stable v2.2.0 was published on 2026-09-03; using
+  that existing v2.1.3 installation to download, install, and relaunch into it
+  is the remaining end-to-end test.
 - The first v2.2.0 dry run exposed a historical URL bug: loading the v2.1.2 DMG
   while generating v2.1.3 had rewritten its enclosure under the v2.1.3 tag.
   Feed generation now normalizes tag/version pairs, retains historical entries

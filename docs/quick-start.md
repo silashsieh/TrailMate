@@ -28,8 +28,8 @@ Starting with v2.1.3, choose **TrailMate → Check for Updates…** to check the
 signed update feed. Automatic checks and downloads are controlled separately
 under **TrailMate → Settings… → Updates**. TrailMate verifies the Sparkle EdDSA
 signature and Apple's code signature, then asks before installing and
-relaunching. v2.1.3 is the corrected bootstrap build; v2.2.0 is its first
-intended end-to-end update target.
+relaunching. v2.2.0 is the current stable release and the first published
+update target for the corrected v2.1.3 bootstrap.
 
 The public v2.1.2 pre-release has a broken updater configuration and damaged
 nested signatures in its packaged app. Replace it manually with v2.1.3 once;
@@ -83,7 +83,9 @@ cd TrailMate
 
 Output: `TrailMate/PythonResources/` (~210 MB). The python-build-standalone tarball is cached under `packaging/.cache/`, so subsequent runs are fast.
 
-On a fresh clone, the bundle is not yet wired into the Xcode project. See [`packaging/README.md`](../packaging/README.md) for the one-time Xcode steps (folder reference, entitlements, re-sign Run Script phase). Skip this section if you only need to build the DMG via `release.sh`.
+The Xcode project is already wired to copy the generated `TrailMate/PythonResources/`
+bundle and re-sign its embedded code. See [`packaging/README.md`](../packaging/README.md)
+for the signing and release details.
 
 ### 2. Open and run
 

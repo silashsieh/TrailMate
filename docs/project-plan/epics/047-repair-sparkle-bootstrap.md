@@ -50,8 +50,8 @@ then use it to test the update to v2.2.0.
 
 ## Open questions
 
-- None for the repair. Delta efficiency across Python-runtime changes remains
-  tracked by epic 038.
+- None for the repair. Delta generation is disabled and its future URL/hosting
+  strategy remains tracked by epic 038.
 
 ## Decisions made along the way
 
@@ -61,6 +61,9 @@ then use it to test the update to v2.2.0.
   fails unless the app users receive passes deep, strict signature validation.
 - Cut build 11 as v2.1.3. v2.1.2 remains immutable and is documented as a
   broken bootstrap that must be replaced manually once.
+- Stable v2.2.0 was published on 2026-09-03 with the corrected signed feed. The
+  final acceptance check is performing the update from the installed v2.1.3
+  bootstrap and confirming installation and relaunch.
 
 ## Bugs / follow-ups found while building
 

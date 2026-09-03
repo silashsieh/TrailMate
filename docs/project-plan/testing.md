@@ -96,9 +96,12 @@ Coverage:
   `radioButtons` (`sheet.radioButtons["Sweeping"]`); the sweep math itself is
   `CoverageRouteBuilderTests`, not here.
 
-Every test leaves user preferences as it found them (UI tests run against the real
-`com.sh.TrailMate` defaults). Deliberately device-free and data-free otherwise, so the suite
-passes identically on a clean CI user and a dev Mac.
+The UI tests currently run against the real `com.sh.TrailMate` defaults. The restore toggle is put
+back exactly, but the language, Wander, and Log tests normalize to factory values rather than
+restoring arbitrary prior values. App-hosted `AppState` tests also isolate `UserDefaults` while still
+reading the production recording/route directories through fixed service roots. This isolation gap
+must be fixed before expanding the suite; see the 2026-09-03 matrix in
+[[033-refresh-test-coverage]].
 
 **Test-only launch hooks (DEBUG builds only; `UITestSupport.swift`).**
 
@@ -110,7 +113,8 @@ passes identically on a clean CI user and a dev Mac.
   `connect()` attach a `MockSimulationBackend` — no tunnel, no admin prompt, no daemon;
   commands are accepted and location updates swallowed. This is the "record-only mock"
   backend the `SimulationBackend` protocol was shaped for, and it unlocks any
-  connected-gated UI (`testMockConnectionEnablesConnectedUI` exercises the connect flow).
+  connected-gated UI (`testMockConnectionShowsConnectedDeviceNameAndStatus` exercises the connect
+  flow).
 - `--uitest-open-wander` opens the Wander sheet at launch with a synthetic center, so the
   preset-persistence test (epic 018's contract — selection saved on every change, not just
   Start) can verify a full relaunch round-trip without driving the map long-press, which
@@ -124,15 +128,25 @@ passes identically on a clean CI user and a dev Mac.
 Query gotcha for future tests: SwiftUI exposes sidebar headers/buttons as accessibility
 *labels* but Form/row `Text`s as *values* — match the latter with a `value ==` predicate.
 
-## Unit Tests (TODO)
+## Automated Coverage (TODO)
 
-- **`DaemonProtocolTests`** — fake daemon process that records commands; verify `DaemonBridge`
-  sends correct command strings and parses responses. Needs a fake-daemon harness; build it the
-  next time the protocol changes.
-- **`RouteVMTests`** — search, From/To state transitions, route calculation result handling.
-- **`RecorderServiceTests`** — record → persist → reload → coords identical. Deferred: the
-  app-hosted test process shares the real `~/Library/Application Support/TrailMate/`, so this
-  needs injectable storage paths first.
+The authoritative, acceptance-level gap matrix is in [[033-refresh-test-coverage]]. In summary:
+
+- **Multi-session/AppState:** collection and selection invariants, joystick/tuning ownership,
+  connected-name switching, and a two-device UI path.
+- **AI control:** every `AppState.dispatch` verb plus the real Unix-socket lifecycle and framing.
+- **Connection stack:** discovery/tunnel-map parsers, `DaemonBridge` pipe protocol/failures, and
+  `DeviceSession` disconnect/retry isolation. Epics 042/043 create the immediate seam.
+- **Offline routing:** replace the stale `RouteVMTests` name with `DeviceSessionRouteTests` behind an
+  injected `RoutingService`; cover offline build/play/save and error transitions.
+- **Saved libraries:** waypoint defaults and route files/order sidecar through isolated persistence;
+  owned by epic 039.
+- **Recording:** replace the shared-recorder TODO with `RecordingCaptureTests` and temporary-root
+  `RecordingsLibraryTests`; owned by epic 040.
+- **Simulation cadence/deviation:** idle suppression, idle re-emission, UI push caps, Rejoin, and
+  timed route abort through an injected clock/tick driver.
+- **Updater/background UI:** update and menu/Dock preference round-trips plus pure status/activation
+  decisions. Signed production update and MenuBarExtra interaction remain manual.
 
 ## Integration Tests (TODO — semi-automated, slower)
 
@@ -158,7 +172,7 @@ To live in `TrailMateTests/ManualSmokeTestPlan.md` once written.
 
 Items the automated suites can't cover (UI-fragile or device-bound), so verify here:
 
-1. Menu-bar device name (epic 026): connect a device; the menu-bar item reads `<name> · Connected · <activity>` (MenuBarExtra content isn't UICTest-queryable).
+1. Menu-bar device name (epic 026): connect a device; the menu-bar item reads `<name> · Connected · <activity>` (MenuBarExtra content isn't XCUITest-queryable).
 1. Place search → Go (epic 027): type a place name, pick a result; the red dot teleports there and the map pans to frame it (needs live MapKit local search).
 1. Saved-items library (epic 029): drag to reorder a saved location and a saved route; assign each to a category via the row context menu; relaunch and confirm both order and category stick. Selecting a saved item auto-pans the map to frame it. (Reorder/auto-pan *math* is unit-tested in `SavedItemsLibraryTests`; the drag/context-menu UI is checked here.)
 1. Map-control overlap (epic 024): with the joystick active mid-route, confirm the map controls and off-route indicator don't occlude each other (layout/occlusion, asserted visually).
@@ -167,7 +181,15 @@ Items the automated suites can't cover (UI-fragile or device-bound), so verify h
 
 ## Implementation order for the remaining suites (suggested)
 
-1. `RecorderServiceTests` — once storage paths are injectable.
-2. `RouteVMTests` — pure state-machine coverage of search and From/To transitions.
-3. `DaemonProtocolTests` — needs a fake daemon harness; build it the next time the protocol changes.
-4. Smoke-test checklist — write it down and run it manually for the next release; automate piecewise later.
+The worktree ownership, dependencies, merge waves, and release gates are coordinated by
+[[v2.3.0-design]]; this section is the testing-only projection of that plan.
+
+1. Land the isolated filesystem roots in epics 039/040 and an isolated socket/defaults setup, so
+   later tests cannot read or alter personal data.
+2. Add `AppStateSessionTests` and `DeviceSessionRouteTests`; reuse their fakes for the full AI
+   dispatch matrix and two-device UI hook.
+3. Build the fake pipe/connection harness with epics 042/043, then cover discovery, tunnel-map, and
+   daemon/session failure transitions.
+4. Add the socket-lifecycle suite, actor cadence/deviation tests, and updater/background UI tests.
+5. Write and run `TrailMateTests/ManualSmokeTestPlan.md` for the remaining device-, system-, and
+   release-bound checks before the v2.3.0 tag.

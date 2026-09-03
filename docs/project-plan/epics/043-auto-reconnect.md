@@ -39,11 +39,15 @@ gone:
 
 ## Goal
 
-**Auto-reconnect is armed by an explicit Connect and disarmed only by an explicit Disconnect.**
-Inside that window, any connection the app loses on its own recovers itself: TrailMate retries
-**10 times, 5 seconds apart** (≈50 s), without user action. If all 10 fail it stops and settles
-into the ordinary disconnected state. An intentional Disconnect never reconnects, and a
-re-authorization is never forced silently.
+**Auto-reconnect is armed by an explicit Connect and disarmed by an intentional Disconnect or
+Cancel retry.** While the Settings toggle enables the policy, any connection the app loses on its
+own inside that window recovers itself: TrailMate retries
+**10 times**, with each attempt beginning after a full **5-second post-failure delay**, without user
+action. The triggering abnormal disconnect starts the delay before attempt 1; after attempts 1–9
+fail, each failure starts a fresh delay before the next attempt. Attempt 10's failure settles
+immediately into the ordinary disconnected state — there is no useless final delay. Attempt runtime
+is additional to the delay, so this is not a fixed 50-second wall-clock window. An intentional
+Disconnect never reconnects, and a re-authorization is never forced silently.
 
 ## Out of scope
 
@@ -54,11 +58,19 @@ re-authorization is never forced silently.
 
 ## Stories
 
-- [ ] Arm on explicit Connect; disarm on explicit Disconnect. Only `expectingExit` (user
-      Disconnect) suppresses retry — every other loss of connection inside that window retries.
-- [ ] Retry policy: **10 attempts at a fixed 5 s interval**, then stop and settle into the
-      disconnected state — never retry forever at a device that is powered off or unplugged.
-      The attempt counter resets after any successful reconnect, so a later drop gets a fresh 10.
+- [ ] Arm on explicit Connect; disarm on explicit Disconnect or Cancel retry. Only intentional
+      user actions suppress an armed retry — every app-observed loss inside that window retries
+      while the Settings policy is enabled.
+- [ ] Retry policy: **10 attempts, each after a fixed 5 s post-failure delay**, then stop and settle
+      into the disconnected state — never retry forever at a device that is powered off or unplugged.
+      The first delay starts when the abnormal drop is observed; later delays start only after the
+      preceding attempt has failed, so attempts never overlap and attempt runtime does not consume
+      the five seconds. Attempt 10 fails directly to disconnected with no final delay. The attempt
+      counter resets after any successful reconnect, so a later drop gets a fresh 10.
+- [ ] Split the existing connection machinery into a single-attempt primitive and its callers'
+      policies. Explicit Connect may retain its current startup retry behavior; auto-reconnect must
+      invoke exactly one prompt-free connection attempt per numbered retry and must not nest the
+      existing three-attempt loop.
 - [ ] Surface the *reconnecting* state in **both** places: the status string (sidebar row
       `statusText`, `ContentView.swift:1545`, and the menu-bar item, `MenuBarStatusView.swift`)
       **and** beside the Connect/Disconnect control (`ContentView.swift:60`), including which
@@ -67,13 +79,17 @@ re-authorization is never forced silently.
       scheduling further attempts and disarms auto-reconnect for the session; an attempt already
       in flight is *not* force-killed — it is allowed to run to its timeout, after which the
       device settles into the ordinary disconnected state and the button returns to Connect.
+- [ ] Cancellation during the five-second delay settles immediately and prevents the pending
+      attempt. Cancellation during an in-flight attempt follows the graceful wind-down above; when
+      that attempt fails or times out, no five-second delay and no subsequent attempt are scheduled.
 - [ ] During that wind-down the button reads **"Cancelling…"** and is disabled, so the control
       never claims an action it is no longer offering.
 - [ ] Once the attempts are exhausted (or cancelled), show the ordinary disconnected state with
       the reason.
 - [ ] Skip silently when re-authorization would be needed: prompt the user instead of popping an
       admin dialog on its own.
-- [ ] Sub-case — wake from sleep runs the **same** policy (10 × 5 s, same UI, same Cancel).
+- [ ] Sub-case — wake from sleep runs the **same** ten-attempt, five-second post-failure-delay
+      policy (same UI, same Cancel).
       Sleep is currently a graceful disconnect (`willSleep` disconnects and releases the wake
       token) with no wake handler, so waking needs a manual Connect today; `willSleep` must be
       reclassified as an app-initiated drop rather than an `expectingExit` one, and a wake
@@ -89,15 +105,23 @@ re-authorization is never forced silently.
 ## Decisions made along the way
 
 - **The "user clicks Connect" decision is reversed inside an explicitly-connected session
-  (2026-09-03, owner's call).** The armed window runs from an explicit Connect to an explicit
-  Disconnect; inside it, a connection the app loses on its own must restore itself. The
+  (2026-09-03, owner's call).** The armed window starts with an explicit Connect and ends with an
+  explicit Disconnect or Cancel retry; inside it, a connection the app loses on its own must
+  restore itself while the Settings policy is enabled. The
   explicit-Connect design still holds for the *first* connection of a session — this is
   recovery, not discovery.
-- **Retry policy fixed at 10 attempts × 5 s, no backoff (2026-09-03, owner's call).** A flat
-  interval over an exponential curve: the realistic causes (lid close, Wi-Fi blip, USB reseat)
-  clear in seconds or not at all, so a ~50 s window at a predictable cadence beats a curve that
-  spends its budget waiting. Exhaustion is not an error state of its own — it lands in the
-  ordinary disconnected state, which the user can Connect out of by hand.
+- **Retry policy fixed at 10 attempts with a 5 s post-failure delay, no backoff (2026-09-03,
+  owner's call).** The abnormal drop starts the delay before attempt 1; each failed attempt starts
+  the next five-second delay, and attempt 10's failure settles immediately. Attempt duration is not
+  part of the delay, so the total wall time is the sum of ten attempt runtimes plus ten pre-attempt
+  delays rather than a promised ~50-second window. A flat delay over an exponential curve keeps the
+  cadence predictable for brief Wi-Fi/USB interruptions. Exhaustion is not an error state of its
+  own — it lands in the ordinary disconnected state, which the user can Connect out of by hand.
+- **Auto-reconnect counts single attempts, not the existing nested startup loop (2026-09-03).**
+  `DeviceSession.connect()` currently contains its own three-attempt startup policy. The reusable
+  connection operation must be factored so each displayed `n/10` maps to exactly one daemon/tunnel
+  attempt; otherwise the UI count, cancellation boundary, and ten-attempt acceptance criterion would
+  all be false.
 - **Retry state is visible in two places, and Cancel lives on the Connect/Disconnect control
   (2026-09-03, owner's call).** The status string and the area beside the button both show it —
   the status string is where the user already looks for connection state, and the button area is
@@ -113,9 +137,9 @@ re-authorization is never forced silently.
   control always names what will happen if it is pressed, and names nothing while it is inert.
 - **Wake from sleep reconnects under the same policy (2026-09-03, owner's call).** Sleep is not
   an explicit Disconnect, so it stays inside the armed window: on wake the tunnel retries
-  10 × 5 s with the same status strings and the same Cancel retry control. No separate
-  reconnect-on-wake path and no separate policy — one retry loop, one set of states. This
-  requires `willSleep` to stop taking the `expectingExit` path.
+  ten times with the same five-second post-failure delay, status strings, and Cancel retry control.
+  No separate reconnect-on-wake path and no separate policy — one retry loop, one set of states.
+  This requires `willSleep` to stop taking the `expectingExit` path.
 - **Scheduled into v2.3.0 (2026-09-03) alongside [[042-survive-closed-daemon-pipe]]**, which
   fixes the crash on the same disconnect path this epic has to recover from.
 
@@ -125,16 +149,21 @@ re-authorization is never forced silently.
 
 - [ ] A drop with tunneld still alive reconnects without user action and without an admin prompt.
 - [ ] A user-initiated Disconnect never triggers a reconnect.
-- [ ] A device that stays unreachable produces exactly 10 attempts at ~5 s spacing, then stops in
-      the ordinary disconnected state — no eleventh attempt, no error-only dead end.
+- [ ] A device that stays unreachable produces exactly 10 non-overlapping attempts. Attempt 1 starts
+      about 5 s after the triggering failure; attempts 2–10 each start about 5 s after the preceding
+      attempt finishes with failure. Attempt 10 settles immediately into the ordinary disconnected
+      state — no final wait, no eleventh attempt, and no error-only dead end.
 - [ ] A reconnect that succeeds on attempt *n* cancels the remaining attempts and resets the
       counter for the next drop.
 - [ ] While retrying, the attempt state is visible in the status string *and* beside the
       Connect/Disconnect control, and the button reads "Cancel retry".
 - [ ] Cancel retry schedules no further attempt; the in-flight one finishes on its own timeout,
       after which the session is plainly disconnected and the button reads Connect again.
+- [ ] Cancel during a post-failure delay prevents the pending attempt immediately; cancel during an
+      attempt allows only that attempt to finish and schedules neither a delay nor another attempt.
 - [ ] Between the cancel press and that settle, the button reads a disabled "Cancelling…".
 - [ ] After a cancel, nothing reconnects on its own until the user presses Connect.
-- [ ] Sleeping and waking the Mac reconnects the device under the same 10 × 5 s policy, with the
-      same status strings and Cancel retry control, and without an admin prompt.
+- [ ] Sleeping and waking the Mac reconnects the device under the same ten-attempt,
+      five-second post-failure-delay policy, with the same status strings and Cancel retry control,
+      and without an admin prompt.
 - [ ] The Settings toggle off reproduces today's manual behavior exactly.

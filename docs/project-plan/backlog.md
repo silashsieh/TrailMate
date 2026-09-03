@@ -23,7 +23,8 @@ SORT status ASC, id ASC
   [046 — Pin the sidebar Devices section while scrolling](epics/046-pin-sidebar-devices-section.md) (#70).
 - **Scheduled out of this list on 2026-09-03:** 042 (#75) and 043 (#72) moved into v2.3.0 — see
   [roadmap](roadmap.md). 043's gating question (reverse the "the user clicks Connect" design) was
-  answered: retry is armed between an explicit Connect and an explicit Disconnect, 10 × 5 s.
+  answered: retry is armed between an explicit Connect and an explicit Disconnect, with ten attempts
+  each beginning after a five-second post-failure delay.
 - **Open inbox items with no epic yet:** #41 (share saved locations & routes — parked pending a
   [scope.md](scope.md) decision on file-export vs cloud sync), #74 (extend the wake assertion to
   offline simulation + a toggle).

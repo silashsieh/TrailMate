@@ -3,7 +3,7 @@ type: epic
 id: 042
 title: Survive a closed daemon pipe — turn SIGPIPE into a recoverable disconnect
 status: open
-milestone:
+milestone: v2.3.0
 issue: 75
 opened: 2026-08-18
 shipped:
@@ -78,6 +78,11 @@ alive** — menu bar, other sessions, and the command socket unaffected.
   triggered by `TUNNEL_DOWN` / daemon-exit fast enough to stop it?
 
 ## Decisions made along the way
+
+- **Scheduled into v2.3.0 (2026-09-03, owner's call).** Filed unmilestoned on 2026-08-18;
+  pulled into the correctness release alongside [[043-auto-reconnect]] — a crash on a closed
+  daemon pipe is the same disconnect path auto-retry has to recover from, so the two are
+  worth building together.
 
 ## Bugs / follow-ups found while building
 

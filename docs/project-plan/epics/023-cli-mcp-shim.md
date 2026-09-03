@@ -3,7 +3,7 @@ type: epic
 id: 023
 title: trailmate CLI + stdio MCP shim (AI integration follow-up)
 status: open
-milestone: v2.3.0
+milestone: v2.4.0
 issue: 54
 opened: 2026-06-19
 shipped:
@@ -85,6 +85,9 @@ Both reach the same `AppState.dispatch(_:)` facade through the socket, so the
   Python SDK drags 29 packages with compiled extensions into the bundle re-sign. The stdio
   core (JSON-RPC + 4 handlers) has been stable since 2024-11.
 - **Both are thin clients of the existing socket** — the brain stays in the app.
+- **Re-scheduled to v2.4.0 (2026-09-03, owner's call).** Moved out of v2.3.0 together with
+  [[014-readme-screenshots]], leaving v2.3.0 as the correctness/coverage release (033, 039,
+  040). GitHub issue #54 re-milestoned to match.
 
 ## Bugs / follow-ups found while building
 

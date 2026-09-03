@@ -45,4 +45,36 @@ struct MonotonicTimeSourceTests {
         #expect(clock.pendingSleepCount == 0)
         #expect(clock.now == .zero)
     }
+
+    @Test func cancellationDuringContinuationRegistrationCannotLoseWakeup() async {
+        let entered = AsyncStream<Void>.makeStream()
+        let release = AsyncStream<Void>.makeStream()
+        let clock = ManualMonotonicClock(beforeContinuationRegistration: {
+            entered.continuation.yield()
+            var iterator = release.stream.makeAsyncIterator()
+            _ = await iterator.next()
+        })
+        let source = clock.timeSource
+        let sleeper = Task {
+            try await source.sleep(for: .seconds(50))
+        }
+
+        var enteredIterator = entered.stream.makeAsyncIterator()
+        _ = await enteredIterator.next()
+        #expect(clock.outstandingSleepCount == 1)
+        #expect(clock.pendingSleepCount == 0)
+
+        sleeper.cancel()
+        for _ in 0..<100 where clock.outstandingSleepCount != 0 {
+            await Task.yield()
+        }
+        #expect(clock.outstandingSleepCount == 0)
+
+        release.continuation.yield()
+        await #expect(throws: CancellationError.self) {
+            try await sleeper.value
+        }
+        #expect(clock.outstandingSleepCount == 0)
+        #expect(clock.pendingSleepCount == 0)
+    }
 }

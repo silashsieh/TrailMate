@@ -15,8 +15,13 @@ nonisolated final class ManualMonotonicClock: @unchecked Sendable {
     }
 
     private let lock = NSLock()
+    private let beforeContinuationRegistration: (@Sendable () async -> Void)?
     private var current: Duration = .zero
     private var sleeps: [UUID: SleepState] = [:]
+
+    init(beforeContinuationRegistration: (@Sendable () async -> Void)? = nil) {
+        self.beforeContinuationRegistration = beforeContinuationRegistration
+    }
 
     var now: Duration {
         lock.lock()
@@ -30,6 +35,12 @@ nonisolated final class ManualMonotonicClock: @unchecked Sendable {
         return sleeps.values.reduce(into: 0) { count, state in
             if case .waiting = state { count += 1 }
         }
+    }
+
+    var outstandingSleepCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return sleeps.count
     }
 
     var timeSource: MonotonicTimeSource {
@@ -70,6 +81,9 @@ nonisolated final class ManualMonotonicClock: @unchecked Sendable {
         lock.unlock()
 
         try await withTaskCancellationHandler {
+            if let beforeContinuationRegistration {
+                await beforeContinuationRegistration()
+            }
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
                 lock.lock()
                 guard case .registering = sleeps[id] else {
@@ -88,9 +102,13 @@ nonisolated final class ManualMonotonicClock: @unchecked Sendable {
     private func cancelSleep(id: UUID) {
         let continuation: CheckedContinuation<Void, any Error>?
         lock.lock()
-        if case .waiting(let sleeper) = sleeps.removeValue(forKey: id) {
+        switch sleeps.removeValue(forKey: id) {
+        case .waiting(let sleeper):
             continuation = sleeper.continuation
-        } else {
+        case .registering, nil:
+            // Removing `.registering` records cancellation before its checked
+            // continuation exists. Registration then observes the missing id
+            // and resumes immediately with CancellationError.
             continuation = nil
         }
         lock.unlock()

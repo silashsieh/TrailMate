@@ -2,7 +2,7 @@
 type: epic
 id: 039
 title: Fix saved-items drag-reorder (flicker + snap-back)
-status: open
+status: in-progress
 milestone: v2.3.0
 issue: 68
 opened: 2026-06-24
@@ -65,13 +65,13 @@ category round-trips, and app relaunch.
 - [ ] Trace one drag through each complete view-to-storage path above. Establish whether `onMove`
       fires, whether it receives section-relative offsets, whether the in-memory order changes once,
       and whether a view refresh or store reload restores the pre-drag order.
-- [ ] Fix the smallest ownership/identity boundary responsible for the failure. The committed order
+- [x] Fix the smallest ownership/identity boundary responsible for the failure. The committed order
       must be the single source rendered by the section for the rest of the gesture; do not introduce
       a second view-local order that can drift from `AppState` / `SavedRoutesStore`.
 - [ ] Confirm both row interaction styles remain correct: dragging a location must not teleport, and
       dragging a route must not load it. Rename, delete, Category assignment, and tap-to-select/load
       must remain unchanged.
-- [ ] Add persistence regression coverage above the already-green pure transform tests. Locations
+- [x] Add persistence regression coverage above the already-green pure transform tests. Locations
       must round-trip through an isolated `UserDefaults` suite and routes through a temporary
       `SavedRoutesStore` base directory / `order.json`; neither test may touch the user's real
       Application Support data.
@@ -99,6 +99,23 @@ category round-trips, and app relaunch.
 - **A pure `LibraryOrder` test is not sufficient regression coverage (2026-09-03).** Those tests are
   already green while the user-visible operation fails. Automated coverage must cross each storage
   seam, and the real drag remains a UI test or mandatory manual release check.
+- **Replace filtered `ForEach.onMove` state with stable-ID drag/drop (2026-09-03).** Static tracing
+  ruled out the section-relative offset transform: Apple's `onMove` contract makes those offsets
+  relative to the filtered `ForEach`, and the existing pure cases already prove that mapping. The
+  unstable boundary was the `List`'s private reorder state: each section supplied a freshly filtered
+  value, while unrelated sidebar observation and actionable row gestures could reconstruct that
+  dynamic content before `onMove` committed, producing the visible flicker/snap-back. Each row now
+  starts a namespaced stable-UUID drag and each `ForEach` accepts an indexed drop; only the store
+  commits the resulting UUID-before-UUID move. Library type and category membership are validated,
+  so cross-library and cross-section drops are no-ops. No view-local order was added.
+- **Keep the original drag as the v2.3.0 manual gate unless WP9 proves XCUITest reliable
+  (2026-09-03).** WP2 adds deterministic row accessibility identifiers and store-level regression
+  tests but does not edit the WP9-owned UI test file. The candidate UI fixture must seed two
+  ungrouped and two categorized locations/routes with fixed UUIDs under the isolated UI-test
+  defaults/runtime root. Drag the first row onto the section end with
+  `press(forDuration:thenDragTo:)`, assert accessibility order and relaunch order, and assert the
+  selected coordinate/loaded route did not change. If AppKit exposes no stable insertion target,
+  execute that same matrix manually for disconnected-idle and active-simulation states.
 
 ## Bugs / follow-ups found while building
 
@@ -109,7 +126,7 @@ category round-trips, and app relaunch.
 - [ ] Dragging never triggers the row's normal action (location teleport or route load).
 - [ ] The new order survives reselection, moving the item out of and back into its category, and an
       app relaunch.
-- [ ] Isolated persistence tests cover the location `UserDefaults` path and route `order.json` path;
+- [x] Isolated persistence tests cover the location `UserDefaults` path and route `order.json` path;
       the existing pure offset tests remain green.
 - [ ] The original drag path is covered by a reliable XCUITest or is explicitly executed as a
       mandatory manual release check.

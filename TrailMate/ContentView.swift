@@ -627,18 +627,20 @@ private struct SavedLocationsSection: View {
 
     var body: some View {
         // Ungrouped waypoints sit under the main header, next to Save Current
-        // Location; each user-defined folder gets its own section below. Drag
-        // reorders within a section (.onMove); the row context menu moves an
-        // item between folders. (epic 029)
+        // Location; each user-defined folder gets its own section below. A
+        // stable-ID drop commits directly to the store; the row context menu
+        // remains the only way to move an item between folders. (epic 039)
         let ungrouped = appState.savedWaypoints.filter { $0.category == nil }
         let canSave = appState.simState.simulatedCoordinate != nil
         if !ungrouped.isEmpty || canSave {
             Section("Saved Locations") {
                 ForEach(ungrouped) { waypoint in
                     SavedLocationRow(waypoint: waypoint)
+                        .draggable(SavedItemDragPayload.waypoint(waypoint.id))
+                        .accessibilityIdentifier("saved-waypoint-\(waypoint.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveWaypoints(inCategory: nil, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    moveWaypoints(payloads, to: destination, in: ungrouped, category: nil)
                 }
 
                 if canSave {
@@ -662,12 +664,27 @@ private struct SavedLocationsSection: View {
             Section(category) {
                 ForEach(appState.savedWaypoints.filter { $0.category == category }) { waypoint in
                     SavedLocationRow(waypoint: waypoint)
+                        .draggable(SavedItemDragPayload.waypoint(waypoint.id))
+                        .accessibilityIdentifier("saved-waypoint-\(waypoint.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveWaypoints(inCategory: category, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    let waypoints = appState.savedWaypoints.filter { $0.category == category }
+                    moveWaypoints(payloads, to: destination, in: waypoints, category: category)
                 }
             }
         }
+    }
+
+    private func moveWaypoints(
+        _ payloads: [String],
+        to destination: Int,
+        in waypoints: [SavedWaypoint],
+        category: String?
+    ) {
+        let movingIDs = payloads.compactMap(SavedItemDragPayload.waypointID)
+        guard movingIDs.count == payloads.count else { return }
+        let destinationID = waypoints.indices.contains(destination) ? waypoints[destination].id : nil
+        appState.moveWaypoints(inCategory: category, movingIDs: movingIDs, before: destinationID)
     }
 }
 
@@ -802,9 +819,11 @@ private struct SavedRoutesSection: View {
             Section("Saved Routes") {
                 ForEach(ungrouped) { route in
                     SavedRouteRow(route: route)
+                        .draggable(SavedItemDragPayload.route(route.id))
+                        .accessibilityIdentifier("saved-route-\(route.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveRoutes(inCategory: nil, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    moveRoutes(payloads, to: destination, in: ungrouped, category: nil)
                 }
             }
         }
@@ -813,12 +832,27 @@ private struct SavedRoutesSection: View {
             Section(category) {
                 ForEach(appState.savedRoutes.routes.filter { $0.category == category }) { route in
                     SavedRouteRow(route: route)
+                        .draggable(SavedItemDragPayload.route(route.id))
+                        .accessibilityIdentifier("saved-route-\(route.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveRoutes(inCategory: category, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    let routes = appState.savedRoutes.routes.filter { $0.category == category }
+                    moveRoutes(payloads, to: destination, in: routes, category: category)
                 }
             }
         }
+    }
+
+    private func moveRoutes(
+        _ payloads: [String],
+        to destination: Int,
+        in routes: [SavedRoute],
+        category: String?
+    ) {
+        let movingIDs = payloads.compactMap(SavedItemDragPayload.routeID)
+        guard movingIDs.count == payloads.count else { return }
+        let destinationID = routes.indices.contains(destination) ? routes[destination].id : nil
+        appState.moveRoutes(inCategory: category, movingIDs: movingIDs, before: destinationID)
     }
 }
 

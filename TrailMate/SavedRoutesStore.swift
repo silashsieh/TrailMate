@@ -117,11 +117,21 @@ final class SavedRoutesStore {
         load()
     }
 
-    // Reorder within one folder (see AppState.moveWaypoints for the offset
-    // mapping), then persist the full visible order to the sidecar.
-    func move(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+    // Reorder within one folder from stable drag identities, then persist the
+    // full visible order to the sidecar. IDs outside the folder are rejected by
+    // LibraryOrder, which keeps cross-section drops out of this operation.
+    func move(
+        inCategory category: String?,
+        movingIDs: [SavedRoute.ID],
+        before destinationID: SavedRoute.ID?
+    ) {
         let groupIDs = Set(routes.filter { $0.category == category }.map(\.id))
-        routes = LibraryOrder.moveWithinGroup(routes, groupIDs: groupIDs, fromOffsets: source, toOffset: destination)
+        routes = LibraryOrder.moveWithinGroup(
+            routes,
+            groupIDs: groupIDs,
+            movingIDs: movingIDs,
+            before: destinationID
+        )
         saveOrder(routes.map(\.id))
     }
 

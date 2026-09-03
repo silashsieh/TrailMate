@@ -47,21 +47,6 @@ enum TransportMode: String, CaseIterable {
     }
 }
 
-struct SavedWaypoint: Codable, Identifiable {
-    var id = UUID()
-    var name: String
-    var latitude: Double
-    var longitude: Double
-    // User-defined folder this waypoint lives under (epic 029). nil = ungrouped,
-    // shown under the top-level "Saved Locations" header. decodeIfPresent makes
-    // it backward-compatible with waypoints saved before the field existed.
-    var category: String?
-
-    var coordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-}
-
 // A one-shot request for the map to pan/zoom so a selected library item is
 // framed (#53). MapArea observes `AppState.mapFocus` and applies `region`; a
 // fresh `id` per request means re-selecting the same item pans again. The
@@ -179,7 +164,11 @@ final class AppState {
     let tunnelBroker: TunnelBroker
     let recorder: RecorderService
     let savedRoutes: SavedRoutesStore
-    var savedWaypoints: [SavedWaypoint] = []
+    let savedWaypointsStore: SavedWaypointsStore
+
+    var savedWaypoints: [SavedWaypoint] {
+        savedWaypointsStore.waypoints
+    }
 
     // Set when a saved location/route is selected; consumed by MapArea to pan
     // and frame the map on it (#53). See MapFocusRequest.
@@ -229,6 +218,7 @@ final class AppState {
         self.tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
         self.recorder = RecorderService(baseURL: runtimePaths.recordingsDirectory)
         self.savedRoutes = SavedRoutesStore(baseURL: runtimePaths.savedRoutesDirectory)
+        self.savedWaypointsStore = SavedWaypointsStore(defaults: defaults)
         self.restoreLastSimulatedLocation = SimulatedPositionPersistence.restoreOnLaunch(in: defaults)
         self.aiControlEnabled = defaults.bool(forKey: "aiControlEnabled")
 
@@ -272,7 +262,11 @@ final class AppState {
             }
         }
 
-        loadWaypoints()
+        do {
+            try savedWaypointsStore.load()
+        } catch {
+            addLog("Could not load saved locations: \(error.localizedDescription)")
+        }
         recorder.loadIndex()
         savedRoutes.load()
 
@@ -827,20 +821,28 @@ final class AppState {
     func saveCurrentLocation(name: String) {
         guard let coord = selectedSession.simState.simulatedCoordinate else { return }
         let waypoint = SavedWaypoint(name: name, latitude: coord.latitude, longitude: coord.longitude)
-        savedWaypoints.append(waypoint)
-        persistWaypoints()
-        addLog("Saved location: \(name)")
+        do {
+            try savedWaypointsStore.save(waypoint)
+            addLog("Saved location: \(name)")
+        } catch {
+            addLog("Save failed: \(error.localizedDescription)")
+        }
     }
 
     func deleteWaypoint(_ waypoint: SavedWaypoint) {
-        savedWaypoints.removeAll { $0.id == waypoint.id }
-        persistWaypoints()
+        do {
+            try savedWaypointsStore.delete(waypoint)
+        } catch {
+            addLog("Delete failed: \(error.localizedDescription)")
+        }
     }
 
     func renameWaypoint(_ waypoint: SavedWaypoint, to newName: String) {
-        guard let index = savedWaypoints.firstIndex(where: { $0.id == waypoint.id }) else { return }
-        savedWaypoints[index].name = newName
-        persistWaypoints()
+        do {
+            try savedWaypointsStore.rename(waypoint, to: newName)
+        } catch {
+            addLog("Rename failed: \(error.localizedDescription)")
+        }
     }
 
     // Selecting a saved location frames it on the map (#53) and, when connected,
@@ -860,21 +862,30 @@ final class AppState {
     }
 
     func setWaypointCategory(_ category: String?, for waypoint: SavedWaypoint) {
-        guard let index = savedWaypoints.firstIndex(where: { $0.id == waypoint.id }) else { return }
         let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
-        savedWaypoints[index].category = (trimmed?.isEmpty ?? true) ? nil : trimmed
-        persistWaypoints()
+        do {
+            try savedWaypointsStore.setCategory((trimmed?.isEmpty ?? true) ? nil : trimmed, for: waypoint)
+        } catch {
+            addLog("Category update failed: \(error.localizedDescription)")
+        }
     }
 
-    // Reorder within one folder. `.onMove` reports offsets relative to that
-    // folder's rows, so map them back onto the global array's matching slots,
-    // leaving every other folder untouched. Persisted as the array order.
-    func moveWaypoints(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
-        let groupIDs = Set(savedWaypoints.filter { $0.category == category }.map(\.id))
-        savedWaypoints = LibraryOrder.moveWithinGroup(
-            savedWaypoints, groupIDs: groupIDs, fromOffsets: source, toOffset: destination
-        )
-        persistWaypoints()
+    // Reorder differences carry stable item IDs, so periodic parent-view updates
+    // cannot invalidate section-relative offsets while a drag is in flight.
+    func moveWaypoints(
+        inCategory category: String?,
+        movingIDs: [SavedWaypoint.ID],
+        before destinationID: SavedWaypoint.ID?
+    ) {
+        do {
+            try savedWaypointsStore.move(
+                inCategory: category,
+                movingIDs: movingIDs,
+                before: destinationID
+            )
+        } catch {
+            addLog("Reorder failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Recording library
@@ -1013,8 +1024,12 @@ final class AppState {
         savedRoutes.setCategory((trimmed?.isEmpty ?? true) ? nil : trimmed, for: route)
     }
 
-    func moveRoutes(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
-        savedRoutes.move(inCategory: category, fromOffsets: source, toOffset: destination)
+    func moveRoutes(
+        inCategory category: String?,
+        movingIDs: [SavedRoute.ID],
+        before destinationID: SavedRoute.ID?
+    ) {
+        savedRoutes.move(inCategory: category, movingIDs: movingIDs, before: destinationID)
     }
 
     func renameSavedRoute(_ route: SavedRoute, to newName: String) {
@@ -1071,17 +1086,6 @@ final class AppState {
     }
 
     // MARK: - Private
-
-    private func loadWaypoints() {
-        guard let data = defaults.data(forKey: "savedWaypoints"),
-              let waypoints = try? JSONDecoder().decode([SavedWaypoint].self, from: data) else { return }
-        savedWaypoints = waypoints
-    }
-
-    private func persistWaypoints() {
-        guard let data = try? JSONEncoder().encode(savedWaypoints) else { return }
-        defaults.set(data, forKey: "savedWaypoints")
-    }
 
     // MARK: - Internal
 

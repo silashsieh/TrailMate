@@ -12,8 +12,8 @@ export is not enough if staging changes nested bundle metadata.
 
 After the DMG has been signed, notarized, and stapled,
 `packaging/generate-appcast.sh` uses Sparkle's release tool to create an
-EdDSA-signed appcast and any useful deltas. The public workflow publishes the
-archives on GitHub Releases and the stable appcast on GitHub Pages.
+EdDSA-signed appcast. The public workflow publishes full update archives on
+GitHub Releases and the stable appcast on GitHub Pages.
 
 ## Prerequisites
 
@@ -183,8 +183,8 @@ update channel.
 First prove that the runner can import the `.p12`, reproduce the Developer ID
 signature, notarize and staple the DMG, verify the finished artifact, and
 generate a signed appcast. Dry-run mode is the safe default: it uploads the
-DMG, appcast, deltas, and Pages payload as a workflow artifact retained for
-seven days, but creates no GitHub release and deploys nothing to Pages.
+DMG, appcast, and Pages payload as a workflow artifact retained for seven days,
+but creates no GitHub release and deploys nothing to Pages.
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -214,7 +214,7 @@ stapling step is missing or invalid; the publishing path will not create an
 ad-hoc or unnotarized fallback release.
 
 For a public run, the release first remains a draft while the DMG, appcast, and
-delta assets upload. It becomes public (as a pre-release when `beta=true`) only
+any generated delta assets upload. It becomes public (as a pre-release when `beta=true`) only
 after every upload succeeds; the Pages deployment then publishes that exact appcast at
 `https://silashsieh.github.io/TrailMate/appcast.xml`. To restore Pages from a
 published release without rebuilding or resigning anything:
@@ -228,6 +228,15 @@ the signed feed from an installed public build. Its first full updater test is
 installing and relaunching into v2.2.0 after that release is published.
 The public v2.1.2 pre-release cannot start its updater safely and its packaged
 app has damaged nested signatures, so replace it manually with v2.1.3 once.
+
+Sparkle delta generation is currently disabled. GitHub Release assets live
+under version-specific tag paths, while `generate_appcast` accepts one download
+prefix per invocation and rewrites every archive loaded into that invocation.
+Loading historical DMGs therefore risks assigning old archives to the current
+tag. The script preserves and re-signs feed history, validates that every full
+DMG URL's tag matches its filename version, and publishes full updates. Deltas
+are an optional bandwidth optimization; disabling them does not weaken update
+signing or prevent v2.1.3 from upgrading to v2.2.0.
 
 ## Primary references
 

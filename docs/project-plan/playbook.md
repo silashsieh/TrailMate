@@ -44,7 +44,7 @@
 ## Recipe: ship a release
 
 1. `gh workflow run release.yml --ref main -f dry_run=true -f beta=true` — builds, signs,
-   notarizes, generates the signed Sparkle feed/deltas, and uploads seven-day workflow artifacts
+   notarizes, generates the signed Sparkle feed, and uploads seven-day workflow artifacts
    without creating a release or changing Pages. (`beta` is ignored during a dry run.)
 2. After the dry run passes, `gh workflow run release.yml --ref main -f dry_run=false -f beta=true`
    — creates `v<MARKETING_VERSION>`, uploads the notarized DMG plus Sparkle assets while the

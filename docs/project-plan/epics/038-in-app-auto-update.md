@@ -72,8 +72,11 @@ version.
 
 ## Open questions
 
-- **Delta health across Python bumps.** A bundled-runtime change invalidates
-  most of a delta; verify the appcast safely falls back to a full update.
+- **Future delta hosting.** GitHub Release assets use a different tag path for
+  every version, while `generate_appcast` applies one download prefix to every
+  archive loaded in an invocation. Deltas remain disabled until the archives
+  have a shared stable URL layout or the pipeline gains a safe per-version URL
+  strategy. Full signed updates are the supported path.
 
 ## Decisions made along the way
 
@@ -112,6 +115,10 @@ version.
 - The public v2.1.3 bootstrap was successfully installed and reached the signed
   Pages feed on 2026-09-03. Publishing v2.2.0 is the remaining end-to-end
   download, installation, and relaunch test.
+- The first v2.2.0 dry run exposed a historical URL bug: loading the v2.1.2 DMG
+  while generating v2.1.3 had rewritten its enclosure under the v2.1.3 tag.
+  Feed generation now normalizes tag/version pairs, retains historical entries
+  without loading their archives, and fails if any full-DMG URL is mismatched.
 
 ## Acceptance criteria
 
@@ -122,7 +129,8 @@ version.
 - [ ] A tampered update or wrong signing identity is rejected.
 - [x] A release publishes a notarized manual-install DMG and a Sparkle-signed
       appcast/archive at a stable feed URL.
-- [ ] Normal releases produce useful deltas when the bundled Python runtime has
-      not changed and fall back safely when it has.
+- [ ] Re-enable useful deltas after adopting an archive layout or generation
+      strategy that preserves correct per-version GitHub Release URLs. Until
+      then, every update uses the signed full-DMG fallback.
 - [x] Updater UI is localized in English and Traditional Chinese, with an
       automatic-check preference in Settings.

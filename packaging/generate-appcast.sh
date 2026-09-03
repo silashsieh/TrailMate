@@ -38,28 +38,17 @@ GENERATE_APPCAST="${SPARKLE_GENERATE_APPCAST:-$BUILD/DerivedData/SourcePackages/
 rm -rf "$APPCAST_DIR" "$PAGES_DIR"
 mkdir -p "$APPCAST_DIR" "$PAGES_DIR"
 
-# Preserve the existing feed and full archives so Sparkle can retain history
-# and generate deltas. Only enclosure URLs from this repository are trusted.
+# Preserve the existing feed so Sparkle retains release history. Do not load
+# historical DMGs into this invocation: generate_appcast accepts one download
+# URL prefix and rewrites every loaded archive with it, which would point old
+# archives at the current release tag. Full updates remain available; delta
+# generation stays disabled until archives have a shared stable URL layout.
 if curl --fail --silent --show-error --location "$FEED_URL" \
     --output "$APPCAST_DIR/appcast.xml"; then
-    while IFS= read -r archive_url; do
-        case "$archive_url" in
-            "$RELEASE_DOWNLOAD_ROOT"/*/*.dmg) ;;
-            *)
-                echo "→ Skipping unexpected archive URL from existing appcast"
-                continue
-                ;;
-        esac
-
-        archive_name="$(basename "${archive_url%%\?*}")"
-        [ -n "$archive_name" ] || continue
-        if [ ! -f "$APPCAST_DIR/$archive_name" ]; then
-            echo "→ Downloading prior update archive: $archive_name"
-            curl --fail --silent --show-error --location "$archive_url" \
-                --output "$APPCAST_DIR/$archive_name"
-        fi
-    done < <(perl -ne 'while (/url="([^"]+\.dmg(?:\?[^"]*)?)"/g) { print "$1\n" }' \
-        "$APPCAST_DIR/appcast.xml")
+    echo "→ Preserving existing appcast history"
+    perl -0pi -e \
+        's{https://github\.com/silashsieh/TrailMate/releases/download/v[^/"]+/TrailMate-([0-9]+\.[0-9]+\.[0-9]+)\.dmg}{https://github.com/silashsieh/TrailMate/releases/download/v$1/TrailMate-$1.dmg}g' \
+        "$APPCAST_DIR/appcast.xml"
 else
     rm -f "$APPCAST_DIR/appcast.xml"
     echo "→ No existing appcast found; creating the bootstrap feed"
@@ -74,7 +63,7 @@ printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$GENERATE_APPCAST" \
     --link "https://github.com/silashsieh/TrailMate/releases/tag/v$VERSION" \
     --versions "$BUILD_NUMBER" \
     --maximum-versions 3 \
-    --maximum-deltas 5 \
+    --maximum-deltas 0 \
     "$APPCAST_DIR"
 
 xmllint --noout "$APPCAST_DIR/appcast.xml"
@@ -85,6 +74,14 @@ grep -Fq "sparkle:edSignature=" "$APPCAST_DIR/appcast.xml" \
     || die "Generated appcast does not contain an EdDSA archive signature"
 grep -Fq "<!-- sparkle-signatures:" "$APPCAST_DIR/appcast.xml" \
     || die "Generated appcast does not contain an EdDSA feed signature"
+perl -0ne '
+    while (m{https://github\.com/silashsieh/TrailMate/releases/download/v([^/"]+)/TrailMate-([0-9]+\.[0-9]+\.[0-9]+)\.dmg}g) {
+        die "Release tag v$1 does not match TrailMate-$2.dmg\n" if $1 ne $2;
+        $count++;
+    }
+    END { die "Generated appcast contains no versioned TrailMate DMG URLs\n" unless $count }
+' "$APPCAST_DIR/appcast.xml" \
+    || die "Generated appcast contains an invalid release archive URL"
 
 cp "$APPCAST_DIR/appcast.xml" "$PAGES_DIR/appcast.xml"
 touch "$PAGES_DIR/.nojekyll"

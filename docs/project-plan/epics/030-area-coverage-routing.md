@@ -2,11 +2,11 @@
 type: epic
 id: 030
 title: Area serpentine coverage routing
-status: in-progress
+status: done
 milestone: v2.2.0
 issue: 47
 opened: 2026-06-19
-shipped:
+shipped: 2026-08-21
 tags: [routing, map]
 ---
 

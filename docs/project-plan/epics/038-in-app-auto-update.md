@@ -57,7 +57,7 @@ version.
 
 ## Stories
 
-- [ ] Validate a downloaded GitHub DMG end to end: Developer ID identity,
+- [x] Validate a downloaded GitHub DMG end to end: Developer ID identity,
       secure timestamps, Hardened Runtime, nested Python signatures, accepted
       notarization, stapled ticket, Gatekeeper assessment, and launch.
 - [x] Add Sparkle 2 via SPM; wire `SPUStandardUpdaterController` into SwiftUI
@@ -109,6 +109,9 @@ version.
 - [[047-repair-sparkle-bootstrap]] — v2.1.2 omitted Sparkle's required
   pre-extraction verification setting and damaged the app signature while
   staging the DMG.
+- The public v2.1.3 bootstrap was successfully installed and reached the signed
+  Pages feed on 2026-09-03. Publishing v2.2.0 is the remaining end-to-end
+  download, installation, and relaunch test.
 
 ## Acceptance criteria
 
@@ -117,9 +120,9 @@ version.
 - [ ] "Check for Updates…" finds a newer release, downloads it, verifies it,
       installs it, and relaunches into the new version.
 - [ ] A tampered update or wrong signing identity is rejected.
-- [ ] A release publishes a notarized manual-install DMG and a Sparkle-signed
+- [x] A release publishes a notarized manual-install DMG and a Sparkle-signed
       appcast/archive at a stable feed URL.
 - [ ] Normal releases produce useful deltas when the bundled Python runtime has
       not changed and fall back safely when it has.
-- [ ] Updater UI is localized in English and Traditional Chinese, with an
+- [x] Updater UI is localized in English and Traditional Chinese, with an
       automatic-check preference in Settings.

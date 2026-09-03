@@ -38,7 +38,7 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v2.1.3 — Sparkle bootstrap hotfix:**
+- **v2.1.3 — Sparkle bootstrap hotfix (published; forward update test pending):**
   [047 — Repair the Sparkle bootstrap and DMG integrity checks](epics/047-repair-sparkle-bootstrap.md).
 - **v2.4.0 — Map-surface re-architecture (idle CPU):**
   [041 — Telemetry plane: frequency-partitioned simulation state](epics/041-telemetry-plane.md),
@@ -52,9 +52,10 @@ sync at release cuts; the epic files remain authoritative.
   [039 — Fix saved-items drag-reorder](epics/039-fix-saved-items-reorder.md),
   [040 — Isolate recording per session (fix shared-recorder mixed traces)](epics/040-per-session-recording.md),
   [014 — README screenshots & GIF demo](epics/014-readme-screenshots.md).
-- **v2.2.0 — Area serpentine and auto-update:**
-  [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md),
-  [038 — In-app auto-update (Sparkle)](epics/038-in-app-auto-update.md).
+- **v2.2.0 — Area serpentine and auto-update (release preparation):**
+  [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md) is done;
+  [038 — In-app auto-update (Sparkle)](epics/038-in-app-auto-update.md) awaits the
+  v2.1.3 → v2.2.0 installation/relaunch smoke test after publication.
   CPU-profiling wins already landed this cycle:
   [034 — Eliminate idle & playback CPU spikes](epics/034-cpu-idle-playback-spikes.md),
   [035 — Cap simulation-loop CPU during motion](epics/035-throttle-simulation-loop.md)

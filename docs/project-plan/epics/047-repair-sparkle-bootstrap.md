@@ -43,8 +43,10 @@ then use it to test the update to v2.2.0.
 - [x] Preserve bundle metadata while staging the app into the DMG.
 - [x] Verify the staged app and the exact app mounted from the finished DMG.
 - [x] Add automated coverage for the paired Sparkle security settings.
-- [ ] Pass the protected Developer ID signing, notarization, and appcast dry run.
-- [ ] Manually install v2.1.3 and complete the v2.1.3 → v2.2.0 update smoke test.
+- [x] Pass the protected Developer ID signing, notarization, and appcast dry run.
+- [x] Manually install v2.1.3 and confirm **Check for Updates…** reaches the
+      signed feed without a configuration error.
+- [ ] Complete the v2.1.3 → v2.2.0 download, installation, and relaunch smoke test.
 
 ## Open questions
 
@@ -69,10 +71,10 @@ then use it to test the update to v2.2.0.
 
 - [x] The built app contains both `SURequireSignedFeed = true` and
   `SUVerifyUpdateBeforeExtraction = true`.
-- [ ] A signed dry run verifies the exported app, staged app, finished DMG, and
-  app mounted from that DMG before uploading artifacts.
-- [ ] A clean v2.1.3 install enables **Check for Updates…** without a fatal
-  updater configuration error.
-- [ ] The public v2.1.3 DMG passes Gatekeeper and the installed app passes
-  deep, strict code-signature verification.
+- [x] A signed dry run verifies the exported app, staged app, finished DMG, and
+      app mounted from that DMG before uploading artifacts.
+- [x] A clean v2.1.3 install enables **Check for Updates…** without a fatal
+      updater configuration error.
+- [x] The public v2.1.3 DMG passes Gatekeeper and the installed app passes
+      deep, strict code-signature verification.
 - [ ] v2.1.3 downloads, verifies, installs, and relaunches into v2.2.0.

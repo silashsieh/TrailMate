@@ -58,20 +58,24 @@ struct SavedRoute: Identifiable, Codable, Hashable {
 final class SavedRoutesStore {
     private(set) var routes: [SavedRoute] = []
 
+    let baseURL: URL
+
     nonisolated static var baseURL: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return support.appendingPathComponent("TrailMate").appendingPathComponent("routes")
+        AppRuntimePaths.live.savedRoutesDirectory
+    }
+
+    init(baseURL: URL = AppProcessConfiguration.current.runtimePaths.savedRoutesDirectory) {
+        self.baseURL = baseURL.standardizedFileURL
     }
 
     // The user's drag-reordered sequence lives in a sidecar so a reorder is one
     // tiny write, not a rewrite of every route file (epic 029). It sits in the
     // routes dir but isn't a route, so the loader skips it by name.
     private static let orderFileName = "order.json"
-    private static var orderURL: URL { baseURL.appendingPathComponent(orderFileName) }
+    private var orderURL: URL { baseURL.appendingPathComponent(Self.orderFileName) }
 
     func load() {
-        let base = Self.baseURL
+        let base = baseURL
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         guard let files = try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: nil) else {
             routes = []
@@ -97,7 +101,7 @@ final class SavedRoutesStore {
     }
 
     func delete(_ route: SavedRoute) {
-        let url = Self.baseURL.appendingPathComponent("\(route.id.uuidString).json")
+        let url = baseURL.appendingPathComponent("\(route.id.uuidString).json")
         try? FileManager.default.removeItem(at: url)
         routes.removeAll { $0.id == route.id }
         // Drop the deleted id from the sidecar so it can't resurrect a stale slot.
@@ -124,7 +128,7 @@ final class SavedRoutesStore {
     // MARK: - Private
 
     private func write(_ route: SavedRoute) throws {
-        let base = Self.baseURL
+        let base = baseURL
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         let url = base.appendingPathComponent("\(route.id.uuidString).json")
         let encoder = JSONEncoder()
@@ -134,7 +138,7 @@ final class SavedRoutesStore {
     }
 
     private func loadOrder() -> [UUID] {
-        guard let data = try? Data(contentsOf: Self.orderURL),
+        guard let data = try? Data(contentsOf: orderURL),
               let strings = try? JSONDecoder().decode([String].self, from: data) else { return [] }
         return strings.compactMap(UUID.init(uuidString:))
     }
@@ -142,6 +146,6 @@ final class SavedRoutesStore {
     private func saveOrder(_ ids: [UUID]) {
         let strings = ids.map(\.uuidString)
         guard let data = try? JSONEncoder().encode(strings) else { return }
-        try? data.write(to: Self.orderURL, options: .atomic)
+        try? data.write(to: orderURL, options: .atomic)
     }
 }

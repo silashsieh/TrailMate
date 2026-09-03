@@ -84,6 +84,8 @@ struct MapFocusRequest: Identifiable {
 @MainActor
 final class AppState {
     let defaults: UserDefaults
+    let runtimePaths: AppRuntimePaths
+    let monotonicTime: MonotonicTimeSource
 
     // The device sessions — one per connectable slot. Always ≥ 1: launch creates
     // a single unbound session (it holds the restored red dot + pre-connect route
@@ -174,9 +176,9 @@ final class AppState {
     // App-global tunnel broker (epic 012): one privileged `tunneld` for all
     // devices, one auth prompt per session. Sessions resolve their RSD endpoint
     // through it on connect; torn down only at app quit.
-    let tunnelBroker = TunnelBroker()
-    let recorder = RecorderService()
-    let savedRoutes = SavedRoutesStore()
+    let tunnelBroker: TunnelBroker
+    let recorder: RecorderService
+    let savedRoutes: SavedRoutesStore
     var savedWaypoints: [SavedWaypoint] = []
 
     // Set when a saved location/route is selected; consumed by MapArea to pan
@@ -216,8 +218,17 @@ final class AppState {
         return transportMode.directionsTransportType
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = AppProcessConfiguration.current.defaults,
+        runtimePaths: AppRuntimePaths = AppProcessConfiguration.current.runtimePaths,
+        monotonicTime: MonotonicTimeSource = .continuous
+    ) {
         self.defaults = defaults
+        self.runtimePaths = runtimePaths
+        self.monotonicTime = monotonicTime
+        self.tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
+        self.recorder = RecorderService(baseURL: runtimePaths.recordingsDirectory)
+        self.savedRoutes = SavedRoutesStore(baseURL: runtimePaths.savedRoutesDirectory)
         self.restoreLastSimulatedLocation = SimulatedPositionPersistence.restoreOnLaunch(in: defaults)
         self.aiControlEnabled = defaults.bool(forKey: "aiControlEnabled")
 
@@ -227,7 +238,7 @@ final class AppState {
         let first = DeviceSession(manager: self)
         self.sessions = [first]
         self.selectedSessionID = first.id
-        self.commandServer = CommandServer(appState: self)
+        self.commandServer = CommandServer(appState: self, socketURL: runtimePaths.aiSocketURL)
 
         let storedCustom = defaults.double(forKey: "customSpeedKmh")
         self.customSpeedKmh = storedCustom > 0 ? storedCustom : 15.0

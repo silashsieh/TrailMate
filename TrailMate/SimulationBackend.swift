@@ -59,7 +59,7 @@ final class SimulationStateBridge {
     // position at quit is saved unconditionally by the AppDelegate.
     @ObservationIgnored private var lastPositionSave: ContinuousClock.Instant?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = AppProcessConfiguration.current.defaults) {
         self.defaults = defaults
     }
 

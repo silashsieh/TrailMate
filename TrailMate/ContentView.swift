@@ -2158,7 +2158,7 @@ private enum MapCameraPersistence {
     private static let defaultSpan = MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
 
     static func loadRegion() -> MKCoordinateRegion {
-        let defaults = UserDefaults.standard
+        let defaults = AppProcessConfiguration.current.defaults
         guard defaults.object(forKey: centerLatKey) != nil else {
             return MKCoordinateRegion(center: defaultCenter, span: defaultSpan)
         }
@@ -2174,7 +2174,7 @@ private enum MapCameraPersistence {
     }
 
     static func save(region: MKCoordinateRegion) {
-        let defaults = UserDefaults.standard
+        let defaults = AppProcessConfiguration.current.defaults
         defaults.set(region.center.latitude, forKey: centerLatKey)
         defaults.set(region.center.longitude, forKey: centerLonKey)
         defaults.set(region.span.latitudeDelta, forKey: spanLatKey)

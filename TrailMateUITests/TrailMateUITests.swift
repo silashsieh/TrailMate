@@ -12,21 +12,37 @@ import XCTest
 // expose *values* — hence the value predicates.
 final class TrailMateUITests: XCTestCase {
     private var app: XCUIApplication!
+    private var isolatedDefaultsSuiteName: String!
+    private var isolatedRuntimeRoot: URL!
 
     @MainActor
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        let isolationID = UUID().uuidString
+        isolatedDefaultsSuiteName = "com.sh.TrailMate.UITests.\(isolationID)"
+        isolatedRuntimeRoot = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("TrailMate-UITests-\(isolationID)", isDirectory: true)
+        UserDefaults(suiteName: isolatedDefaultsSuiteName)?
+            .removePersistentDomain(forName: isolatedDefaultsSuiteName)
+        try? FileManager.default.removeItem(at: isolatedRuntimeRoot)
         // Base flag for every UI test: suppresses the real device lister so no
         // Local Network permission dialog appears on a clean CI user. Tests
         // append the specific --uitest-* hooks they need before launching.
         app.launchArguments = ["--uitest"]
+        app.launchEnvironment["TRAILMATE_TEST_DEFAULTS_SUITE"] = isolatedDefaultsSuiteName
+        app.launchEnvironment["TRAILMATE_TEST_RUNTIME_ROOT"] = isolatedRuntimeRoot.path
     }
 
     @MainActor
     override func tearDownWithError() throws {
         app.terminate()
         app = nil
+        UserDefaults(suiteName: isolatedDefaultsSuiteName)?
+            .removePersistentDomain(forName: isolatedDefaultsSuiteName)
+        try? FileManager.default.removeItem(at: isolatedRuntimeRoot)
+        isolatedDefaultsSuiteName = nil
+        isolatedRuntimeRoot = nil
     }
 
     private func staticText(withValue value: String, in element: XCUIElement) -> XCUIElement {
@@ -138,7 +154,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertEqual(switchValue(toggle), flipped)
 
-        // Leave the user's setting as we found it.
+        // Restore the per-test domain before this test ends.
         toggle.click()
         XCTAssertEqual(switchValue(toggle), original)
     }
@@ -165,7 +181,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(restored.waitForExistence(timeout: 5))
         XCTAssertEqual(String(describing: restored.value ?? ""), "English")
 
-        // Reset to System Default so the override doesn't leak to other tests.
+        // Reset to System Default inside this test's isolated domain.
         restored.click()
         app.menuItems["System Default"].click()
         XCTAssertEqual(String(describing: restored.value ?? ""), "System Default")
@@ -235,8 +251,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(restoredField.waitForExistence(timeout: 5))
         XCTAssertEqual(String(describing: restoredField.value ?? ""), "850")
 
-        // Park the selection on the factory-default preset rather than the
-        // test value (the original preset isn't accessibility-readable).
+        // Park the isolated domain on the factory-default preset.
         sheet.buttons["wander.radius.500"].click()
         sheet.buttons["Close"].click()
     }
@@ -304,7 +319,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(viewFullLog().waitForExistence(timeout: 5))
 
         // Collapse, relaunch: the log must come back collapsed — which also
-        // restores the factory default, leaving the preference as we found it.
+        // restores the factory default inside this test's isolated domain.
         logToggle().click()
         XCTAssertFalse(viewFullLog().waitForExistence(timeout: 2))
         app.terminate()

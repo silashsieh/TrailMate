@@ -46,10 +46,14 @@ final class RecorderService {
     private var bufferedPoints: [Point] = []
     private var currentID = UUID()
 
+    let baseURL: URL
+
     nonisolated static var baseURL: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return support.appendingPathComponent("TrailMate").appendingPathComponent("recordings")
+        AppRuntimePaths.live.recordingsDirectory
+    }
+
+    init(baseURL: URL = AppProcessConfiguration.current.runtimePaths.recordingsDirectory) {
+        self.baseURL = baseURL.standardizedFileURL
     }
 
     func start() {
@@ -94,7 +98,7 @@ final class RecorderService {
 
     func loadIndex() {
         let fm = FileManager.default
-        let base = Self.baseURL
+        let base = baseURL
         try? fm.createDirectory(at: base, withIntermediateDirectories: true)
 
         guard let days = try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: [.isDirectoryKey]) else {
@@ -125,7 +129,7 @@ final class RecorderService {
         time.dateFormat = "HHmmss"
 
         let fm = FileManager.default
-        let dayURL = Self.baseURL.appendingPathComponent(day.string(from: startedAt))
+        let dayURL = baseURL.appendingPathComponent(day.string(from: startedAt))
         try fm.createDirectory(at: dayURL, withIntermediateDirectories: true)
 
         let filename = "\(time.string(from: startedAt))-\(id.uuidString.prefix(8)).gpx"

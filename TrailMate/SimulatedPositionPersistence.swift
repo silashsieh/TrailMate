@@ -17,8 +17,8 @@ enum SimulatedPositionPersistence {
     // Default true: the maps-app convention is to never start blank (D9);
     // turning this off is the explicit opt-out back to a start-empty launch.
     static var restoreOnLaunch: Bool {
-        get { restoreOnLaunch(in: .standard) }
-        set { setRestoreOnLaunch(newValue, in: .standard) }
+        get { restoreOnLaunch(in: AppProcessConfiguration.current.defaults) }
+        set { setRestoreOnLaunch(newValue, in: AppProcessConfiguration.current.defaults) }
     }
 
     static func restoreOnLaunch(in defaults: UserDefaults) -> Bool {
@@ -29,7 +29,7 @@ enum SimulatedPositionPersistence {
         defaults.set(restore, forKey: restoreKey)
     }
 
-    static func load(from defaults: UserDefaults = .standard) -> CLLocationCoordinate2D? {
+    static func load(from defaults: UserDefaults = AppProcessConfiguration.current.defaults) -> CLLocationCoordinate2D? {
         guard defaults.object(forKey: latKey) != nil else { return nil }
         return CLLocationCoordinate2D(
             latitude: defaults.double(forKey: latKey),
@@ -37,7 +37,10 @@ enum SimulatedPositionPersistence {
         )
     }
 
-    static func save(_ coordinate: CLLocationCoordinate2D, to defaults: UserDefaults = .standard) {
+    static func save(
+        _ coordinate: CLLocationCoordinate2D,
+        to defaults: UserDefaults = AppProcessConfiguration.current.defaults
+    ) {
         defaults.set(coordinate.latitude, forKey: latKey)
         defaults.set(coordinate.longitude, forKey: lonKey)
     }

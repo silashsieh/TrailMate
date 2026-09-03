@@ -33,17 +33,14 @@ nonisolated enum SocketPath {
     // The resolved socket path, creating the containing directory if needed.
     // Throws rather than returning a path bind() would reject, so the server's
     // start() surfaces a real reason in the log instead of a silent failure.
-    static func resolve() throws -> String {
+    static func resolve(_ socketURL: URL = AppProcessConfiguration.current.runtimePaths.aiSocketURL) throws -> String {
         let fm = FileManager.default
-        guard let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            throw Error.unresolvedSupportDirectory
-        }
-        let dir = support.appendingPathComponent(directoryName, isDirectory: true)
+        let socketURL = socketURL.standardizedFileURL
+        let dir = socketURL.deletingLastPathComponent()
         // Owner-only — the socket's auth model is filesystem permissions.
         try fm.createDirectory(at: dir, withIntermediateDirectories: true,
                                attributes: [.posixPermissions: 0o700])
 
-        let socketURL = dir.appendingPathComponent(socketFileName, isDirectory: false)
         let path = socketURL.path
 
         // Byte length (UTF-8) plus the NUL terminator must fit sun_path.
@@ -57,7 +54,7 @@ nonisolated enum SocketPath {
     // Best-effort resolution that never throws — for display in Settings, where
     // a hard failure would be worse than showing the intended path. Falls back
     // to the conventional location string if resolution fails.
-    static func displayPath() -> String {
-        (try? resolve()) ?? "~/Library/Application Support/\(directoryName)/\(socketFileName)"
+    static func displayPath(_ socketURL: URL = AppProcessConfiguration.current.runtimePaths.aiSocketURL) -> String {
+        (try? resolve(socketURL)) ?? socketURL.path
     }
 }

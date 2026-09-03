@@ -3,7 +3,10 @@ import Foundation
 #if DEBUG
 // Launch-argument switches for UI tests, DEBUG-only so release builds carry
 // no test hooks.
-enum UITestSupport {
+nonisolated enum UITestSupport {
+    static let defaultsSuiteEnvironmentKey = "TRAILMATE_TEST_DEFAULTS_SUITE"
+    static let runtimeRootEnvironmentKey = "TRAILMATE_TEST_RUNTIME_ROOT"
+
     // Unit tests host their bundle in TrailMate.app. Starting Sparkle there can
     // present its first-run consent window on a clean runner and keep the host
     // alive after the suite finishes. UI tests carry an explicit launch flag;
@@ -16,6 +19,36 @@ enum UITestSupport {
     // lister so its Bonjour/usbmux scan never raises the macOS Local Network
     // permission dialog, which blocks automation on a clean CI user.
     static let isUITesting = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--uitest") }
+
+    // XCUITest passes both values explicitly and keeps them stable when it
+    // terminates/relaunches the app inside one test. Hosted unit tests do not
+    // control launchEnvironment, so their process id gives them a private,
+    // deterministic domain/root for the lifetime of the test host.
+    private static let isolationToken: String = {
+        let environment = ProcessInfo.processInfo.environment
+        if let suite = environment[defaultsSuiteEnvironmentKey], !suite.isEmpty {
+            return suite
+        }
+        return "com.sh.TrailMate.Tests.\(ProcessInfo.processInfo.processIdentifier)"
+    }()
+
+    nonisolated(unsafe) static let defaults: UserDefaults = {
+        let suiteName = ProcessInfo.processInfo.environment[defaultsSuiteEnvironmentKey] ?? isolationToken
+        return UserDefaults(suiteName: suiteName)!
+    }()
+
+    static let runtimePaths: AppRuntimePaths = {
+        let environment = ProcessInfo.processInfo.environment
+        let root: URL
+        if let explicitRoot = environment[runtimeRootEnvironmentKey], !explicitRoot.isEmpty {
+            root = URL(fileURLWithPath: explicitRoot, isDirectory: true)
+        } else {
+            // Keep the fallback short enough for sockaddr_un.sun_path.
+            root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+                .appendingPathComponent(isolationToken, isDirectory: true)
+        }
+        return AppRuntimePaths(rootDirectory: root)
+    }()
 
     // Replaces device discovery and the tunnel+daemon pair with mocks so
     // connected-only UI flows are testable with no device, tunnel, or admin

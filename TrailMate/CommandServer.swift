@@ -32,6 +32,7 @@ import os
 // `Task { @MainActor in }` hops (dispatch, addLog).
 nonisolated final class CommandServer: @unchecked Sendable {
     private let appState: AppState
+    private let socketURL: URL
     private let log = Logger(subsystem: "com.harry.trailmate", category: "CommandServer")
 
     // Guards all mutable state below. The lock — not a confining queue — is the
@@ -50,8 +51,9 @@ nonisolated final class CommandServer: @unchecked Sendable {
     // returns a timeout — a wedged tunnel (TUNNEL_DOWN) must not park it forever.
     private static let dispatchTimeout: DispatchTimeInterval = .seconds(15)
 
-    init(appState: AppState) {
+    init(appState: AppState, socketURL: URL = AppProcessConfiguration.current.runtimePaths.aiSocketURL) {
         self.appState = appState
+        self.socketURL = socketURL.standardizedFileURL
     }
 
     // MARK: - Lifecycle
@@ -62,7 +64,7 @@ nonisolated final class CommandServer: @unchecked Sendable {
 
         let path: String
         do {
-            path = try SocketPath.resolve()
+            path = try SocketPath.resolve(socketURL)
         } catch {
             lock.unlock()
             logEvent("AI control: socket path error — \(error.localizedDescription)")

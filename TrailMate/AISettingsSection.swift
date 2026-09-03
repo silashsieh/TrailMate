@@ -26,7 +26,7 @@ struct AISettingsSection: View {
                     Text("Socket")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(verbatim: SocketPath.displayPath())
+                    Text(verbatim: SocketPath.displayPath(appState.runtimePaths.aiSocketURL))
                         .font(.caption.monospaced())
                         .textSelection(.enabled)
                         .foregroundStyle(.secondary)

@@ -38,6 +38,11 @@ final class TunnelBroker {
 
     private var controlFile: URL?
     private var isRunning = false
+    let controlDirectory: URL
+
+    init(controlDirectory: URL = AppProcessConfiguration.current.runtimePaths.tunnelControlDirectory) {
+        self.controlDirectory = controlDirectory.standardizedFileURL
+    }
 
     // Launch the single privileged tunneld (the one auth prompt). Idempotent —
     // returns immediately if already running. Resolves readiness by polling
@@ -56,11 +61,7 @@ final class TunnelBroker {
             shutdown: { await Self.requestTunneldShutdown(port: Self.port) }
         )
 
-        let appSupport = try FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true
-        )
-        let tunnelsDir = appSupport.appendingPathComponent("TrailMate/tunnels", isDirectory: true)
+        let tunnelsDir = controlDirectory
         try FileManager.default.createDirectory(at: tunnelsDir, withIntermediateDirectories: true)
         let ctrl = tunnelsDir.appendingPathComponent("tunneld-\(UUID().uuidString).info")
         controlFile = ctrl

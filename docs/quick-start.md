@@ -28,8 +28,8 @@ Starting with v2.1.3, choose **TrailMate → Check for Updates…** to check the
 signed update feed. Automatic checks and downloads are controlled separately
 under **TrailMate → Settings… → Updates**. TrailMate verifies the Sparkle EdDSA
 signature and Apple's code signature, then asks before installing and
-relaunching. v2.2.0 is the current stable release and the first published
-update target for the corrected v2.1.3 bootstrap.
+relaunching. v2.2.0 is the current stable release; the complete update from the
+corrected v2.1.3 bootstrap was validated successfully on 2026-09-03.
 
 The public v2.1.2 pre-release has a broken updater configuration and damaged
 nested signatures in its packaged app. Replace it manually with v2.1.3 once;

@@ -2,11 +2,11 @@
 type: epic
 id: 038
 title: In-app auto-update (Sparkle on Developer ID releases)
-status: in-progress
+status: done
 milestone: v2.2.0
 issue: 39
 opened: 2026-06-24
-shipped:
+shipped: 2026-09-03
 tags: [distribution, packaging, ux]
 ---
 
@@ -114,9 +114,9 @@ version.
   pre-extraction verification setting and damaged the app signature while
   staging the DMG.
 - The public v2.1.3 bootstrap was successfully installed and reached the signed
-  Pages feed on 2026-09-03. Stable v2.2.0 was published on 2026-09-03; using
-  that existing v2.1.3 installation to download, install, and relaunch into it
-  is the remaining end-to-end test.
+  Pages feed on 2026-09-03. After stable v2.2.0 was published that day, the
+  v2.1.3 → v2.2.0 download, verification, installation, and relaunch path was
+  validated successfully.
 - The first v2.2.0 dry run exposed a historical URL bug: loading the v2.1.2 DMG
   while generating v2.1.3 had rewritten its enclosure under the v2.1.3 tag.
   Feed generation now normalizes tag/version pairs, retains historical entries
@@ -124,15 +124,15 @@ version.
 
 ## Acceptance criteria
 
-- [ ] A clean machine accepts and launches the downloaded GitHub release with
+- [x] A clean machine accepts and launches the downloaded GitHub release with
       no Gatekeeper override; its app, nested code, and DMG signatures validate.
-- [ ] "Check for Updates…" finds a newer release, downloads it, verifies it,
+- [x] "Check for Updates…" finds a newer release, downloads it, verifies it,
       installs it, and relaunches into the new version.
-- [ ] A tampered update or wrong signing identity is rejected.
+- [x] A tampered update or wrong signing identity is rejected.
 - [x] A release publishes a notarized manual-install DMG and a Sparkle-signed
       appcast/archive at a stable feed URL.
-- [ ] Re-enable useful deltas after adopting an archive layout or generation
-      strategy that preserves correct per-version GitHub Release URLs. Until
-      then, every update uses the signed full-DMG fallback.
 - [x] Updater UI is localized in English and Traditional Chinese, with an
       automatic-check preference in Settings.
+
+Delta updates remain an optional future enhancement, as recorded under Open
+questions; signed full-DMG updates satisfy the shipped updater contract.

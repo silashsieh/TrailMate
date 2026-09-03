@@ -223,10 +223,9 @@ published release without rebuilding or resigning anything:
 gh workflow run static.yml --ref main -f release_tag=v2.2.0
 ```
 
-v2.1.3 is the corrected bootstrap Sparkle release and has successfully reached
-the signed feed from an installed public build. Stable v2.2.0 is now published;
-the remaining full updater test is installing and relaunching into it from that
-existing v2.1.3 installation.
+v2.1.3 is the corrected bootstrap Sparkle release. Its full update path to
+stable v2.2.0—feed discovery, download, signature verification, installation,
+and relaunch—was validated successfully on 2026-09-03.
 The public v2.1.2 pre-release cannot start its updater safely and its packaged
 app has damaged nested signatures, so replace it manually with v2.1.3 once.
 

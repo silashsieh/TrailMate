@@ -2,11 +2,11 @@
 type: epic
 id: 047
 title: Repair the Sparkle bootstrap and DMG integrity checks
-status: in-progress
+status: done
 milestone: v2.1.3
 issue:
 opened: 2026-09-03
-shipped:
+shipped: 2026-09-03
 tags: [distribution, packaging, bug]
 ---
 
@@ -46,7 +46,7 @@ then use it to test the update to v2.2.0.
 - [x] Pass the protected Developer ID signing, notarization, and appcast dry run.
 - [x] Manually install v2.1.3 and confirm **Check for Updates…** reaches the
       signed feed without a configuration error.
-- [ ] Complete the v2.1.3 → v2.2.0 download, installation, and relaunch smoke test.
+- [x] Complete the v2.1.3 → v2.2.0 download, installation, and relaunch smoke test.
 
 ## Open questions
 
@@ -62,8 +62,8 @@ then use it to test the update to v2.2.0.
 - Cut build 11 as v2.1.3. v2.1.2 remains immutable and is documented as a
   broken bootstrap that must be replaced manually once.
 - Stable v2.2.0 was published on 2026-09-03 with the corrected signed feed. The
-  final acceptance check is performing the update from the installed v2.1.3
-  bootstrap and confirming installation and relaunch.
+  installed v2.1.3 bootstrap downloaded, verified, installed, and relaunched
+  into v2.2.0 successfully.
 
 ## Bugs / follow-ups found while building
 
@@ -80,4 +80,4 @@ then use it to test the update to v2.2.0.
       updater configuration error.
 - [x] The public v2.1.3 DMG passes Gatekeeper and the installed app passes
       deep, strict code-signature verification.
-- [ ] v2.1.3 downloads, verifies, installs, and relaunches into v2.2.0.
+- [x] v2.1.3 downloads, verifies, installs, and relaunches into v2.2.0.

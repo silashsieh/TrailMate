@@ -18,9 +18,27 @@ For users who just want to run TrailMate.
 
 1. Grab the latest `TrailMate-<version>.dmg` from the [Releases page](https://github.com/silashsieh/TrailMate/releases).
 2. Open the DMG and drag `TrailMate.app` to `/Applications`.
-3. The DMG is **ad-hoc signed** (no paid Developer ID), so Gatekeeper will refuse a normal double-click on first launch. Use one of:
-   - Right-click `TrailMate.app` in Finder → **Open** → **Open** to confirm.
-   - Or open System Settings → Privacy & Security → scroll to the "TrailMate was blocked" notice → **Open Anyway**.
+3. Public releases are Developer ID signed and notarized. A normal double-click
+   should pass Gatekeeper once the release workflow has been configured with
+   its production credentials.
+
+### Updating TrailMate
+
+Starting with v2.1.3, choose **TrailMate → Check for Updates…** to check the
+signed update feed. Automatic checks and downloads are controlled separately
+under **TrailMate → Settings… → Updates**. TrailMate verifies the Sparkle EdDSA
+signature and Apple's code signature, then asks before installing and
+relaunching. v2.2.0 is the current stable release; the complete update from the
+corrected v2.1.3 bootstrap was validated successfully on 2026-09-03.
+
+The public v2.1.2 pre-release has a broken updater configuration and damaged
+nested signatures in its packaged app. Replace it manually with v2.1.3 once;
+v2.1.2 cannot repair itself through Sparkle.
+
+If the in-app check cannot reach the feed, download the latest notarized DMG
+from GitHub Releases and replace the app manually. If GitHub Pages is down but
+Releases is available, this manual path remains valid. Never install an update
+from an appcast or DMG hosted outside the official TrailMate GitHub project.
 
 ### 2. Pair your iPhone (one-time)
 
@@ -50,7 +68,8 @@ For users who want to modify TrailMate or produce their own DMG.
 
 - macOS on Apple Silicon, Xcode 26+, Xcode Command Line Tools (`xcode-select --install`).
 - ~300 MB free disk (Python bundle + build artifacts).
-- A free Apple ID is enough — no paid Developer Program required.
+- A free Apple ID is enough for local development. Producing the same public
+  release artifact requires a paid Apple Developer Program membership.
 
 ### 1. Clone and build the bundled Python runtime
 
@@ -64,12 +83,14 @@ cd TrailMate
 
 Output: `TrailMate/PythonResources/` (~210 MB). The python-build-standalone tarball is cached under `packaging/.cache/`, so subsequent runs are fast.
 
-On a fresh clone, the bundle is not yet wired into the Xcode project. See [`packaging/README.md`](../packaging/README.md) for the one-time Xcode steps (folder reference, entitlements, re-sign Run Script phase). Skip this section if you only need to build the DMG via `release.sh`.
+The Xcode project is already wired to copy the generated `TrailMate/PythonResources/`
+bundle and re-sign its embedded code. See [`packaging/README.md`](../packaging/README.md)
+for the signing and release details.
 
 ### 2. Open and run
 
 1. Open `TrailMate.xcodeproj` in Xcode.
-2. Target → Signing & Capabilities → set Team to your free Apple ID (or "Sign to run locally").
+2. Target → Signing & Capabilities → set Team to your Apple ID (or "Sign to run locally").
 3. ⌘R to build and run.
 
 The iPhone-side setup (Developer Mode, trust, DDI mount) is identical to Option A.
@@ -80,13 +101,19 @@ The iPhone-side setup (Developer Mode, trust, DDI mount) is identical to Option 
 ./packaging/release.sh
 ```
 
-Output: `build/TrailMate-<version>.dmg`, ad-hoc signed. This is what the `release.yml` GitHub Actions workflow runs.
+Output: `build/TrailMate-<version>.dmg`. With no production credentials the
+script uses its ad-hoc verification path. Public releases use the Developer ID
+and notarization environment documented in
+[`packaging/README.md`](../packaging/README.md).
 
 -----
 
 ## Common first-run issues
 
-- **"App is damaged and can't be opened"** — Gatekeeper quarantined the unsigned bundle. Strip the quarantine attribute: `xattr -dr com.apple.quarantine /Applications/TrailMate.app`.
+- **Gatekeeper blocks a current public release** — do not strip quarantine as a
+  normal installation step. Confirm the DMG came from the official GitHub
+  release, then report the affected version because its signing or notarization
+  is incomplete. Older ad-hoc releases still require Finder's **Open** override.
 - **"Could not find Developer Disk Image"** — the DDI isn't mounted. Connect to Xcode once (Window → Devices and Simulators), wait for the download, then reconnect the device.
 - **"Tunnel won't start" / RSD address never arrives** — confirm Developer Mode is on, the cable is data-capable (not power-only), and you've tapped Trust on the iPhone for this Mac.
 - **Device appears but Connect fails repeatedly** — quit TrailMate, open Activity Monitor, kill any stray `tm_daemon`, `tm_tunnel`, or `pymobiledevice3` processes, relaunch.

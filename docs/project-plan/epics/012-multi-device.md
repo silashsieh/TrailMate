@@ -112,7 +112,7 @@ watch + `.stop` sentinel, but launch `pymobiledevice3 remote tunneld` instead of
 `lockdown start-tunnel`; the app queries `GET /` for the per-UDID RSD map. One prompt, N
 tunnels, hot-plug. The fallback (N `start-tunnel` sessions) is **not needed** — see result.
 
-#### Spike result (2026-06-13, macOS 26.5 / 3 Wi-Fi-paired devices)
+#### Spike result (2026-06-13, macOS 26.4 / 3 Wi-Fi-paired devices)
 - ✅ One `sudo … remote tunneld` launch tunneled **all three** devices; `GET /` returned the
   per-UDID map (`tunnel-address`, `tunnel-port`, `interface: usbmux-<UDID>-Network`).
 - ✅ **Sleep → wake recovered every tunnel with NO new auth prompt** (the decisive test).
@@ -138,12 +138,14 @@ sudo PYTHONHOME=$PR/python PYTHONPATH=$PR/python-libs PYTHONNOUSERSITE=1 PYTHONU
   $PR/python/bin/python3.13 -m pymobiledevice3 remote tunneld --port 49151 -p tcp
 curl -s http://127.0.0.1:49151/          # expect {udid:[{tunnel-address,tunnel-port,interface}]}
 ```
-Then on macOS 26.4 / iOS 26.4: (a) plug 2nd iPhone → re-`GET /` shows it (hot-plug);
+Then on macOS 26.4 / iOS 26.4: (a) USB-plug a 2nd iPhone → re-`GET /` shows it (a USB hot-plug
+sub-test, separate from the 3-device Wi-Fi-paired run above);
 (b) unplug → gone; (c) **sleep→wake→re-`GET /` recovers tunnels with NO new auth dialog**
 (the decisive test choosing `tunneld` over per-device start-tunnel); (d) take an
 `(address,port)` from `GET /`, run `tm_daemon.py <address> <port>`, push a `SETQ`, confirm the
 dot moves — proves a tunneld tunnel is DVT-usable. `tunneld` returns a **list per UDID** (pick
-the usbmux/USB TCP entry); make the port configurable (49151 may collide).
+the entry for the active transport — `usbmux-<UDID>-Network` for a Wi-Fi-paired device, the USB
+entry when cabled); make the port configurable (49151 may collide).
 
 ### Open-question answers
 - **Restore seeding before connect** → use the last-selected UDID's slot.

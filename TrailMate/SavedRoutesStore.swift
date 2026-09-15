@@ -29,6 +29,9 @@ struct SavedRoute: Identifiable, Codable, Hashable {
     let fromWaypoint: NamedCoord?
     let toWaypoint: NamedCoord?
     let stopWaypoints: [NamedCoord]?
+    // User-defined folder this route lives under (epic 029). nil = ungrouped.
+    // decodeIfPresent keeps routes saved before this field existed loadable.
+    var category: String?
 
     var transportMode: TransportMode {
         TransportMode(rawValue: transportModeRaw) ?? .walk
@@ -61,6 +64,12 @@ final class SavedRoutesStore {
         return support.appendingPathComponent("TrailMate").appendingPathComponent("routes")
     }
 
+    // The user's drag-reordered sequence lives in a sidecar so a reorder is one
+    // tiny write, not a rewrite of every route file (epic 029). It sits in the
+    // routes dir but isn't a route, so the loader skips it by name.
+    private static let orderFileName = "order.json"
+    private static var orderURL: URL { baseURL.appendingPathComponent(orderFileName) }
+
     func load() {
         let base = Self.baseURL
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
@@ -70,23 +79,20 @@ final class SavedRoutesStore {
         }
         let decoder = JSONDecoder()
         var loaded: [SavedRoute] = []
-        for file in files where file.pathExtension.lowercased() == "json" {
+        for file in files
+        where file.pathExtension.lowercased() == "json" && file.lastPathComponent != Self.orderFileName {
             if let data = try? Data(contentsOf: file),
                let route = try? decoder.decode(SavedRoute.self, from: data) {
                 loaded.append(route)
             }
         }
-        routes = loaded.sorted(by: { $0.createdAt > $1.createdAt })
+        // Saved order first; anything the sidecar doesn't know yet (fresh saves,
+        // pre-029 libraries) leads, newest-first — the prior default order.
+        routes = LibraryOrder.ordered(loaded, byIDOrder: loadOrder(), fallback: { $0.createdAt > $1.createdAt })
     }
 
     func save(_ route: SavedRoute) throws {
-        let base = Self.baseURL
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let url = base.appendingPathComponent("\(route.id.uuidString).json")
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(route)
-        try data.write(to: url, options: .atomic)
+        try write(route)
         load()
     }
 
@@ -94,5 +100,48 @@ final class SavedRoutesStore {
         let url = Self.baseURL.appendingPathComponent("\(route.id.uuidString).json")
         try? FileManager.default.removeItem(at: url)
         routes.removeAll { $0.id == route.id }
+        // Drop the deleted id from the sidecar so it can't resurrect a stale slot.
+        saveOrder(routes.map(\.id))
+    }
+
+    // MARK: - Grouping & ordering (epic 029)
+
+    func setCategory(_ category: String?, for route: SavedRoute) {
+        guard var updated = routes.first(where: { $0.id == route.id }) else { return }
+        updated.category = category
+        try? write(updated)
+        load()
+    }
+
+    // Reorder within one folder (see AppState.moveWaypoints for the offset
+    // mapping), then persist the full visible order to the sidecar.
+    func move(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+        let groupIDs = Set(routes.filter { $0.category == category }.map(\.id))
+        routes = LibraryOrder.moveWithinGroup(routes, groupIDs: groupIDs, fromOffsets: source, toOffset: destination)
+        saveOrder(routes.map(\.id))
+    }
+
+    // MARK: - Private
+
+    private func write(_ route: SavedRoute) throws {
+        let base = Self.baseURL
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let url = base.appendingPathComponent("\(route.id.uuidString).json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(route)
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func loadOrder() -> [UUID] {
+        guard let data = try? Data(contentsOf: Self.orderURL),
+              let strings = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return strings.compactMap(UUID.init(uuidString:))
+    }
+
+    private func saveOrder(_ ids: [UUID]) {
+        let strings = ids.map(\.uuidString)
+        guard let data = try? JSONEncoder().encode(strings) else { return }
+        try? data.write(to: Self.orderURL, options: .atomic)
     }
 }

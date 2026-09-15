@@ -44,7 +44,7 @@ actor DaemonBridge: SimulationBackend {
     nonisolated private let eventsContinuation: AsyncStream<SimulationBackendEvent>.Continuation
 
     // Cached write handle for the hot SETQ path. Serialized against start/stop
-    // mutations by `writeQueue` so the 20 Hz simulation tick can write without
+    // mutations by `writeQueue` so the 10 Hz simulation tick can write without
     // crossing this actor's executor and without racing pipe-close on stop.
     nonisolated(unsafe) private var writeHandle: FileHandle?
     nonisolated private let writeQueue = DispatchQueue(label: "TrailMate.DaemonBridge.write")
@@ -166,7 +166,7 @@ actor DaemonBridge: SimulationBackend {
         return response
     }
 
-    // Fire-and-forget for 10-20Hz playback. Nonisolated so the simulation
+    // Fire-and-forget for 10 Hz playback. Nonisolated so the simulation
     // actor's tick can call us without an executor hop. The single-sender
     // invariant (only SimulationActor calls this) plus the serial writeQueue
     // makes it safe against start/stop mutating the cached handle.

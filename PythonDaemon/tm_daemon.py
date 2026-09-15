@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+#
+# Copyright (c) 2026 Silas Hsieh
+#
+# This file is part of the TrailMate Python daemon. Because it imports
+# pymobiledevice3 (GPL-3.0-or-later), the daemon is a combined work and is
+# distributed under the GNU General Public License v3.0 or later. See the
+# COPYING file in this directory and ../LICENSING.md for the full terms.
+#
+# The TrailMate macOS application that launches this daemon as a separate
+# process (over a stdin/stdout text protocol) is licensed separately under
+# the MIT License; see ../LICENSE.md.
+#
 """TrailMate Location Simulation Daemon.
 
 Maintains a persistent DVT connection to an iOS device and accepts

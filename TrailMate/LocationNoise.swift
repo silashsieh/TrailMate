@@ -24,7 +24,7 @@ nonisolated final class LocationNoise {
     }
 
     // Box-Muller transform: two uniform draws → one standard-normal sample.
-    // We discard the second output; sampling twice per call is cheap at <=20Hz.
+    // We discard the second output; sampling twice per call is cheap at 10 Hz.
     private func gaussianSample() -> Double {
         let u1 = max(Double.leastNonzeroMagnitude, Double.random(in: 0...1))
         let u2 = Double.random(in: 0...1)

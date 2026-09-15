@@ -15,6 +15,50 @@ struct CoordinateMathTests {
             .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
     }
 
+    private func offset(
+        _ base: CLLocationCoordinate2D,
+        north: Double = 0,
+        east: Double = 0
+    ) -> CLLocationCoordinate2D {
+        let latRad = base.latitude * .pi / 180
+        return CLLocationCoordinate2D(
+            latitude: base.latitude + north / 111_320.0,
+            longitude: base.longitude + east / (111_320.0 * cos(latRad))
+        )
+    }
+
+    private func referenceDistanceFromRoute(
+        _ probe: CLLocationCoordinate2D,
+        route: [CLLocationCoordinate2D]
+    ) -> Double {
+        guard route.count >= 2 else { return 0 }
+        return zip(route, route.dropFirst())
+            .map { referenceDistanceFromSegment(probe: probe, a: $0.0, b: $0.1) }
+            .min() ?? 0
+    }
+
+    private func referenceDistanceFromSegment(
+        probe: CLLocationCoordinate2D,
+        a: CLLocationCoordinate2D,
+        b: CLLocationCoordinate2D
+    ) -> Double {
+        let probeLoc = CLLocation(latitude: probe.latitude, longitude: probe.longitude)
+        let aLoc = CLLocation(latitude: a.latitude, longitude: a.longitude)
+        let bLoc = CLLocation(latitude: b.latitude, longitude: b.longitude)
+        let ab = aLoc.distance(from: bLoc)
+        let ap = aLoc.distance(from: probeLoc)
+        let bp = bLoc.distance(from: probeLoc)
+
+        if ab == 0 { return ap }
+
+        let t = (ap * ap + ab * ab - bp * bp) / (2 * ab)
+        if t <= 0 { return ap }
+        if t >= ab { return bp }
+
+        let perpSq = ap * ap - t * t
+        return perpSq > 0 ? perpSq.squareRoot() : 0
+    }
+
     @Test func routeDistanceMatchesKnownTaipeiReference() {
         // Taipei 101 → Taipei Main Station straight line: haversine gives
         // 5028.7 m; testing.md's reference demands agreement within 1%.
@@ -86,5 +130,19 @@ struct CoordinateMathTests {
         let tick = try #require(engine.tick(dt: 1))
         #expect(abs((tick.vx * tick.vx + tick.vy * tick.vy).squareRoot() - 5.0) < 1e-6)
         #expect(abs(tick.vx / tick.vy - 0.75) < 1e-6)
+    }
+
+    @Test func deviationDistanceMatchesCLLocationReference() {
+        let start = CLLocationCoordinate2D(latitude: 25.0330, longitude: 121.5654)
+        let north = offset(start, north: 100)
+        let east = offset(north, east: 120)
+        let probe = offset(start, north: 50, east: 20)
+        let route = [start, north, east]
+
+        let engine = NavigationEngine()
+        engine.loadRoute(coordinates: route, baseSpeed: 1.4)
+
+        let expected = referenceDistanceFromRoute(probe, route: route)
+        #expect(abs(engine.distanceFromRoute(probe) - expected) < 0.25)
     }
 }

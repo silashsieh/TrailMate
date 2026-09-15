@@ -1,0 +1,74 @@
+name: Deploy Sparkle appcast to Pages
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        description: Actions artifact containing the prepared Pages payload
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release whose appcast should be deployed
+        required: true
+        default: v2.2.0
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download prepared update site
+        if: ${{ inputs.artifact_name != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: _site
+
+      - name: Download appcast from a published release
+        if: ${{ inputs.artifact_name == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          mkdir -p _site
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern appcast.xml \
+            --dir _site
+          touch _site/.nojekyll
+          printf '%s\n' \
+            '<!doctype html>' \
+            '<html lang="en">' \
+            '<meta charset="utf-8">' \
+            '<meta name="viewport" content="width=device-width, initial-scale=1">' \
+            '<title>TrailMate Updates</title>' \
+            '<h1>TrailMate Updates</h1>' \
+            '<p>The signed Sparkle update feed is available at <a href="appcast.xml">appcast.xml</a>.</p>' \
+            '<p>Installers and release notes are published on <a href="https://github.com/silashsieh/TrailMate/releases">GitHub Releases</a>.</p>' \
+            > _site/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Package Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

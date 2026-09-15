@@ -6,14 +6,20 @@
 # in packaging/.cache/.
 #
 # Bump PBS_TAG / PY_VERSION when a newer python-build-standalone release ships
-# (https://github.com/astral-sh/python-build-standalone/releases). Both can
-# be overridden via env vars without editing this file.
+# (https://github.com/astral-sh/python-build-standalone/releases). All three
+# pins below can be overridden via env vars without editing this file.
+#
+# PMD3_SPEC is pinned to an EXACT version on purpose: pymobiledevice3 is GPLv3
+# and a floating spec could silently pull a new transitive dep under a less
+# friendly license (see THIRD-PARTY-LICENSES.md / LICENSING.md). To upgrade,
+# bump the version here and rebuild — step 7 regenerates the license manifest
+# and warns if a new copyleft dependency entered the tree.
 
 set -euo pipefail
 
 PBS_TAG="${PBS_TAG:-20260510}"
 PY_VERSION="${PY_VERSION:-3.13.13}"
-PMD3_SPEC="${PMD3_SPEC:-pymobiledevice3>=9.12}"
+PMD3_SPEC="${PMD3_SPEC:-pymobiledevice3==9.30.1}"
 
 PY_MAJOR_MINOR="${PY_VERSION%.*}"
 ARCH_TAG="aarch64-apple-darwin"
@@ -89,6 +95,12 @@ from pymobiledevice3.services.dvt.instruments.location_simulation import Locatio
 from pymobiledevice3.usbmux import list_devices
 print('daemon + lister imports OK')
 "
+
+# 7. Regenerate the third-party license inventory from the freshly-installed
+# deps. Warns on stderr if a new GPL/LGPL/MPL package entered the tree — a
+# copyleft dep can change the license of the distributed aggregate (LICENSING.md).
+echo "→ Regenerating THIRD-PARTY-LICENSES.md"
+"$PY" "$ROOT/packaging/gen-third-party-licenses.py" "$OUT"
 
 echo
 echo "✓ Bundle ready: $OUT"

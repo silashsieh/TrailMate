@@ -9,21 +9,14 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# All jobs run on the self-hosted macOS runner. GitHub-hosted runners are not
-# usable while the account is billing-blocked (out of included minutes / $0
-# spending limit) — that block hits every hosted runner, including a cheap
-# ubuntu probe and any macos-* fallback target, so automatic "fall back to
-# hosted when self-hosted is offline" routing is not possible right now. When
-# minutes reset or a spending limit is set, the probe-based fallback can be
-# revived from PR #37's history.
 jobs:
   build:
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-26
 
     steps:
     - uses: actions/checkout@v6
     - name: Cache python-build-standalone download
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: packaging/.cache
         key: pbs-${{ hashFiles('packaging/build.sh') }}
@@ -31,12 +24,12 @@ jobs:
       run: ./packaging/release.sh
 
   test:
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-26
 
     steps:
     - uses: actions/checkout@v6
     - name: Cache python-build-standalone download
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: packaging/.cache
         key: pbs-${{ hashFiles('packaging/build.sh') }}
@@ -61,7 +54,7 @@ jobs:
     # zip round-trip (upload-artifact roots the artifact at the matched path).
     - name: Upload result bundle on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: test-results
         path: build
@@ -69,12 +62,12 @@ jobs:
   # UI automation gets its own job so an XCUITest/TCC flake never taints the
   # unit-test signal.
   ui-test:
-    runs-on: [self-hosted, macOS, ARM64]
+    runs-on: macos-26
 
     steps:
     - uses: actions/checkout@v6
     - name: Cache python-build-standalone download
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: packaging/.cache
         key: pbs-${{ hashFiles('packaging/build.sh') }}
@@ -94,7 +87,7 @@ jobs:
           CODE_SIGNING_REQUIRED=NO
     - name: Upload result bundle on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ui-test-results
         path: build

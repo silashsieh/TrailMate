@@ -52,10 +52,24 @@ struct SavedWaypoint: Codable, Identifiable {
     var name: String
     var latitude: Double
     var longitude: Double
+    // User-defined folder this waypoint lives under (epic 029). nil = ungrouped,
+    // shown under the top-level "Saved Locations" header. decodeIfPresent makes
+    // it backward-compatible with waypoints saved before the field existed.
+    var category: String?
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
+}
+
+// A one-shot request for the map to pan/zoom so a selected library item is
+// framed (#53). MapArea observes `AppState.mapFocus` and applies `region`; a
+// fresh `id` per request means re-selecting the same item pans again. The
+// region is computed in AppState (it owns the coordinates) so MapArea just
+// applies it — keeping camera-math in one place.
+struct MapFocusRequest: Identifiable {
+    let id = UUID()
+    let region: MKCoordinateRegion
 }
 
 // The device manager. Owns app-global concerns — discovery, the device
@@ -165,6 +179,16 @@ final class AppState {
     let savedRoutes = SavedRoutesStore()
     var savedWaypoints: [SavedWaypoint] = []
 
+    // Set when a saved location/route is selected; consumed by MapArea to pan
+    // and frame the map on it (#53). See MapFocusRequest.
+    var mapFocus: MapFocusRequest?
+
+    // Standalone place search for direct location entry (epic 027, #42),
+    // independent of the route From/To searches. Selecting a result teleports
+    // the red dot rather than filling a route slot. App-global because it
+    // targets the selected session's position, like teleport.
+    let placeSearch = LocationSearch()
+
     // Routing kernel (D4). Swappable behind the protocol; MapKit today. Stateless
     // and shared across sessions (the MapKit throttle is per-process, not
     // per-route).
@@ -257,6 +281,12 @@ final class AppState {
             Task { await first.sim.teleport(to: restored) }
         }
 
+        // Arm the selected session's joystick now (the selectedSessionID didSet
+        // doesn't fire for the in-init assignment above). Joystick steers the
+        // local red dot whether or not a device is connected, so it's armed from
+        // launch rather than waiting for the first connect.
+        syncActiveJoystick()
+
         #if DEBUG
         if UITestSupport.openWander {
             pendingWanderCenter = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
@@ -337,7 +367,9 @@ final class AppState {
     // this was the last session, leave a fresh unbound one in its place. If the
     // removed session was selected, fall back to the first remaining session.
     func removeSession(_ session: DeviceSession) {
-        Task { await session.disconnect() }
+        // shutdown(), not disconnect(): the sim engine now runs for the session's
+        // whole life, so a removed slot must stop its loops or they leak.
+        Task { await session.shutdown() }
         sessions.removeAll { $0.id == session.id }
         if sessions.isEmpty {
             sessions = [DeviceSession(manager: self)]
@@ -348,14 +380,15 @@ final class AppState {
         syncActiveJoystick()
     }
 
-    // Keep exactly the selected, connected session's joystick armed, so the one
-    // physical controller / WASD / virtual stick drives one device. Called on
-    // selection change and after every connect/disconnect. A disarmed engine
-    // still reads the controller in its tick but contributes no velocity, so
-    // non-selected devices never move from joystick input.
+    // Keep exactly the selected session's joystick armed, so the one physical
+    // controller / WASD / virtual stick drives one red dot. Armed regardless of
+    // connection — the joystick steers the local position whether or not a device
+    // is mirroring it. Called on selection change and after every connect/disconnect.
+    // A disarmed engine still reads the controller in its tick but contributes no
+    // velocity, so non-selected devices never move from joystick input.
     func syncActiveJoystick() {
         for s in sessions {
-            s.setJoystickArmed(s.id == selectedSessionID && s.connectionStatus.isConnected)
+            s.setJoystickArmed(s.id == selectedSessionID)
         }
     }
 
@@ -363,6 +396,13 @@ final class AppState {
 
     var simState: SimulationStateBridge { selectedSession.simState }
     var connectionStatus: ConnectionStatus { selectedSession.connectionStatus }
+    // The selected session's friendly name, but only while it is actually
+    // connected — nil otherwise so status surfaces never show a stale name
+    // (epic 026). Single source of truth for the connected name shown in the
+    // menu bar and sidebar; tracks the active session under multi-device.
+    var connectedDeviceName: String? {
+        selectedSession.connectionStatus.isConnected ? selectedSession.deviceName : nil
+    }
     var isCalculatingRoute: Bool { selectedSession.isCalculatingRoute }
     var routeCoordinates: [CLLocationCoordinate2D] {
         get { selectedSession.routeCoordinates }
@@ -402,12 +442,44 @@ final class AppState {
     func prepareForQuit() async {
         commandServer.stop()
         for s in sessions {
-            await s.disconnect()
+            await s.shutdown()
         }
         tunnelBroker.stop()
     }
     func teleport(to coordinate: CLLocationCoordinate2D) { selectedSession.teleport(to: coordinate) }
     func clearLocation() async { await selectedSession.clearLocation() }
+
+    // MARK: - Direct location entry (epic 027)
+
+    // Resolve a searched place and teleport the red dot there (#42), framing it
+    // on the map like a selected saved location. Independent of the route From/To
+    // fields — it consumes no route slot. Not connection-gated: teleport moves
+    // the local dot and a connected device mirrors it (epic 028).
+    func goToSearchResult(_ completion: MKLocalSearchCompletion) async {
+        placeSearch.select(completion)
+        guard let coord = await placeSearch.resolve(completion) else {
+            addLog("Couldn't resolve “\(completion.title)”.")
+            return
+        }
+        mapFocus = MapFocusRequest(region: MapRegionMath.region(around: coord))
+        selectedSession.teleport(to: coord)
+    }
+
+    // Teleport the red dot to a typed decimal-degree coordinate (#52); frames it
+    // on the map. The caller parses via CoordinateFormat, so this takes a
+    // resolved coordinate.
+    func goToCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        mapFocus = MapFocusRequest(region: MapRegionMath.region(around: coordinate))
+        selectedSession.teleport(to: coordinate)
+    }
+
+    // Copy a coordinate to the clipboard as a paste-able "lat, lon" string (#52).
+    func copyCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        let text = CoordinateFormat.string(from: coordinate)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        addLog("Copied coordinate: \(text)")
+    }
     func selectFrom(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectFrom(completion) }
     func useCurrentLocationAsFrom() { selectedSession.useCurrentLocationAsFrom() }
     func selectTo(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectTo(completion) }
@@ -422,6 +494,11 @@ final class AppState {
     func routeFromCurrent(to dest: CLLocationCoordinate2D) async { await selectedSession.routeFromCurrent(to: dest) }
     func wanderNearby(center: CLLocationCoordinate2D, radius: Double, duration: TimeInterval) async {
         await selectedSession.wanderNearby(center: center, radius: radius, duration: duration)
+    }
+    func sweepArea(center: CLLocationCoordinate2D, halfSideMeters: Double, laneSpacingMeters: Double) async {
+        await selectedSession.sweepArea(
+            center: center, halfSideMeters: halfSideMeters, laneSpacingMeters: laneSpacingMeters
+        )
     }
     func loadDrawnRoute(_ coords: [CLLocationCoordinate2D]) async { await selectedSession.loadDrawnRoute(coords) }
     func startPlayback() { selectedSession.startPlayback() }
@@ -755,8 +832,38 @@ final class AppState {
         persistWaypoints()
     }
 
+    // Selecting a saved location frames it on the map (#53) and, when connected,
+    // teleports the device to it — the pre-029 tap behavior, kept additive so the
+    // map also moves even while disconnected (saved sections render disconnected).
     func teleportToWaypoint(_ waypoint: SavedWaypoint) {
+        mapFocus = MapFocusRequest(region: MapRegionMath.region(around: waypoint.coordinate))
         selectedSession.teleport(to: waypoint.coordinate)
+    }
+
+    // MARK: - Saved-location grouping & ordering (epic 029)
+
+    // Folder names in use, alphabetized. Derived from the items themselves —
+    // an empty folder doesn't persist on its own (start-simple; see epic 029).
+    var savedLocationCategories: [String] {
+        Set(savedWaypoints.compactMap(\.category)).sorted()
+    }
+
+    func setWaypointCategory(_ category: String?, for waypoint: SavedWaypoint) {
+        guard let index = savedWaypoints.firstIndex(where: { $0.id == waypoint.id }) else { return }
+        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
+        savedWaypoints[index].category = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        persistWaypoints()
+    }
+
+    // Reorder within one folder. `.onMove` reports offsets relative to that
+    // folder's rows, so map them back onto the global array's matching slots,
+    // leaving every other folder untouched. Persisted as the array order.
+    func moveWaypoints(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+        let groupIDs = Set(savedWaypoints.filter { $0.category == category }.map(\.id))
+        savedWaypoints = LibraryOrder.moveWithinGroup(
+            savedWaypoints, groupIDs: groupIDs, fromOffsets: source, toOffset: destination
+        )
+        persistWaypoints()
     }
 
     // MARK: - Recording library
@@ -830,6 +937,11 @@ final class AppState {
         let coords = route.clCoordinates
         guard !coords.isEmpty else { return }
 
+        // Frame the whole route on the map when it's selected (#53).
+        if let region = MapRegionMath.boundingRegion(coords) {
+            mapFocus = MapFocusRequest(region: region)
+        }
+
         transportMode = route.transportMode
         if let custom = route.customSpeedKmh {
             customSpeedKmh = custom
@@ -875,6 +987,23 @@ final class AppState {
 
     func deleteSavedRoute(_ route: SavedRoute) {
         savedRoutes.delete(route)
+    }
+
+    // MARK: - Saved-route grouping & ordering (epic 029)
+
+    // Folder names in use across saved routes, alphabetized (see the
+    // savedLocationCategories note — folders are derived, not free-standing).
+    var savedRouteCategories: [String] {
+        Set(savedRoutes.routes.compactMap(\.category)).sorted()
+    }
+
+    func setRouteCategory(_ category: String?, for route: SavedRoute) {
+        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
+        savedRoutes.setCategory((trimmed?.isEmpty ?? true) ? nil : trimmed, for: route)
+    }
+
+    func moveRoutes(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
+        savedRoutes.move(inCategory: category, fromOffsets: source, toOffset: destination)
     }
 
     func renameSavedRoute(_ route: SavedRoute, to newName: String) {

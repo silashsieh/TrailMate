@@ -9,6 +9,7 @@ import SwiftUI
 // SimulatedPositionPersistence.
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    let updaterController: UpdaterController
 
     // Seeded from the persisted choice; onChange writes it back. Launch-only —
     // AppleLanguages is bound at process start, so it doesn't need to live on
@@ -85,11 +86,36 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Updates") {
+                Toggle(
+                    "Automatically check for updates",
+                    isOn: Binding(
+                        get: { updaterController.automaticallyChecksForUpdates },
+                        set: { updaterController.setAutomaticallyChecksForUpdates($0) }
+                    )
+                )
+                .accessibilityIdentifier("settings.updates.automaticChecks")
+
+                Toggle(
+                    "Automatically download updates",
+                    isOn: Binding(
+                        get: { updaterController.automaticallyDownloadsUpdates },
+                        set: { updaterController.setAutomaticallyDownloadsUpdates($0) }
+                    )
+                )
+                .disabled(!updaterController.automaticallyChecksForUpdates)
+                .accessibilityIdentifier("settings.updates.automaticDownloads")
+
+                Text("TrailMate asks before installing an update and relaunching.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             // AI control settings (epic 019). Self-contained subview owned by
             // the AI-integration work; the single cross-file reference in B3.
             AISettingsSection()
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 420)
+        .frame(width: 420, height: 520)
     }
 }

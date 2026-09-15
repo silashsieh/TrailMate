@@ -1,6 +1,10 @@
 #!/bin/bash
 # tm_tunneld.sh — privileged wrapper for `pymobiledevice3 remote tunneld`.
 #
+# Part of the TrailMate Python daemon, distributed under the GNU General Public
+# License v3.0 or later (see COPYING and ../LICENSING.md). The TrailMate macOS
+# app is licensed separately under the MIT License.
+#
 # Launched as root by TrailMate.app via `osascript … with administrator
 # privileges` — ONE auth prompt for the whole session. Runs a single tunneld
 # that auto-tunnels every connected device (usb + wifi + usbmux). The host
@@ -39,7 +43,19 @@ export PYTHONDONTWRITEBYTECODE=1
 
 cleanup() {
     if [ -n "${TUNNELD_PID:-}" ]; then
+        # Ask politely first (SIGTERM / its own graceful shutdown), then ESCALATE.
+        # A tunneld holding a live TUN tunnel wedges on shutdown — it acks
+        # SIGINT/SIGTERM but never exits — so a plain `kill -TERM` + `wait` would
+        # block here forever and leak the root daemon on the port (epic 031/032).
+        # Poll for a short grace period, then SIGKILL (uncatchable) so teardown
+        # always completes. We run as root, so we can force-kill our own child;
+        # the kernel reclaims the utun interface when the process dies.
         kill -TERM "$TUNNELD_PID" 2>/dev/null
+        for _ in $(seq 1 12); do                 # ~3s grace for a clean exit
+            kill -0 "$TUNNELD_PID" 2>/dev/null || break
+            sleep 0.25
+        done
+        kill -KILL "$TUNNELD_PID" 2>/dev/null     # force if still wedged
         wait "$TUNNELD_PID" 2>/dev/null
     fi
     rm -f "$CTRL" "$CTRL.stop" "$CTRL.err" "$CTRL.error"

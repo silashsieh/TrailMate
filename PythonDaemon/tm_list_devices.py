@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+#
+# Copyright (c) 2026 Silas Hsieh
+#
+# This file is part of the TrailMate Python daemon. Because it imports
+# pymobiledevice3 (GPL-3.0-or-later), it is a combined work and is distributed
+# under the GNU General Public License v3.0 or later. See the COPYING file in
+# this directory and ../LICENSING.md for the full terms. The TrailMate macOS
+# app that drives this daemon is licensed separately under the MIT License.
+#
 """TrailMate Device Lister.
 
 One-shot enumeration of paired iOS devices reachable from this Mac, used by

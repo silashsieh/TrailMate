@@ -6,19 +6,19 @@ The iOS 17+ RSD tunnel uses RemoteXPC, personalized DDI mounting, and TUN-based 
 
 ## D2: Why a persistent daemon instead of CLI invocation per command?
 
-Each `pymobiledevice3` CLI invocation pays Python interpreter startup (~500ms-1s) plus tunnel setup (~1-3s on first call). For joystick mode at 20Hz, that's a non-starter. Keeping one daemon alive with the tunnel and DVT handle pre-opened reduces per-command latency to <10ms.
+Each `pymobiledevice3` CLI invocation pays Python interpreter startup (~500ms-1s) plus tunnel setup (~1-3s on first call). For joystick mode at the 10 Hz control cadence, that's a non-starter. Keeping one daemon alive with the tunnel and DVT handle pre-opened reduces per-command latency to <10ms.
 
 ## D3: Why a separate privileged helper instead of running the whole app as root?
 
-Two reasons. First, only the TUN interface creation needs root; everything else (UI, MapKit, GameController, daemon stdin/stdout) is fine as the regular user. Running the whole app as root would be a gratuitous security mistake. Second, isolating the privileged step keeps the root surface tiny: today only `tm_tunnel.sh` runs as root, brought up via `osascript … with administrator privileges`, while the app stays unprivileged. A packaged SMAppService helper is the documented modern path and would drop the per-session auth prompt, but it needs paid signing, so it's deferred (see features.md).
+Two reasons. First, only the TUN interface creation needs root; everything else (UI, MapKit, GameController, daemon stdin/stdout) is fine as the regular user. Running the whole app as root would be a gratuitous security mistake. Second, isolating the privileged step keeps the root surface tiny: today only `tm_tunneld.sh` runs as root, brought up via `osascript … with administrator privileges`, while the app stays unprivileged. A packaged SMAppService helper is the documented modern path and would drop the per-session auth prompt. Developer ID signing is now available, but helper design, installation, migration, and lifecycle remain separate deferred work (see features.md).
 
 ## D4: Why MapKit over Google Maps or OpenStreetMap?
 
 Free, no API key, no account, no quota, native SwiftUI integration, MKDirections for routing in one line. The only argument against is map data density — Apple's data for Taipei walking routes is decent but not as detailed as OSM in some neighborhoods. If that becomes a real problem, OSRM can be slotted in as the routing backend behind a `RoutingService` protocol while keeping MapKit for visualization.
 
-## D5: Why 20 Hz for the simulation loop?
+## D5: Why 10 Hz for the simulation loop?
 
-CoreLocation typically delivers updates to apps at ~1 Hz by default, and rapid updates get coalesced, so wire rate is never the bottleneck for the apps under test. Route playback and joystick share a single 20 Hz aggregator in `SimulationActor` rather than running at separate rates: the joystick wants the tighter loop for perceived responsiveness during direction changes, and interpolating route playback at the same 20 Hz costs negligible CPU while keeping one tick path instead of two. SwiftUI redraws are decoupled by a 2 Hz snapshot-push throttle (see D7), so the backend still receives every 20 Hz tick.
+CoreLocation typically delivers updates to apps at ~1 Hz by default, and rapid updates get coalesced, so wire rate is never the bottleneck for the apps under test. Route playback and joystick share a single 10 Hz aggregator in `SimulationActor`: 100 ms is the invisible floor for app-visible wire freshness, while 4 Hz / 250 ms sits too close to the ~300 ms threshold a human can feel when steering the joystick. SwiftUI redraws are decoupled by snapshot-push throttles (see D7), so the backend still receives every 10 Hz tick.
 
 ## D6: Why local-flat coordinate math instead of geodesic (Haversine)?
 
@@ -26,11 +26,11 @@ For per-tick movement at human-scale speeds (1-25 m/s) and one-tick distances (5
 
 ## D7: Why a SimulationActor instead of keeping everything on MainActor?
 
-Before the actor split, the 20 Hz aggregator and the engines all ran on MainActor inside AppState. Any SwiftUI hitch — map gesture, layout pass, sheet animation — could stall the loop and delay `SETQ` delivery to the device, manifesting as visible jitter on the iPhone side. A `Thread.sleep(forTimeInterval: 0.3)` on MainActor would pause the device's simulated motion for the full 300 ms.
+Before the actor split, the aggregator and the engines all ran on MainActor inside AppState. Any SwiftUI hitch — map gesture, layout pass, sheet animation — could stall the loop and delay `SETQ` delivery to the device, manifesting as visible jitter on the iPhone side. A `Thread.sleep(forTimeInterval: 0.3)` on MainActor would pause the device's simulated motion for the full 300 ms.
 
 The fix is to move the simulation core (aggregator, idle jitter, deviation check, the four engines) onto its own actor's executor. Engines are kept as `nonisolated final class` so the tick is still a synchronous sequence of plain method calls — no per-tick `await` hops between isolation domains, which would reintroduce the same stall problem on a different thread. `DaemonBridge.setLocationQuiet` is `nonisolated` on a serial dispatch queue so the actor's hot path can call it without crossing into the bridge's isolation either.
 
-The 2 Hz UI throttle (introduced as a perf hotfix when the MapPolyline rebuild at 20 Hz was the dominant CPU cost) is folded into the actor's snapshot push, so there's exactly one place that decides when SwiftUI sees a new coordinate. The backend still receives every tick at 20 Hz.
+The UI throttles are folded into the actor's snapshot push, so there's exactly one place that decides when SwiftUI sees a new coordinate. Route playback snapshots stay at 2 Hz because the MapPolyline rebuild is relatively expensive; active non-playing snapshots are capped at 10 Hz so joystick steering does not rebuild MapKit faster than the loop cadence. The backend still receives every tick at 10 Hz.
 
 A `SimulationBackend` protocol abstracts the device-control side: `DaemonBridge` (pymobiledevice3 over a privileged tunnel) is one implementation; future implementations — ADB for Android, SSH to a jailbroken iPhone, a record-only mock for tests — slot in without touching the engines. This is the smallest forward-looking abstraction that pays off no matter which long-term direction the project takes. The full XPC service split (separate binary, codable proto) was considered and explicitly deferred: it costs ~weeks of plumbing and isn't justified until there's a concrete second client.
 
@@ -53,6 +53,53 @@ Epic 012 connects N iPhones at once. Two UI shapes were on the table: tabs/split
 Two structural invariants make N devices correct rather than merely rendered:
 
 - **Device-routing is by `connectedUDID`, never by list position.** Each `DeviceSession` holds its `DaemonBridge` private and a `SimulationActor` only talks to the backend injected at its own `attach()`. `AppState.dispatch` (AI) and the GUI forwarders resolve the target session by its bound UDID, so "device A's coordinate reaches B's daemon" is impossible by construction (proved by `CommandDispatchTests`). `dispatch` never reads `selectedSessionID` — GUI focus is not a routing input.
-- **One physical joystick drives one device.** Every session's `SimulationActor` reads the live `GCController`, but only the selected, connected session's joystick engine is *armed* (`AppState.syncActiveJoystick`, called on selection change and after every connect/disconnect). A disarmed engine contributes no velocity, so non-selected devices never move from joystick/WASD/virtual-stick input even though their actors still observe the controller.
+- **One physical joystick drives one red dot.** Every session's `SimulationActor` reads the live `GCController`, but only the selected session's joystick engine is *armed* (`AppState.syncActiveJoystick`, called on selection change and after every connect/disconnect). Since epic 028 the arm condition is selection alone, not selection + connection — the joystick steers the selected session's local position whether or not a device is attached. A disarmed engine contributes no velocity, so non-selected devices never move from joystick/WASD/virtual-stick input even though their actors still observe the controller.
 
 Scope cut for v2.0.0: position restore stays a single global last-position (restored into the first session at launch, the selected session's saved at quit). Per-UDID restore is a later refinement, not required for the switcher.
+
+## D11: Why the simulated position is a live local state, not a device side effect?
+
+Epic 028 (#45) started as "make map/planning usable while disconnected" and grew, at the owner's request, into decoupling the *simulation* from the connection: the red dot must be controllable with no device attached, and a device must snap to it on connect. We chose to make the **simulated position the authoritative local state** and treat a device connection as a *mirror* of it, rather than gating the driving controls.
+
+Mechanically this is a lifecycle split in `SimulationActor`. The engine loops (10 Hz aggregator, idle jitter, controller observers) now run for the session's whole lifetime — `startEngine()` at `DeviceSession` init, `stopEngine()` at removal/quit — instead of only between connect and disconnect. `attach()`/`detach()` shrank to swapping the device backend: attach injects it, re-emits the current coordinate so the device jumps to the red dot, and takes the App Nap token; detach drops the backend and token but leaves the loops running and the position intact (disconnecting no longer wipes the dot). `emit()` already wrote the bridge unconditionally and the device only via `backend?`, so a disconnected session simulates locally and sends nothing to any device; idle jitter is gated on a live backend so the offline preview doesn't drift.
+
+This **superseded epic 028's first approach** (a `.requiresConnection()` modifier that disabled teleport/play/joystick with a hint while disconnected). With the local-state model those controls simply work offline, so the gating modifier and its hint copy were removed; the only connection-conditional UI left is informational (the map status pill reads "Local position" vs "Simulating", reinforced by the existing green/grey connection dot). The AI command socket is unchanged — it stays device-addressed by `connectedUDID` and still rejects commands to a not-connected device; offline control is a GUI affordance, not a remote one.
+
+Trade-off accepted: every session runs its loops for its whole life (N cheap 10 Hz no-op ticks for N slots), versus the prior "loops only while connected." The aggregator early-returns when no engine contributes, and TrailMate targets a few devices, so the cost is negligible. Per-session leaks are avoided by routing removal/quit through `DeviceSession.shutdown()` (disconnect + `stopEngine`), since `disconnect()` alone now leaves the engine running.
+
+## D12: Why a geometric serpentine sweep instead of road-snapped area coverage?
+
+Epic 030 (#47) wanted coverage-style testing — walk *everything* in a region rather than a hand-placed path. MapKit has no area-coverage primitive, so the choice was between a geometric sweep and building road-aware coverage on top of `MKDirections`. We shipped the geometric sweep: `CoverageRouteBuilder` lays a boustrophedon over a north-up square and hands the polyline to the same playback path as every other route source. Road-aware coverage needs a graph traversal (a route inspection / Chinese-postman problem) over data MapKit doesn't expose, and one `MKDirections` call per lane would multiply the per-Mac rate limit by the lane count for a path the user asked to be *straight*. Sweeping therefore sits with **Go directly** and hand-drawn routes on the direct-movement side of the app, not with **Route here**; Random-mode wander keeps its road routing.
+
+Three shape decisions worth recording, all made to keep the output predictable rather than optimal:
+
+- **The radius is the center-to-edge half-side**, so the square's side is exactly `2 × radius`. Reusing the wander sheet's radius control was the point of folding Sweeping into that sheet, and a half-side reads more naturally on a map than a corner distance (which would put the edges at `radius / √2`). The sheet states the resulting side and lane count so the reading isn't left to inference.
+- **Fixed orientation and start**: lanes run east-west and step south to north, starting at the west end of the southernmost lane. An orientation derived from the input (say, the longer axis) would be meaningless on a square, and a fixed rule makes the route reproducible — identical inputs give identical coordinates, which is what the unit tests assert. The lane set is centered between the south and north edges, so a square narrower than one lane spacing degenerates into a single edge-to-edge pass instead of hugging one edge.
+- **Two coordinates per lane, no intermediate vertices.** `NavigationEngine` advances by arc length and interpolates within a segment, so vertex density buys nothing for playback or for the drawn polyline; the hand-drawn path resamples only because a *hand* stroke needs smoothing. Keeping lane endpoints also makes the reported length exact rather than a sum of rounded samples.
+
+Because the route starts on the boundary and not at the point the user clicked, loading it with `resetStart: true` teleports the marker from the center out to that first edge point. That jump is deliberately outside the route: it contributes no distance and no time, so the sheet's estimate is the sweep itself. A practical point cap (4 000 points) fails absurd radius/spacing combinations up front instead of allocating them.
+
+## D13: Why a signed GitHub Pages appcast pointing to GitHub Release DMGs?
+
+TrailMate remains a direct-download app, so the updater needs one stable HTTPS
+feed without turning the repository itself into a website. GitHub Pages hosts
+only `appcast.xml` and a tiny landing page; every executable stays as an
+immutable, versioned GitHub Release asset. Sparkle can update from a DMG
+directly, which lets one Developer ID-signed, notarized artifact serve both the
+manual install and full-update paths.
+
+There are two independent trust layers by design. Apple code signing and
+notarization establish platform identity and Gatekeeper acceptance. Sparkle's
+pinned EdDSA public key authenticates the appcast archive before installation.
+The corresponding private key is a protected release-environment secret with
+an offline recovery export; the app contains only the public key. A public run
+keeps the GitHub Release in draft state until all assets are uploaded, publishes
+it, and deploys the appcast last, so the stable feed cannot advertise an asset
+that is still private or missing.
+
+Sparkle's signed-feed policy is paired with pre-extraction verification. The
+release pipeline also treats the app mounted from the finished DMG—not the
+pre-staging export—as the integrity boundary. It stages bundles with `ditto`
+and fails if either the staged copy or the final packaged copy no longer passes
+deep, strict Developer ID verification. This closes the two gaps discovered in
+the v2.1.2 bootstrap pre-release (epic 047).

@@ -7,6 +7,7 @@ TrailMate/
 ├── README.md
 ├── CLAUDE.md                          # entry point for Claude Code sessions
 ├── LICENSE.md
+├── Info.plist                         # Sparkle feed URL and public trust key
 ├── .gitignore
 │
 ├── TrailMate/                         # Swift sources (flat layout)
@@ -20,13 +21,15 @@ TrailMate/
 │   ├── CommandServer.swift            # AF_UNIX command socket (off by default; inverse of DaemonBridge)
 │   ├── SocketPath.swift               # ai.sock path + permission/length guards
 │   ├── AISettingsSection.swift        # Settings "AI control" toggle subview
+│   ├── UpdaterController.swift        # Sparkle lifecycle + observable update preferences
+│   ├── CheckForUpdatesView.swift      # application-menu update command
 │   ├── MenuBarStatusView.swift        # MenuBarExtra content: live status + quick actions
 │   ├── RoutingService.swift           # routing kernel protocol + MapKitRoutingService (D4 seam)
 │   ├── GPXService.swift               # GPX import (XMLParser) and export
-│   ├── JoystickEngine.swift           # 20 Hz control loop (controller/virtual stick/WASD)
+│   ├── JoystickEngine.swift           # 10 Hz control loop (controller/virtual stick/WASD)
 │   ├── LocationNoise.swift            # Box-Muller Gaussian jitter on every emission
 │   ├── LocationSearch.swift           # MKLocalSearchCompleter wrapper
-│   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (20 Hz tick)
+│   ├── NavigationEngine.swift         # route playback: polyline interpolation + loop modes (10 Hz tick)
 │   ├── PositionIntegrator.swift       # sums engine velocity vectors; owns authoritative position
 │   ├── PythonBundle.swift             # resolves bundled interpreter + script paths
 │   ├── RecorderService.swift          # session recording: GPX files + index
@@ -35,7 +38,7 @@ TrailMate/
 │   ├── SavedRoutesStore.swift         # per-route JSON persistence under Application Support
 │   ├── SettingsView.swift             # Settings window (⌘,): set-and-forget preferences
 │   ├── SimulatedPositionPersistence.swift  # red-dot persistence + launch-restore preference
-│   ├── SimulationActor.swift          # off-MainActor core: 20 Hz aggregator, engines, snapshot push (one per session)
+│   ├── SimulationActor.swift          # off-MainActor core: 10 Hz aggregator, engines, snapshot push (one per session)
 │   ├── SimulationBackend.swift        # backend protocol + events (DaemonBridge / MockSimulationBackend implement it)
 │   ├── StrokeGeometry.swift           # hand-drawn stroke smoothing + uniform resampling
 │   ├── TunnelBroker.swift             # one privileged `remote tunneld` for all devices; resolves per-UDID RSD endpoint
@@ -56,7 +59,7 @@ TrailMate/
 │   └── tm_tunneld.sh                  # root-only `remote tunneld` launcher (parent-watches the host, N tunnels)
 │
 ├── PythonResources/                   # bundled CPython runtime (gitignored; built by packaging/build.sh)
-├── packaging/                         # build.sh (Python runtime), release.sh (DMG)
+├── packaging/                         # Python bundle, DMG, and signed-appcast scripts
 │
 └── docs/                              # all detailed documentation
     ├── README.md                      # table of contents
@@ -77,6 +80,23 @@ TrailMate/
         ├── features.md                # what ships today, plus dropped/deferred items
         └── decisions.md               # key technical decisions and why
 ```
+
+`UpdaterController` is an app-global `@MainActor @Observable` service owned by
+`TrailMateApp`. It owns the single `SPUStandardUpdaterController`, projects
+Sparkle's KVO preferences into Swift Observation for Settings, and backs the
+application-menu update command. Its trust configuration lives in
+`Info.plist`: a fixed HTTPS feed URL, a pinned EdDSA public key, a required
+signed feed, and verification before archive extraction. Sparkle requires the
+last setting whenever a signed feed is mandatory. The private key exists only
+outside the app in release operations.
+
+The release data flow is deliberately ordered: `release.sh` exports and verifies
+the app, stages it with `ditto` so bundle metadata survives, verifies the staged
+copy, produces and notarizes the Developer ID DMG, then mounts that finished DMG
+and verifies the exact packaged app; `generate-appcast.sh` signs its Sparkle entry;
+the workflow uploads all assets to a draft release; it publishes that release;
+and only then does the reusable Pages workflow deploy the immutable appcast.
+The appcast points at GitHub Release assets, so Pages contains no executables.
 
 ## Layer Diagram
 
@@ -105,8 +125,8 @@ TrailMate/
 ├──────────────────────────────────────────────────────────┤
 │  SimulationActor                                         │  Simulation core
 │  • Owns the engines as nonisolated stored properties.    │  (off MainActor)
-│  • 20 Hz aggregator loop, 1 Hz idle jitter, 5 Hz         │
-│    deviation check, 2 Hz UI snapshot push.               │
+│  • 10 Hz aggregator loop, 1 Hz idle jitter, 5 Hz         │
+│    deviation check, throttled UI snapshot push.          │
 │  • Holds the active SimulationBackend; calls             │
 │    setLocationQuiet synchronously on the hot path.       │
 │  • Owns the App Nap activity token while attached.       │
@@ -150,9 +170,9 @@ Processes cooperating at runtime (multi-device: one tunneld, N daemons):
 |`tm_tunneld.sh`|root (via sudo)   |session   |Run one `pymobiledevice3 remote tunneld` opening every device's RSD TUN tunnel; nothing else|
 |`tm_daemon.py` |user              |per device|Persistent pymobiledevice3 + DVT connection — **one per connected device**           |
 
-`tm_tunneld.sh` exists *only* because creating TUN interfaces requires root. It does the absolute minimum: launches one `pymobiledevice3 remote tunneld` (which auto-tunnels all connected devices, with hot-plug), and parent-watches the host PID so a host crash can't leak it. It's brought up by `TunnelBroker.swift` via `osascript … with administrator privileges` — **one auth dialog per session for all devices**. The broker resolves each device's *current* RSD endpoint by querying tunneld's HTTP API at connect time, because the RSD address+port are **ephemeral** — tunneld reassigns them on every (re)establishment, so nothing caches them; the UDID is the only stable key. All location logic stays in the unprivileged app.
+`tm_tunneld.sh` exists *only* because creating TUN interfaces requires root. It does the absolute minimum: launches one `pymobiledevice3 remote tunneld` (which auto-tunnels all connected devices, with hot-plug), and parent-watches the host PID. On quit or host-death its `cleanup` tears the tunnel down by escalating SIGTERM → short grace → SIGKILL, so even a tunneld wedged on an active TUN tunnel (which acks but ignores SIGINT/SIGTERM) can't leak on the port (epic 032). It's brought up by `TunnelBroker.swift` via `osascript … with administrator privileges` — **one auth dialog per session for all devices**. Before launching, the broker probes tunneld's localhost HTTP `/hello`; if a stale tunneld from a dead prior run is still squatting on the port (the watchdog can leak one on a hard kill), it reclaims it via that tunneld's own `/shutdown` — unprivileged, so no extra prompt (epic 031). That reclaim is best-effort (a tunneld wedged on an active tunnel won't honour `/shutdown`); the durable guarantee is the force-killed teardown above. The broker resolves each device's *current* RSD endpoint by querying tunneld's HTTP API at connect time, because the RSD address+port are **ephemeral** — tunneld reassigns them on every (re)establishment, so nothing caches them; the UDID is the only stable key. All location logic stays in the unprivileged app.
 
-The Python daemon is a *long-lived* subprocess. Spawning `pymobiledevice3` per command costs ~500ms–1s in interpreter cold-start, which would kill the joystick experience. Instead, we spawn it once, keep the DVT connection open, and stream `SETQ lat lon\n` lines into its stdin at 20 Hz from the simulation actor.
+The Python daemon is a *long-lived* subprocess. Spawning `pymobiledevice3` per command costs ~500ms–1s in interpreter cold-start, which would kill the joystick experience. Instead, we spawn it once, keep the DVT connection open, and stream `SETQ lat lon\n` lines into its stdin at 10 Hz from the simulation actor.
 
 ## Concurrency Topology
 
@@ -164,11 +184,13 @@ Swift 6 strict concurrency, with three isolation domains:
 |`SimulationActor`     |Engines (nav/joystick/integrator/noise), aggregator + idle-jitter loops, deviation check, snapshot push, App Nap token. **One per session** — independent actors, no shared mutable state.|
 |`DaemonBridge` (actor)|Process lifecycle, stdin/stdout state, pending-line continuations. **One per connected session**, held private to it.          |
 
-Multi-device (epic 012) replicates the actor/bridge/daemon per `DeviceSession` rather than sharing them; `AppState` owns the collection and a `selectedSessionID`. The control surface (route panel, playback, joystick) binds to the selected session via `AppState`'s forwarding accessors; the map iterates all sessions for color-coded markers + routes. Device-routing is structural: a `DeviceSession` holds its `DaemonBridge` privately and a `SimulationActor` only ever talks to the backend injected at its own `attach()`, so a command resolved to session A by `connectedUDID` can never reach B's daemon. The single physical joystick is armed on exactly the selected, connected session (`AppState.syncActiveJoystick`); other sessions' engines read the controller but stay inactive, contributing no velocity.
+Multi-device (epic 012) replicates the actor/bridge/daemon per `DeviceSession` rather than sharing them; `AppState` owns the collection and a `selectedSessionID`. The control surface (route panel, playback, joystick) binds to the selected session via `AppState`'s forwarding accessors; the map iterates all sessions for color-coded markers + routes. Device-routing is structural: a `DeviceSession` holds its `DaemonBridge` privately and a `SimulationActor` only ever talks to the backend injected at its own `attach()`, so a command resolved to session A by `connectedUDID` can never reach B's daemon. The single physical joystick is armed on exactly the selected session (`AppState.syncActiveJoystick`), connected or not — the joystick steers that session's local red dot whether or not a device is mirroring it; other sessions' engines read the controller but stay inactive, contributing no velocity.
+
+The simulated position is a live *local* state, not a device side effect (epic 028). Each session's `SimulationActor` runs its loops for the session's whole lifetime — `startEngine()` at session creation, `stopEngine()` at removal/quit — so teleport, route playback, and joystick drive the red dot with or without a device. `attach()`/`detach()` only swap the device *mirror* in and out: attach injects the backend, immediately re-emits the current position (so the device snaps to the red dot on connect) and takes the App Nap token; detach drops the backend and token but leaves the loops running and the position intact. `emit()` writes the position to the bridge (the red dot) unconditionally and to `backend?` only when one is attached, so a disconnected session simulates locally and emits nothing to any device.
 
 `DaemonBridge` reads its daemon's stdout with an event-driven `readabilityHandler` (feeding an ordered `AsyncStream` drained by one Task into the actor), **not** `FileHandle.bytes.lines`. This is load-bearing for multi-device: `bytes.lines` does a blocking read that holds Foundation's shared file-handle async-read queue, so once one device connects and its daemon goes idle, that bridge's blocked reader starves every *other* bridge's reader — a second device's daemon connects and prints `READY` but the bridge never reads it, hanging on "Connecting…" forever. The readabilityHandler never blocks, so concurrent bridges read independently. (Connecting one device at a time always worked, which is what made this look like a stack/tunnel limit rather than a reader bug.)
 
-The engines are marked `nonisolated final class` so the simulation actor can call them synchronously inside a tick — no per-tick `await` hop. The 2 Hz UI throttle lives in the actor's snapshot-push path; the backend still receives every SETQ tick at 20 Hz because `setLocationQuiet` is `nonisolated` on `DaemonBridge` (cached pipe handle + serial queue). A `Thread.sleep(forTimeInterval:)` on MainActor will *not* delay SETQ delivery — that was the failure mode the actor split eliminated.
+The engines are marked `nonisolated final class` so the simulation actor can call them synchronously inside a tick — no per-tick `await` hop. The UI throttle lives in the actor's snapshot-push path: route playback snapshots stay capped at 2 Hz, and active non-playing motion is capped at 10 Hz so joystick steering does not rebuild MapKit faster than the loop cadence. The backend still receives every SETQ tick at 10 Hz because `setLocationQuiet` is `nonisolated` on `DaemonBridge` (cached pipe handle + serial queue). A `Thread.sleep(forTimeInterval:)` on MainActor will *not* delay SETQ delivery — that was the failure mode the actor split eliminated.
 
 ## Daemon Protocol
 
@@ -219,7 +241,7 @@ PLAY <udid> | PAUSE <udid> | STOP <udid> | SEEK <udid> <0…1> | CLEAR <udid>
 {"ok":false,"code":"not_connected","error":"device … is not connected"}
 ```
 
-`ok` means *accepted*, not completed (most moves are fire-and-forget; read `STATUS` for realized state). Device-scoped verbs carry the target UDID; dispatch resolves the connected session by `connectedUDID` and **never** reads the GUI's `selectedSessionID`, so a command for device A can never reach device B. A greeting line on connect advertises the protocol version. Adding a verb means updating `CommandProtocol.swift`, the `trailmate` CLI, and this section together (see CLAUDE.md).
+`ok` means *accepted*, not completed (most moves are fire-and-forget; read `STATUS` for realized state). Device-scoped verbs carry the target UDID; dispatch resolves the connected session by `connectedUDID` and **never** reads the GUI's `selectedSessionID`, so a command for device A can never reach device B. A greeting line on connect advertises the protocol version. Adding a verb means updating `CommandProtocol.swift`, `AppState.dispatch(_:)`, and this section together (see CLAUDE.md); the planned `trailmate` CLI is not yet built (see [features.md](features.md#deferred--dropped)), but will need the same treatment once it ships.
 
 ## Coordinate Math
 
@@ -231,6 +253,13 @@ meters_per_deg_lon = 111_320 * cos(lat_in_radians)
 ```
 
 This is accurate to <0.1% over distances <10km, which covers every realistic single-tick movement. For long routes (>50km), MKDirections gives us a polyline of fine-grained coordinates, so we never need to integrate over long stretches.
+
+Route-deviation checks use the same local-flat assumption but cache the route vertices as
+route-local `(x, y)` meters once in `NavigationEngine.loadRoute`. Each 5 Hz off-route scan
+projects only the current probe point and then uses pure `Double` segment-distance math over
+the cached vertices. The scan still covers the whole route, rather than only the current
+playhead neighborhood, because teleport and joystick drift can move the local position far
+from the active segment and the nearest-route distance must remain behaviorally unchanged.
 
 Hand-drawn strokes pass through `StrokeGeometry` before reaching the engine: Chaikin corner-cutting (two passes) takes hand jitter out of the path shape, then uniform arc-length resampling emits one vertex per `clamp(baseSpeed × 1 s, 2 m, 15 m)`. The resampler's contract is what `NavigationEngine` relies on — at least two distinct vertices and no near-zero segments (its velocity tangent normalizes by segment length); click-sized strokes and jitter blobs resample to nil and never load. Chaikin's linear blends run on raw degrees (local-flat error at stroke scale is far below GPS noise), while all spacing decisions are meters-based via `CLLocation.distance`, the same rationale as `joinSegments`.
 

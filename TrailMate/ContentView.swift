@@ -26,6 +26,19 @@ struct ContentView: View {
 
 private struct SidebarView: View {
     @Environment(AppState.self) private var appState
+    // The live log occupies space it rarely earns; start collapsed and remember
+    // the user's choice across launches. (The full-log sheet stays the deep view.)
+    @AppStorage("sidebarLogExpanded") private var logExpanded = false
+
+    // Normally the persisted choice; under the --uitest-expand-log hook, forced
+    // open so the smoke suite can assert the section's contents without
+    // depending on the persisted (collapsed-by-default) state.
+    private var logExpansion: Binding<Bool> {
+        #if DEBUG
+        if UITestSupport.expandLog { return .constant(true) }
+        #endif
+        return $logExpanded
+    }
 
     var body: some View {
         List {
@@ -54,10 +67,15 @@ private struct SidebarView: View {
                 }
             }
 
-            if appState.connectionStatus.isConnected {
-                RouteSection()
-                JoystickSection()
-            }
+            // Direct location entry (epic 027): search a place or type a
+            // coordinate to teleport the red dot, independent of route endpoints.
+            DirectLocationSection()
+
+            // Both sections drive the local red dot, with or without a device
+            // attached (the device mirrors it once connected), so neither is
+            // gated on connection.
+            RouteSection()
+            JoystickSection()
 
             if !appState.savedWaypoints.isEmpty || appState.simState.simulatedCoordinate != nil {
                 SavedLocationsSection()
@@ -71,7 +89,11 @@ private struct SidebarView: View {
                 RecordingsSection()
             }
 
-            Section("Log") {
+            // Live log, collapsed by default (epic 025). A DisclosureGroup keeps
+            // an always-visible disclosure triangle next to the "Log" label, so
+            // it's obvious the section opens (a collapsed `Section` only reveals
+            // its control on hover). The @AppStorage binding persists the choice.
+            DisclosureGroup("Log", isExpanded: logExpansion) {
                 if appState.logMessages.isEmpty {
                     Text("No activity yet.")
                         .foregroundStyle(.secondary)
@@ -288,6 +310,80 @@ private struct SearchField: View {
     }
 }
 
+// MARK: - Direct location entry (epic 027)
+
+// Search a place or type a coordinate to teleport the red dot, independent of
+// the route From/To fields (#42, #52). Selecting a search result or submitting
+// a coordinate teleports directly — it consumes no route slot — and a copy
+// affordance puts the current position on the clipboard. Nothing here gates on
+// a connection: teleport drives the local dot, mirrored by a device when one is
+// attached (epic 028).
+private struct DirectLocationSection: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        Section("Go to Location") {
+            // Tapping a result goes straight there (it is the "Go here"
+            // affordance), unlike the route fields where selection just fills
+            // the slot.
+            SearchField(
+                label: "Search for a place",
+                search: appState.placeSearch,
+                onSelect: { completion in
+                    Task { await appState.goToSearchResult(completion) }
+                }
+            )
+
+            CoordinateEntryField()
+
+            if let coord = appState.simState.simulatedCoordinate {
+                Button {
+                    appState.copyCoordinate(coord)
+                } label: {
+                    Label("Copy Current Coordinate", systemImage: "doc.on.doc")
+                }
+            }
+        }
+    }
+}
+
+// Decimal-degree "lat, lon" entry that teleports on submit (#52). The Go button
+// and Return both commit; the button disables until the text parses, and a
+// short hint appears after a failed parse.
+private struct CoordinateEntryField: View {
+    @Environment(AppState.self) private var appState
+    @State private var text = ""
+    @State private var showHint = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                TextField("lat, lon", text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { go() }
+
+                Button("Go") { go() }
+                    .disabled(CoordinateFormat.parse(text) == nil)
+            }
+
+            if showHint {
+                Text("Enter decimal degrees, e.g. 25.0330, 121.5654")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func go() {
+        guard let coord = CoordinateFormat.parse(text) else {
+            showHint = true
+            return
+        }
+        showHint = false
+        appState.goToCoordinate(coord)
+    }
+}
+
 private struct StopRow: View {
     let index: Int
     let stop: RouteStop
@@ -378,7 +474,6 @@ private struct PlaybackControls: View {
                     Label("Play", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .disabled(!appState.connectionStatus.isConnected)
             case .playing:
                 Button {
                     appState.pausePlayback()
@@ -531,23 +626,45 @@ private struct SavedLocationsSection: View {
     @State private var waypointName = ""
 
     var body: some View {
-        Section("Saved Locations") {
-            ForEach(appState.savedWaypoints) { waypoint in
-                SavedLocationRow(waypoint: waypoint)
-            }
-
-            if appState.simState.simulatedCoordinate != nil {
-                Button("Save Current Location") {
-                    waypointName = ""
-                    showSaveAlert = true
+        // Ungrouped waypoints sit under the main header, next to Save Current
+        // Location; each user-defined folder gets its own section below. Drag
+        // reorders within a section (.onMove); the row context menu moves an
+        // item between folders. (epic 029)
+        let ungrouped = appState.savedWaypoints.filter { $0.category == nil }
+        let canSave = appState.simState.simulatedCoordinate != nil
+        if !ungrouped.isEmpty || canSave {
+            Section("Saved Locations") {
+                ForEach(ungrouped) { waypoint in
+                    SavedLocationRow(waypoint: waypoint)
                 }
-                .alert("Save Location", isPresented: $showSaveAlert) {
-                    TextField("Name", text: $waypointName)
-                    Button("Save") {
-                        guard !waypointName.isEmpty else { return }
-                        appState.saveCurrentLocation(name: waypointName)
+                .onMove { source, destination in
+                    appState.moveWaypoints(inCategory: nil, fromOffsets: source, toOffset: destination)
+                }
+
+                if canSave {
+                    Button("Save Current Location") {
+                        waypointName = ""
+                        showSaveAlert = true
                     }
-                    Button("Cancel", role: .cancel) {}
+                    .alert("Save Location", isPresented: $showSaveAlert) {
+                        TextField("Name", text: $waypointName)
+                        Button("Save") {
+                            guard !waypointName.isEmpty else { return }
+                            appState.saveCurrentLocation(name: waypointName)
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    }
+                }
+            }
+        }
+
+        ForEach(appState.savedLocationCategories, id: \.self) { category in
+            Section(category) {
+                ForEach(appState.savedWaypoints.filter { $0.category == category }) { waypoint in
+                    SavedLocationRow(waypoint: waypoint)
+                }
+                .onMove { source, destination in
+                    appState.moveWaypoints(inCategory: category, fromOffsets: source, toOffset: destination)
                 }
             }
         }
@@ -559,6 +676,8 @@ private struct SavedLocationRow: View {
     @Environment(AppState.self) private var appState
     @State private var isRenaming = false
     @State private var draftName = ""
+    @State private var showNewCategoryAlert = false
+    @State private var newCategoryName = ""
     @FocusState private var nameFieldIsFocused: Bool
 
     var body: some View {
@@ -599,9 +718,22 @@ private struct SavedLocationRow: View {
         }
         .contextMenu {
             Button("Rename") { beginRename() }
+            CategoryMenu(
+                categories: appState.savedLocationCategories,
+                current: waypoint.category,
+                assign: { appState.setWaypointCategory($0, for: waypoint) },
+                newCategory: { newCategoryName = ""; showNewCategoryAlert = true }
+            )
             Button("Delete", role: .destructive) {
                 appState.deleteWaypoint(waypoint)
             }
+        }
+        .alert("New Category", isPresented: $showNewCategoryAlert) {
+            TextField("Category", text: $newCategoryName)
+            Button("Create") {
+                appState.setWaypointCategory(newCategoryName, for: waypoint)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -623,15 +755,68 @@ private struct SavedLocationRow: View {
     }
 }
 
+// Shared "Category" submenu for saved-item context menus (epic 029): assign the
+// item to an existing folder (the current one checkmarked), spin up a new
+// folder, or clear the assignment.
+private struct CategoryMenu: View {
+    let categories: [String]
+    let current: String?
+    let assign: (String?) -> Void
+    let newCategory: () -> Void
+
+    var body: some View {
+        Menu("Category") {
+            ForEach(categories, id: \.self) { category in
+                Button {
+                    assign(category)
+                } label: {
+                    if category == current {
+                        Label(category, systemImage: "checkmark")
+                    } else {
+                        Text(category)
+                    }
+                }
+            }
+            if !categories.isEmpty {
+                Divider()
+            }
+            Button("New Category…") { newCategory() }
+            if current != nil {
+                Button("Remove from Category") { assign(nil) }
+            }
+        }
+    }
+}
+
 // MARK: - Saved Routes
 
 private struct SavedRoutesSection: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        Section("Saved Routes") {
-            ForEach(appState.savedRoutes.routes) { route in
-                SavedRouteRow(route: route)
+        // Ungrouped routes under the main header; one section per folder below.
+        // No Save button here (routes are saved from the Route section), so skip
+        // the header entirely when everything is filed away. (epic 029)
+        let ungrouped = appState.savedRoutes.routes.filter { $0.category == nil }
+        if !ungrouped.isEmpty {
+            Section("Saved Routes") {
+                ForEach(ungrouped) { route in
+                    SavedRouteRow(route: route)
+                }
+                .onMove { source, destination in
+                    appState.moveRoutes(inCategory: nil, fromOffsets: source, toOffset: destination)
+                }
+            }
+        }
+
+        ForEach(appState.savedRouteCategories, id: \.self) { category in
+            Section(category) {
+                ForEach(appState.savedRoutes.routes.filter { $0.category == category }) { route in
+                    SavedRouteRow(route: route)
+                }
+                .onMove { source, destination in
+                    appState.moveRoutes(inCategory: category, fromOffsets: source, toOffset: destination)
+                }
             }
         }
     }
@@ -642,6 +827,8 @@ private struct SavedRouteRow: View {
     @Environment(AppState.self) private var appState
     @State private var isRenaming = false
     @State private var draftName = ""
+    @State private var showNewCategoryAlert = false
+    @State private var newCategoryName = ""
     @FocusState private var nameFieldIsFocused: Bool
 
     var body: some View {
@@ -676,7 +863,20 @@ private struct SavedRouteRow: View {
             Button("Load") { appState.loadSavedRoute(route, autoPlay: false) }
             Button("Replay") { appState.loadSavedRoute(route, autoPlay: true) }
             Button("Rename") { beginRename() }
+            CategoryMenu(
+                categories: appState.savedRouteCategories,
+                current: route.category,
+                assign: { appState.setRouteCategory($0, for: route) },
+                newCategory: { newCategoryName = ""; showNewCategoryAlert = true }
+            )
             Button("Delete", role: .destructive) { appState.deleteSavedRoute(route) }
+        }
+        .alert("New Category", isPresented: $showNewCategoryAlert) {
+            TextField("Category", text: $newCategoryName)
+            Button("Create") {
+                appState.setRouteCategory(newCategoryName, for: route)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -818,10 +1018,12 @@ private struct WanderSheet: View {
     enum RadiusChoice: Hashable { case fixed(Double), custom }
     enum DurationChoice: Hashable { case fixed(TimeInterval), custom }
 
+    @State private var mode: WanderMode
     @State private var radiusChoice: RadiusChoice
     @State private var customRadiusText: String
     @State private var durationChoice: DurationChoice
     @State private var customDurationText: String
+    @State private var laneSpacingText: String
 
     // Numeric so the unit suffix can be a localizable label ("%lld m" /
     // "%lld min") rendered inline, rather than a baked-in English string.
@@ -829,14 +1031,17 @@ private struct WanderSheet: View {
     private static let durationOptions: [TimeInterval] = [30 * 60, 60 * 60, 120 * 60]
 
     // Each open restores the last persisted selection (epic 018); the sheet
-    // is created per presentation, so init is the restore point.
+    // is created per presentation, so init is the restore point. Mode is part
+    // of that: reopening lands in whichever mode was used last.
     init() {
+        _mode = State(initialValue: WanderPresetPersistence.mode)
         _radiusChoice = State(initialValue: WanderPresetPersistence.radiusIsCustom
             ? .custom : .fixed(WanderPresetPersistence.radiusMeters))
         _customRadiusText = State(initialValue: Self.format(WanderPresetPersistence.customRadiusMeters))
         _durationChoice = State(initialValue: WanderPresetPersistence.durationIsCustom
             ? .custom : .fixed(WanderPresetPersistence.durationSeconds))
         _customDurationText = State(initialValue: Self.format(WanderPresetPersistence.customDurationMinutes))
+        _laneSpacingText = State(initialValue: Self.format(WanderPresetPersistence.laneSpacingMeters))
     }
 
     // The magnitude bound keeps Int(value) from trapping if an absurd custom
@@ -847,6 +1052,7 @@ private struct WanderSheet: View {
 
     private static let customRadiusRange: ClosedRange<Double> = 50...2000
     private static let customDurationRange: ClosedRange<Double> = 5...240
+    private static let laneSpacingRange: ClosedRange<Double> = 10...500
 
     // Slider ↔ text bindings: the text field stays the source of truth — it
     // feeds persistence and resolution — and the slider is a view over it.
@@ -864,6 +1070,13 @@ private struct WanderSheet: View {
             Double(customDurationText.trimmingCharacters(in: .whitespaces))
                 ?? WanderPresetPersistence.defaultCustomDurationMinutes
         } set: { customDurationText = Self.format($0) }
+    }
+
+    private var laneSpacingSlider: Binding<Double> {
+        Binding {
+            Double(laneSpacingText.trimmingCharacters(in: .whitespaces))
+                ?? WanderPresetPersistence.defaultLaneSpacingMeters
+        } set: { laneSpacingText = Self.format($0) }
     }
 
     var body: some View {
@@ -885,6 +1098,17 @@ private struct WanderSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            // Two peer ways to generate a route from the same point and radius,
+            // so the mode sits above them as a segmented control rather than
+            // reading as a third preset row.
+            Picker("Mode", selection: $mode) {
+                Text("Random").tag(WanderMode.random)
+                Text("Sweeping").tag(WanderMode.sweeping)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityIdentifier("wander.mode")
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Radius").font(.subheadline).foregroundStyle(.secondary)
@@ -911,38 +1135,65 @@ private struct WanderSheet: View {
                         Text("m").foregroundStyle(.secondary)
                     }
                 }
+                // Radius is the center-to-edge half-side when sweeping, which is
+                // easy to misread as a corner distance — so spell the square out.
+                if let sweep = sweepResult, let radius = resolvedRadius {
+                    Text(String(format: String(localized: "Square side %.0f m · %d lanes"),
+                                radius * 2, sweep.laneCount))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Duration").font(.subheadline).foregroundStyle(.secondary)
-                HStack(spacing: 6) {
-                    ForEach(Self.durationOptions, id: \.self) { seconds in
+            if mode == .random {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Duration").font(.subheadline).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(Self.durationOptions, id: \.self) { seconds in
+                            ChoiceButton(
+                                label: "\(Int(seconds / 60)) min",
+                                isSelected: durationChoice == .fixed(seconds),
+                                accessibilityID: "wander.duration.\(Int(seconds / 60))"
+                            ) { durationChoice = .fixed(seconds) }
+                        }
                         ChoiceButton(
-                            label: "\(Int(seconds / 60)) min",
-                            isSelected: durationChoice == .fixed(seconds),
-                            accessibilityID: "wander.duration.\(Int(seconds / 60))"
-                        ) { durationChoice = .fixed(seconds) }
+                            label: "Custom",
+                            isSelected: durationChoice == .custom,
+                            accessibilityID: "wander.duration.custom"
+                        ) { durationChoice = .custom }
                     }
-                    ChoiceButton(
-                        label: "Custom",
-                        isSelected: durationChoice == .custom,
-                        accessibilityID: "wander.duration.custom"
-                    ) { durationChoice = .custom }
+                    if durationChoice == .custom {
+                        HStack(spacing: 8) {
+                            Slider(value: customDurationSlider, in: Self.customDurationRange, step: 5)
+                            TextField("minutes", text: $customDurationText)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 90)
+                            Text("min").foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                if durationChoice == .custom {
+            }
+
+            // No duration control when sweeping: the square and the lane spacing
+            // fix the route, so its length — and therefore its time — is derived,
+            // not chosen.
+            if mode == .sweeping {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Lane spacing").font(.subheadline).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        Slider(value: customDurationSlider, in: Self.customDurationRange, step: 5)
-                        TextField("minutes", text: $customDurationText)
+                        Slider(value: laneSpacingSlider, in: Self.laneSpacingRange, step: 5)
+                        TextField("meters", text: $laneSpacingText)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 90)
-                        Text("min").foregroundStyle(.secondary)
+                            .accessibilityIdentifier("wander.sweep.spacing")
+                        Text("m").foregroundStyle(.secondary)
                     }
                 }
             }
 
             Text(previewText)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(previewIsWarning ? Color.orange : Color.secondary)
 
             HStack {
                 Spacer()
@@ -958,6 +1209,9 @@ private struct WanderSheet: View {
         // must still restore the selection on relaunch. Custom text is only
         // recorded once it parses to a positive number, so a half-typed value
         // never clobbers the last good one.
+        .onChange(of: mode) { _, choice in
+            WanderPresetPersistence.mode = choice
+        }
         .onChange(of: radiusChoice) { _, choice in
             switch choice {
             case .fixed(let m):
@@ -987,6 +1241,11 @@ private struct WanderSheet: View {
                 WanderPresetPersistence.customDurationMinutes = mins
             }
         }
+        .onChange(of: laneSpacingText) { _, text in
+            if let m = Double(text.trimmingCharacters(in: .whitespaces)), m > 0, m.isFinite {
+                WanderPresetPersistence.laneSpacingMeters = m
+            }
+        }
     }
 
     private var resolvedRadius: Double? {
@@ -1006,32 +1265,107 @@ private struct WanderSheet: View {
         }
     }
 
+    private var resolvedSpacing: Double? {
+        Double(laneSpacingText.trimmingCharacters(in: .whitespaces))
+    }
+
+    // Sweeping geometry is pure arithmetic and bounded by the builder's point
+    // cap, so the sheet builds the real route to preview it: the distance and
+    // time shown are measured off the very coordinates Start hands to the
+    // engine. nil means there's nothing to preview yet (not an error).
+    private var sweepPreview: Result<CoverageRouteBuilder.Result, Error>? {
+        guard mode == .sweeping,
+              let center = appState.pendingWanderCenter,
+              let radius = resolvedRadius, radius > 0, radius.isFinite,
+              let spacing = resolvedSpacing, spacing > 0, spacing.isFinite
+        else { return nil }
+        return Result {
+            try CoverageRouteBuilder.build(options: CoverageRouteBuilder.Options(
+                center: center, halfSideMeters: radius, laneSpacingMeters: spacing
+            ))
+        }
+    }
+
+    private var sweepResult: CoverageRouteBuilder.Result? {
+        guard case .success(let result) = sweepPreview else { return nil }
+        return result
+    }
+
     private var canStart: Bool {
-        guard let r = resolvedRadius, r > 0 else { return false }
-        guard let d = resolvedDuration, d > 0 else { return false }
+        guard let r = resolvedRadius, r > 0, r.isFinite else { return false }
         guard appState.pendingWanderCenter != nil else { return false }
-        return true
+        switch mode {
+        case .random:
+            guard let d = resolvedDuration, d > 0 else { return false }
+            return true
+        case .sweeping:
+            return sweepResult != nil
+        }
+    }
+
+    private var previewIsWarning: Bool {
+        if case .some(.failure) = sweepPreview { return true }
+        return false
+    }
+
+    private var speedLabel: String {
+        if appState.transportMode == .custom {
+            return String(format: String(localized: "Custom %.0f km/h"), appState.customSpeedKmh)
+        }
+        return appState.transportMode.displayName
     }
 
     private var previewText: String {
+        switch mode {
+        case .random: randomPreviewText
+        case .sweeping: sweepPreviewText
+        }
+    }
+
+    // Random picks the duration, so distance is speed × duration.
+    private var randomPreviewText: String {
         guard let d = resolvedDuration else { return " " }
         let kmh = appState.effectiveBaseSpeedMPS * 3.6
         let km = appState.effectiveBaseSpeedMPS * d / 1000
-        let mode: String = {
-            if appState.transportMode == .custom {
-                return String(format: String(localized: "Custom %.0f km/h"), appState.customSpeedKmh)
+        return String(format: String(localized: "≈ %.1f km at %@ (%.0f km/h)"), km, speedLabel, kmh)
+    }
+
+    // Sweeping inverts it: the geometry fixes the distance, and the time follows
+    // from the base speed.
+    private var sweepPreviewText: String {
+        guard let preview = sweepPreview else { return " " }
+        switch preview {
+        case .success(let result):
+            guard let seconds = CoverageRouteBuilder.estimatedSeconds(
+                distanceMeters: result.distanceMeters,
+                speedMPS: appState.effectiveBaseSpeedMPS
+            ) else { return " " }
+            return String(
+                format: String(localized: "≈ %.1f km, ~%.0f min at %@ (%.0f km/h)"),
+                result.distanceMeters / 1000, seconds / 60, speedLabel, appState.effectiveBaseSpeedMPS * 3.6
+            )
+        case .failure(let error):
+            if let builderError = error as? CoverageRouteBuilder.BuilderError,
+               case .tooManyPoints = builderError {
+                return String(localized: "Too many lanes — increase the spacing")
             }
-            return appState.transportMode.displayName
-        }()
-        return String(format: String(localized: "≈ %.1f km at %@ (%.0f km/h)"), km, mode, kmh)
+            return String(localized: "Can't sweep this area")
+        }
     }
 
     private func start() {
         guard let center = appState.pendingWanderCenter,
-              let radius = resolvedRadius,
-              let duration = resolvedDuration else { return }
-        dismiss()
-        Task { await appState.wanderNearby(center: center, radius: radius, duration: duration) }
+              let radius = resolvedRadius else { return }
+        switch mode {
+        case .random:
+            guard let duration = resolvedDuration else { return }
+            dismiss()
+            Task { await appState.wanderNearby(center: center, radius: radius, duration: duration) }
+        case .sweeping:
+            guard let spacing = resolvedSpacing else { return }
+            dismiss()
+            Task { await appState.sweepArea(center: center, halfSideMeters: radius, laneSpacingMeters: spacing) }
+        }
     }
 }
 
@@ -1172,6 +1506,10 @@ private struct DeviceSwitcherRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(session.deviceName ?? String(localized: "No device"))
                         .font(.callout)
+                        // Emphasize the active session's name (epic 026): the
+                        // switcher already lists every device's name; weight marks
+                        // which one the control surface and status currently track.
+                        .fontWeight(isSelected ? .semibold : .regular)
                     Text(statusText)
                         .font(.caption2)
                         .foregroundStyle(statusColor)
@@ -1263,7 +1601,7 @@ private struct RecordButton: View {
 // MARK: - Destination action bar
 
 private struct DestinationActionBar: View {
-    enum Action { case teleport, direct, route, wander, appendDirect, appendRoute, cancel }
+    enum Action { case teleport, direct, route, wander, appendDirect, appendRoute, copy, cancel }
 
     let coord: CLLocationCoordinate2D
     let onAction: (Action) -> Void
@@ -1336,6 +1674,15 @@ private struct DestinationActionBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(appState.isCalculatingRoute)
+
+            Divider().frame(height: 14)
+
+            Button {
+                onAction(.copy)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
 
             Button {
                 onAction(.cancel)
@@ -1457,6 +1804,16 @@ private struct MapArea: View {
                 }
                 recenter(on: coord)
             }
+            // Selecting a saved location/route frames it on the map (#53). A fresh
+            // request id fires this even when the same item is picked twice. The
+            // selection takes camera control, so any active follow disengages.
+            .onChange(of: appState.mapFocus?.id) { _, newID in
+                guard newID != nil, let region = appState.mapFocus?.region else { return }
+                isFollowing = false
+                withAnimation {
+                    cameraPosition = .region(region)
+                }
+            }
             // Long-press fallback for the right-click context menu below — kept so existing
             // muscle memory survives. Long-press, not tap: a plain tap would steal the Map's
             // own pan/zoom gestures, and the 0.5s threshold disambiguates intent from
@@ -1466,11 +1823,11 @@ private struct MapArea: View {
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
                     .onEnded { value in
                         guard case .second(true, let drag) = value, let drag else { return }
-                        guard appState.connectionStatus.isConnected else { return }
                         guard let coordinate = proxy.convert(drag.location, from: .local) else { return }
 
                         // First press: there's no origin yet, so a popover offering "Go directly"
-                        // or "Route here" would have nothing to anchor from. Teleport instead.
+                        // or "Route here" would have nothing to anchor from. Teleport instead
+                        // (works whether or not a device is connected — it moves the red dot).
                         if appState.simState.simulatedCoordinate == nil {
                             appState.teleport(to: coordinate)
                         } else {
@@ -1493,7 +1850,13 @@ private struct MapArea: View {
             .contextMenu {
                 destinationMenu(proxy: proxy)
             }
-            .overlay(alignment: .bottomTrailing) {
+            // Placed as a bottom-trailing safe-area inset rather than a plain overlay so
+            // MapKit reflows its built-in zoom/compass controls (which it positions within
+            // the map's safe area) up and clear of the joystick instead of letting the
+            // joystick occlude them. The Map still draws full-bleed behind the inset, so the
+            // joystick keeps floating over the map; when it's idle the inset collapses to
+            // zero and the controls return to the corner.
+            .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
                 if appState.simState.joystickIsActive {
                     VirtualJoystickView { x, y in
                         appState.updateStickInput(x: x, y: y)
@@ -1548,12 +1911,12 @@ private struct MapArea: View {
                         .padding(.vertical, 8)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
 
-                        if appState.connectionStatus.isConnected {
-                            RecordButton()
-                            followButton
-                        }
-                        // Unlike Record/Follow, drawing is route *construction* and
-                        // needs no device — same as the sidebar planner.
+                        // Record, Follow, and Draw all act on the local red dot or
+                        // route, not the device — Record captures the simulated path
+                        // (offline too), Follow tracks the dot's camera, Draw builds a
+                        // route — so all three show whether or not a device is connected.
+                        RecordButton()
+                        followButton
                         drawButton
                     }
 
@@ -1573,6 +1936,11 @@ private struct MapArea: View {
                                 Task { await appState.appendDirectly(to: dest) }
                             case .appendRoute:
                                 Task { await appState.appendRoute(to: dest) }
+                            case .copy:
+                                // Leave the bar up so copy can precede another
+                                // action on the same point.
+                                appState.copyCoordinate(dest)
+                                return
                             case .cancel:
                                 break
                             }
@@ -1683,12 +2051,12 @@ private struct MapArea: View {
 
     // Right-click destination menu: same actions as DestinationActionBar (the long-press
     // capsule), presented as a native context menu at the pointer — macOS convention, and
-    // consistent with the sidebar rows' .contextMenu. Empty content while disconnected
-    // suppresses the menu entirely, mirroring the long-press guard.
+    // consistent with the sidebar rows' .contextMenu. Every action drives the local red dot
+    // (the device mirrors it when connected), so none gate on connection; only origin-
+    // dependent actions disable until a position exists.
     @ViewBuilder
     private func destinationMenu(proxy: MapProxy) -> some View {
         if !isDrawingRoute,
-           appState.connectionStatus.isConnected,
            let point = lastHoverPoint,
            let coordinate = proxy.convert(point, from: .local) {
             Section(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)) {
@@ -1740,6 +2108,12 @@ private struct MapArea: View {
                     Label("Wander nearby…", systemImage: "shuffle.circle")
                 }
                 .disabled(appState.isCalculatingRoute)
+
+                Button {
+                    appState.copyCoordinate(coordinate)
+                } label: {
+                    Label("Copy Coordinate", systemImage: "doc.on.doc")
+                }
             }
         }
     }
@@ -1749,22 +2123,27 @@ private struct MapArea: View {
             return String(localized: "Drag to draw a route — Esc to cancel")
         }
         switch appState.connectionStatus {
-        case .disconnected:
-            return String(localized: "Connect to a device to start")
         case .connecting:
             return String(localized: "Connecting…")
-        case .connected:
+        case .error:
+            return String(localized: "Connection error — check sidebar")
+        case .connected, .disconnected:
+            // The map drives the local red dot whether or not a device is
+            // attached; the status dot beside this text already shows the
+            // connection. So the copy is about the simulation, only
+            // distinguishing "mirrored to a device" (Simulating) from
+            // "local only" (Local position).
             if appState.simState.navigationPlaybackState == .playing {
                 let pct = Int(appState.simState.navigationProgress * 100)
                 // Explicit format string keeps the lone % escaped as %%.
                 return String(format: String(localized: "Playing route — %d%%"), pct)
             }
             if let coord = appState.simState.simulatedCoordinate {
-                return String(format: String(localized: "Simulating: %.4f, %.4f"), coord.latitude, coord.longitude)
+                return appState.connectionStatus.isConnected
+                    ? String(format: String(localized: "Simulating: %.4f, %.4f"), coord.latitude, coord.longitude)
+                    : String(format: String(localized: "Local position: %.4f, %.4f"), coord.latitude, coord.longitude)
             }
             return String(localized: "Right-click the map to set a starting location")
-        case .error:
-            return String(localized: "Connection error — check sidebar")
         }
     }
 }

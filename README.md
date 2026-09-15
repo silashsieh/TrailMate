@@ -53,6 +53,24 @@ TrailMate was developed in collaboration with [Claude Code](https://claude.com/c
 
 -----
 
+## License
+
+TrailMate is licensed in two parts:
+
+- The **macOS application** (Swift source) is under the **MIT License**.
+- The bundled **Python daemon** and the third-party Python runtime and libraries
+  it relies on include **GPL-3.0-or-later** components (notably
+  [`pymobiledevice3`](https://github.com/doronz88/pymobiledevice3)). As a result,
+  a **binary distribution (the `.dmg`) as a whole is conveyed under
+  GPL-3.0-or-later**.
+
+If you reuse only the Swift code, MIT applies. If you redistribute a built app,
+GPLv3 governs the whole. See [`LICENSING.md`](LICENSING.md) for the full
+breakdown and [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) for the
+bundled-component inventory.
+
+-----
+
 ## Related Projects
 
 Other tools that do roughly the same thing — Mac/desktop apps that simulate GPS on a real iPhone over the lockdown/DVT channel. Worth a look if TrailMate doesn't fit your setup.

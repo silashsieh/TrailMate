@@ -45,6 +45,17 @@ final class TunnelBroker {
     func ensureRunning() async throws {
         if isRunning { return }
 
+        // A fresh launch owns no tunneld, so anything already answering on our
+        // port is a leftover from a previous run (epic 031): a host that died
+        // without the watchdog cleaning it up, now squatting on the port a new
+        // tunneld must bind. Reclaim it via tunneld's own localhost-HTTP
+        // /shutdown — unprivileged, so no auth prompt. Best-effort: if it won't
+        // free, fall through and let the bind failure surface below.
+        await Self.reclaimStaleTunneld(
+            isAlive: { await Self.tunneldIsAlive(port: Self.port) },
+            shutdown: { await Self.requestTunneldShutdown(port: Self.port) }
+        )
+
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true
@@ -155,6 +166,48 @@ final class TunnelBroker {
             }
         }
         return result
+    }
+
+    // MARK: - Stale-tunneld reclaim (epic 031)
+
+    // Liveness probe over tunneld's localhost HTTP. Any answer means a tunneld
+    // is listening on the port; a refused connection throws and reads as absent.
+    static func tunneldIsAlive(port: Int) async -> Bool {
+        let url = URL(string: "http://127.0.0.1:\(port)/hello")!
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+        return (try? await URLSession.shared.data(for: req)) != nil
+    }
+
+    // Ask a running tunneld to stop via its own HTTP endpoint. Unprivileged, so
+    // it stops even a root tunneld with no auth prompt (verified, 020 spike).
+    static func requestTunneldShutdown(port: Int) async {
+        let url = URL(string: "http://127.0.0.1:\(port)/shutdown")!
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
+    // Reclaim loop, factored from the network calls so it is unit-testable: if a
+    // tunneld is alive, shut it down and wait until it stops answering. Returns
+    // true if the port is (or became) free; false if one is still up after the
+    // timeout, in which case the caller lets the launch path surface the bind
+    // error rather than hang.
+    @discardableResult
+    static func reclaimStaleTunneld(
+        isAlive: () async -> Bool,
+        shutdown: () async -> Void,
+        pollInterval: Duration = .milliseconds(250),
+        timeout: Duration = .seconds(5)
+    ) async -> Bool {
+        guard await isAlive() else { return true }   // nothing there — fast path
+        await shutdown()
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await isAlive() == false { return true }
+            try? await Task.sleep(for: pollInterval)
+        }
+        return false
     }
 
     private func waitUntilReady(ctrl: URL, timeout: Duration) async throws {

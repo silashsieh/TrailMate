@@ -78,7 +78,19 @@ struct MenuBarStatusView: View {
                 : String(localized: "Idle")
         }
 
+        // Lead with the connected device's name when there is one (epic 026) so a
+        // glance at the menu answers "which device"; nil while disconnected or
+        // connecting keeps a stale name out. Truncated so a long name doesn't
+        // blow out the narrow menu item.
+        if let name = appState.connectedDeviceName {
+            return "\(Self.truncated(name)) · \(connection) · \(activity)"
+        }
         return "\(connection) · \(activity)"
+    }
+
+    // Cap long device names so the status summary stays compact in the menu bar.
+    private static func truncated(_ name: String, max: Int = 24) -> String {
+        name.count > max ? "\(name.prefix(max - 1))…" : name
     }
 
     // MARK: - Window reopen

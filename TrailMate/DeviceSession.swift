@@ -85,6 +85,19 @@ final class DeviceSession: Identifiable {
                 }
             }
         }
+
+        // The simulation runs for the session's whole lifetime, not just while a
+        // device is connected — the red dot is a live local state that a device,
+        // once attached, mirrors. Torn down in shutdown() at removal / app quit.
+        Task { await sim.startEngine() }
+    }
+
+    // Full teardown: drop the device (if any) and stop the local engine. Used on
+    // session removal and app quit — disconnect() alone now leaves the engine
+    // running so the red dot survives a disconnect.
+    func shutdown() async {
+        await disconnect()
+        await sim.stopEngine()
     }
 
     // MARK: - Connection
@@ -252,7 +265,9 @@ final class DeviceSession: Identifiable {
     // MARK: - Teleport
 
     func teleport(to coordinate: CLLocationCoordinate2D) {
-        guard connectionStatus.isConnected else { return }
+        // No connection gate: teleport moves the local red dot. With a device
+        // attached the actor mirrors it; disconnected it's a local preview that
+        // the device snaps to on the next connect.
         Task {
             await sim.teleport(to: coordinate)
             manager.addLog(String(format: "Teleported to %.6f, %.6f", coordinate.latitude, coordinate.longitude))
@@ -349,7 +364,6 @@ final class DeviceSession: Identifiable {
     // Straight-line travel from the current simulated position to `dest`. Uses
     // NavigationEngine's two-point case (it already handles linear interpolation).
     func travelDirectly(to dest: CLLocationCoordinate2D) {
-        guard connectionStatus.isConnected else { return }
         guard let from = simState.simulatedCoordinate else {
             manager.addLog("Set an origin first — long-press the map to teleport.")
             return
@@ -407,7 +421,6 @@ final class DeviceSession: Identifiable {
     // with a different start point, and silently injecting panel stops would
     // surprise the user.
     func routeFromCurrent(to dest: CLLocationCoordinate2D) async {
-        guard connectionStatus.isConnected else { return }
         guard let from = simState.simulatedCoordinate else {
             manager.addLog("Set an origin first — long-press the map to teleport.")
             return
@@ -432,8 +445,6 @@ final class DeviceSession: Identifiable {
     // disc center and is the playback start; the wander may leak slightly
     // outside the disc by design.
     func wanderNearby(center: CLLocationCoordinate2D, radius: Double, duration: TimeInterval) async {
-        guard connectionStatus.isConnected else { return }
-
         isCalculatingRoute = true
         manager.addLog("Generating wander route…")
 
@@ -465,6 +476,38 @@ final class DeviceSession: Identifiable {
         isCalculatingRoute = false
     }
 
+    // Geometric serpentine sweep of a square centered on the selected map point
+    // (Sweeping mode). Direct movement like travelDirectly — no MKDirections,
+    // nothing snaps to roads — so generation is instant and there's no routing
+    // spinner to raise. resetStart does the rest: it teleports the marker from
+    // the selected center out to the route's first edge point, and that jump is
+    // deliberately outside the route, so it costs no distance or time.
+    func sweepArea(center: CLLocationCoordinate2D, halfSideMeters: Double, laneSpacingMeters: Double) async {
+        let options = CoverageRouteBuilder.Options(
+            center: center,
+            halfSideMeters: halfSideMeters,
+            laneSpacingMeters: laneSpacingMeters
+        )
+
+        do {
+            let result = try CoverageRouteBuilder.build(options: options)
+            routeCoordinates = result.coordinates
+            let speed = manager.effectiveBaseSpeedMPS
+            await sim.loadRoute(coordinates: result.coordinates, baseSpeed: speed, resetStart: true)
+
+            let estMin = (CoverageRouteBuilder.estimatedSeconds(
+                distanceMeters: result.distanceMeters, speedMPS: speed
+            ) ?? 0) / 60
+            manager.addLog(String(
+                format: "Sweep route: %.1f km, %d lanes at %.0f m, ~%.0f min (%@)",
+                result.distanceMeters / 1000, result.laneCount, laneSpacingMeters, estMin, manager.transportLabel
+            ))
+            await sim.play(multiplier: manager.speedMultiplier)
+        } catch {
+            manager.addLog("Sweep failed: \(error.localizedDescription)")
+        }
+    }
+
     // Hand-drawn route from the map's draw mode. The stroke arrives already
     // smoothed and resampled by the view layer (StrokeGeometry guarantees no
     // degenerate segments); this is just the hand-off into the same playback
@@ -485,7 +528,7 @@ final class DeviceSession: Identifiable {
     }
 
     func startPlayback() {
-        guard !routeCoordinates.isEmpty, connectionStatus.isConnected else { return }
+        guard !routeCoordinates.isEmpty else { return }
         let mult = manager.speedMultiplier
         manager.addLog(String(format: "Playing route at %.0f×%@...", mult, loopLogSuffix))
         Task { await sim.play(multiplier: mult) }

@@ -38,11 +38,48 @@ LIMIT 10
 Dataview can't render on GitHub, so here's the current picture in prose. Keep it loosely in
 sync at release cuts; the epic files remain authoritative.
 
-- **v2.1.0 — Auth ergonomics:**
-  [020 — Enter the admin password once](epics/020-single-auth-prompt.md).
+- **Shipped (v2.1.3 — 2026-09-03) — Sparkle bootstrap hotfix:**
+  [047 — Repair the Sparkle bootstrap and DMG integrity checks](epics/047-repair-sparkle-bootstrap.md).
+- **v2.4.0 — Map-surface re-architecture (idle CPU), AI/CLI surface & docs polish:**
+  [041 — Telemetry plane: frequency-partitioned simulation state](epics/041-telemetry-plane.md),
+  [037 — Map-surface re-architecture: MKMapView on the telemetry plane for idle CPU](epics/037-mkmapview-idle-cpu.md)
+  (build plan: [v2.4.0-design](v2.4.0-design.md); measurements: [v2.4.0-baseline](v2.4.0-baseline.md)).
+  Both were built and validated on `feat/037-integration` in July 2026; that PR (#69) closed
+  unmerged, so the work is re-scheduled here — see each epic's Decisions section. Moved in from
+  v2.3.0 on 2026-09-03: [023 — `trailmate` CLI + stdio MCP shim](epics/023-cli-mcp-shim.md),
+  [014 — README screenshots & GIF demo](epics/014-readme-screenshots.md) (the screenshots follow
+  the new map surface).
+- **v2.3.0 — Correctness, connection robustness & test coverage:**
+  [033 — Refresh test & UI coverage for features shipped since v2.0.0](epics/033-refresh-test-coverage.md),
+  [039 — Fix saved-items drag-reorder](epics/039-fix-saved-items-reorder.md),
+  [040 — Isolate recording per session (fix shared-recorder mixed traces)](epics/040-per-session-recording.md),
+  [042 — Survive a closed daemon pipe (SIGPIPE kills the whole app)](epics/042-survive-closed-daemon-pipe.md),
+  [043 — Auto-reconnect after an abnormal disconnect](epics/043-auto-reconnect.md).
+  (023 and 014 moved out to v2.4.0 on 2026-09-03; 042 and 043 moved in from the backlog the same
+  day. 043's "reverse the click-Connect design" gate was answered: auto-reconnect is armed by an
+  explicit Connect and disarmed only by an explicit Disconnect, retrying 10 × 5 s before settling
+  into the disconnected state.)
+- **Published stable (v2.2.0 — 2026-09-03) — Area serpentine and auto-update:**
+  [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md) is done;
+  [038 — In-app auto-update (Sparkle)](epics/038-in-app-auto-update.md) is done,
+  including the validated v2.1.3 → v2.2.0 update and relaunch path.
+  CPU-profiling wins already landed this cycle:
+  [034 — Eliminate idle & playback CPU spikes](epics/034-cpu-idle-playback-spikes.md),
+  [035 — Cap simulation-loop CPU during motion](epics/035-throttle-simulation-loop.md)
+  ([036 — Reduce SwiftUI invalidation](epics/036-reduce-swiftui-invalidation.md) dropped — superseded by 037).
+- **Shipped (v2.1.0 — 2026-06-20) — UI polish, offline use & direct location entry:**
+  [024 — Fix joystick/map-control overlap](epics/024-joystick-map-control-overlap.md),
+  [025 — Collapse the sidebar log by default](epics/025-collapse-log-default.md),
+  [026 — Connected device name in the status bar](epics/026-device-name-status-bar.md),
+  [027 — Direct location entry (search-to-go + coordinates)](epics/027-direct-location-entry.md),
+  [028 — Map & simulated position usable while disconnected](epics/028-map-while-disconnected.md),
+  [029 — Saved-items library UX (reorder, categorize, auto-pan)](epics/029-saved-items-library-ux.md),
+  [031 — Reclaim a stale tunneld before launching](epics/031-reclaim-stale-tunneld.md),
+  [032 — Harden tunnel teardown (force-kill a wedged tunneld)](epics/032-harden-tunnel-teardown.md).
 - **Shipped (v2.0.0 — 2026-06-14) — Multi-device & AI control:**
   [012 — Simultaneous multi-device](epics/012-multi-device.md),
-  [019 — AI tool integration (command layer, CLI, MCP)](epics/019-ai-integration.md),
+  [019 — AI tool integration (command socket layer; CLI & MCP deferred)](epics/019-ai-integration.md),
+  [020 — Single admin prompt per session (once-ever declined; satisfied by 012's broker)](epics/020-single-auth-prompt.md),
   [021 — Menu bar presence & background mode](epics/021-menu-bar-background.md).
   Cross-epic build plan: [v2.0.0-design.md](v2.0.0-design.md).
 - **Shipped (v1.6.0 — 2026-06-11) — Localization, testing & Wi-Fi fix:**

@@ -191,7 +191,7 @@ Only if you want this as a portfolio piece:
 
 - **Done:**
   - Documentation written up: `architecture.md`, `features.md`, `tech-stack.md`, `decisions.md`, `scope.md`, plus the merged docs index.
-  - GitHub Actions: `.github/workflows/swift.yml` builds on push/PR to main; `.github/workflows/release.yml` is a `workflow_dispatch` job that builds via `packaging/release.sh` and uploads a DMG as a GitHub release tagged `v$MARKETING_VERSION`.
+  - GitHub Actions: `.github/workflows/swift.yml` builds on push/PR to main; `.github/workflows/release.yml` is a `workflow_dispatch` job that builds and notarizes via `packaging/release.sh`. Its default dry run uploads a seven-day artifact, while the explicit publishing path creates a GitHub release tagged `v$MARKETING_VERSION`.
   - DMG packaging: `packaging/release.sh` produces a signed DMG.
   - Version bumped to `1.1` in `TrailMate.xcodeproj`.
   - Tagged releases on `origin`: `v1.0.0` and `v1.1` (both with DMG attached via the `release.yml` workflow).

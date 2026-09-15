@@ -4,6 +4,13 @@ import Foundation
 // Launch-argument switches for UI tests, DEBUG-only so release builds carry
 // no test hooks.
 enum UITestSupport {
+    // Unit tests host their bundle in TrailMate.app. Starting Sparkle there can
+    // present its first-run consent window on a clean runner and keep the host
+    // alive after the suite finishes. UI tests carry an explicit launch flag;
+    // hosted unit tests carry Xcode's XCTest configuration environment value.
+    static let isTesting = isUITesting
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     // True for any UI-test launch (every flag below starts with --uitest, and
     // the harness also passes a bare --uitest). Used to skip the real device
     // lister so its Bonjour/usbmux scan never raises the macOS Local Network
@@ -19,5 +26,11 @@ enum UITestSupport {
     // persistence test doesn't depend on the map long-press flow, which is
     // flaky under XCUITest's alert-interruption handling on CI.
     static let openWander = ProcessInfo.processInfo.arguments.contains("--uitest-open-wander")
+
+    // Forces the sidebar Log disclosure open at launch. The log is collapsed by
+    // default (epic 025) and the choice persists across launches, so the smoke
+    // test can't assume the section's contents are rendered; this hook makes
+    // them deterministically present without touching the persisted preference.
+    static let expandLog = ProcessInfo.processInfo.arguments.contains("--uitest-expand-log")
 }
 #endif

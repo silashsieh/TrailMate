@@ -1,6 +1,10 @@
 #!/bin/bash
 # tm_tunnel.sh — privileged wrapper for `pymobiledevice3 lockdown start-tunnel`.
 #
+# Part of the TrailMate Python daemon, distributed under the GNU General Public
+# License v3.0 or later (see COPYING and ../LICENSING.md). The TrailMate macOS
+# app is licensed separately under the MIT License.
+#
 # Launched as root by TrailMate.app via `osascript … with administrator
 # privileges`, backgrounded so osascript returns immediately after the auth
 # dialog. The host app polls a control file for the RSD address+port, then

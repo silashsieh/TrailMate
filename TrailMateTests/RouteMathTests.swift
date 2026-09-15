@@ -55,4 +55,24 @@ struct RouteMathTests {
         let nextLoc = CLLocation(latitude: next.latitude, longitude: next.longitude)
         #expect(lastLoc.distance(from: nextLoc) < 0.01)
     }
+
+    // MARK: - Polyline length
+
+    @Test func totalLengthMatchesKnownTaipeiReference() {
+        // Taipei 101 -> Taipei Main Station straight line: 5028.7 m by haversine,
+        // the same reference CoordinateMathTests uses. A second 100 m leg north of
+        // the station proves the total sums the legs rather than measuring the
+        // end-to-end gap.
+        let taipei101 = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
+        let mainStation = CLLocationCoordinate2D(latitude: 25.0478, longitude: 121.5170)
+        let legs = [taipei101, mainStation, offset(mainStation, north: 100)]
+        #expect(abs(RouteMath.totalLengthMeters([taipei101, mainStation]) - 5028.7) < 50.3)
+        #expect(abs(RouteMath.totalLengthMeters(legs) - (5028.7 + 100)) < 51.3)
+    }
+
+    @Test func totalLengthOfDegenerateInputIsZero() {
+        #expect(RouteMath.totalLengthMeters([]) == 0)
+        #expect(RouteMath.totalLengthMeters([p]) == 0)
+        #expect(RouteMath.totalLengthMeters([p, p]) == 0)
+    }
 }

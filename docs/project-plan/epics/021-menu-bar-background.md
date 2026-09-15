@@ -40,18 +40,18 @@ running; the window reopens from the menu bar item. Behavior is controlled from 
 
 ## Stories
 
-- [ ] `MenuBarExtra` scene: status summary (per-device connection + playback) and quick
+- [x] `MenuBarExtra` scene: status summary (per-device connection + playback) and quick
       actions — Open TrailMate, Pause/Stop, Disconnect, AI-control toggle, Quit.
-- [ ] Keep-running-windowless: closing the main window leaves simulation + command socket
+- [x] Keep-running-windowless: closing the main window leaves simulation + command socket
       live; "Open TrailMate" restores the window (`openWindow` + `NSApp.activate`).
-- [ ] Activation-policy handling: window open → `.regular`; window closed → `.accessory`
+- [x] Activation-policy handling: window open → `.regular`; window closed → `.accessory`
       (Dock icon hides, menu bar item remains); flip back on reopen.
-- [ ] Settings: show/hide menu bar item (`isInserted`), Dock-icon behavior.
-- [ ] *(optional)* Open at login via `SMAppService.mainApp.register()` — free-Apple-ID safe;
+- [x] Settings: show/hide menu bar item (`isInserted`), Dock-icon behavior.
+- [ ] **(deferred — optional)** Open at login via `SMAppService.mainApp.register()` — free-Apple-ID safe;
       pairs with [[020-single-auth-prompt]] for a zero-touch start once prompts are gone.
-- [ ] Verify the App Nap activity token covers the windowless case (long route playback with
+- [x] Verify the App Nap activity token covers the windowless case (long route playback with
       no window, lid open).
-- [ ] Docs: features.md + quick-start describe the menu bar mode.
+- [x] Docs: features.md + quick-start describe the menu bar mode.
 
 ## Open questions — answered at planning (2026-06-13)
 
@@ -88,10 +88,10 @@ running; the window reopens from the menu bar item. Behavior is controlled from 
 
 ## Acceptance criteria
 
-- [ ] Start a route, close the main window: playback continues (device keeps moving), the
+- [x] Start a route, close the main window: playback continues (device keeps moving), the
       menu bar item reflects "playing", and AI commands over the socket still work.
-- [ ] Reopen from the menu bar item: window returns with correct live state; no duplicate
+- [x] Reopen from the menu bar item: window returns with correct live state; no duplicate
       windows, no focus glitches after the activation-policy flip.
-- [ ] Menu bar item disabled in Settings → behavior matches today's (window-only app).
-- [ ] Quit from the menu bar item disconnects cleanly (daemons, tunnels, socket — same path
+- [x] Menu bar item disabled in Settings → behavior matches today's (window-only app).
+- [x] Quit from the menu bar item disconnects cleanly (daemons, tunnels, socket — same path
       as quitting the app today).

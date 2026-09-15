@@ -87,6 +87,10 @@ final class TrailMateUITests: XCTestCase {
 
     @MainActor
     func testSidebarShowsLogSection() throws {
+        // The log is collapsed by default (epic 025), so "View Full Log" only
+        // renders when the disclosure is open; --uitest-expand-log forces it
+        // open deterministically (without mutating the persisted preference).
+        app.launchArguments += ["--uitest-expand-log"]
         app.launch()
         let window = app.windows["TrailMate"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
@@ -103,6 +107,11 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(settings.sliders.firstMatch.exists)
         XCTAssertTrue(staticText(withValue: "Restore last location on launch", in: settings).exists)
         XCTAssertTrue(settings.switches.firstMatch.exists)
+        XCTAssertTrue(
+            settings.switches["settings.updates.automaticChecks"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(settings.switches["settings.updates.automaticDownloads"].exists)
 
         app.typeKey("w", modifierFlags: .command)
         XCTAssertFalse(settings.waitForExistence(timeout: 2))
@@ -162,15 +171,43 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertEqual(String(describing: restored.value ?? ""), "System Default")
     }
 
+    // Epic 028 removed connection-gating: the control surface is usable with no
+    // device attached (everything drives the local red dot, which a device later
+    // mirrors on connect). So the core sections must render at a plain launch,
+    // before any Connect — no mock backend needed.
     @MainActor
-    func testMockConnectionEnablesConnectedUI() throws {
+    func testCoreControlsRenderWithoutConnection() throws {
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        // Section headers are exposed as accessibility labels.
+        XCTAssertTrue(window.staticTexts["Go to Location"].exists)
+        XCTAssertTrue(window.staticTexts["Route"].exists)
+        XCTAssertTrue(window.staticTexts["Joystick"].exists)
+        // A concrete offline control: the coordinate-entry field (epic 027).
+        XCTAssertTrue(window.textFields["lat, lon"].exists)
+        // Sanity: we never connected, so the connected-state action isn't shown.
+        XCTAssertFalse(window.buttons["Disconnect"].exists)
+    }
+
+    // Epic 026: the connected device's name and status surface in the sidebar
+    // switcher row (the status pill). Reframed from the old "connection gates the
+    // UI" check to "the connected state mirrors the device's identity."
+    @MainActor
+    func testMockConnectionShowsConnectedDeviceNameAndStatus() throws {
         app.launchArguments += ["--uitest-mock-connection"]
         app.launch()
         let window = app.windows["TrailMate"]
         XCTAssertTrue(window.waitForExistence(timeout: 15))
         connectMockDevice(in: window)
-        // Connected-only map controls appear.
+        // Connected: the action surface offers Disconnect...
         XCTAssertTrue(window.buttons["Disconnect"].waitForExistence(timeout: 5))
+        // ...and the switcher row shows the mock device's name (epic 026). The
+        // row is a Button wrapping name + status, so match on its label.
+        let deviceRow = window.buttons
+            .containing(NSPredicate(format: "label CONTAINS %@", "Mock iPhone")).firstMatch
+        XCTAssertTrue(deviceRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(deviceRow.label.contains("Connected"))
     }
 
     @MainActor
@@ -201,6 +238,133 @@ final class TrailMateUITests: XCTestCase {
         // Park the selection on the factory-default preset rather than the
         // test value (the original preset isn't accessibility-readable).
         sheet.buttons["wander.radius.500"].click()
+        sheet.buttons["Close"].click()
+    }
+
+    // Epic 027: the coordinate field commits a decimal-degrees pair to the red
+    // dot; "Go" stays disabled until the text parses, and once a position
+    // exists the "Copy Current Coordinate" affordance appears. Runs with no
+    // device — exercising epic 028's offline model end to end.
+    @MainActor
+    func testCoordinateEntryEnablesGoAndRevealsCopy() throws {
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+
+        let field = window.textFields["lat, lon"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        let go = window.buttons["Go"]
+        XCTAssertTrue(go.exists)
+        // Empty (and, below, garbage) text leaves Go disabled.
+        XCTAssertFalse(go.isEnabled)
+
+        field.click()
+        app.typeText("not a coordinate")
+        XCTAssertFalse(go.isEnabled)
+
+        // A valid decimal-degrees pair enables Go; committing it places the dot.
+        field.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("25.0330, 121.5654")
+        XCTAssertTrue(go.isEnabled)
+        go.click()
+
+        // With a position set, the copy affordance appears (it's hidden until
+        // simulatedCoordinate != nil).
+        XCTAssertTrue(window.buttons["Copy Current Coordinate"].waitForExistence(timeout: 5))
+    }
+
+    // Epic 025: the sidebar log is collapsed by default and the expand/collapse
+    // choice persists across launches. Drives the real DisclosureGroup (not the
+    // --uitest-expand-log forced binding) so the persisted @AppStorage path is
+    // what's under test. The log is the sidebar's only disclosure, and its
+    // triangle — not the label text — is the toggle target. "View Full Log"
+    // renders only while expanded, so its presence is the expansion probe.
+    @MainActor
+    func testLogExpansionPersistsAcrossRelaunch() throws {
+        app.launch()
+        var window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+
+        let viewFullLog = { window.buttons["View Full Log"] }
+        let logToggle = { window.disclosureTriangles.firstMatch }
+        XCTAssertTrue(logToggle().waitForExistence(timeout: 5))
+        // Normalize to collapsed — the choice persists, so the starting state
+        // isn't guaranteed.
+        if viewFullLog().exists { logToggle().click() }
+        XCTAssertFalse(viewFullLog().waitForExistence(timeout: 2))
+
+        // Expand, relaunch: the log must come back expanded.
+        logToggle().click()
+        XCTAssertTrue(viewFullLog().waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        XCTAssertTrue(viewFullLog().waitForExistence(timeout: 5))
+
+        // Collapse, relaunch: the log must come back collapsed — which also
+        // restores the factory default, leaving the preference as we found it.
+        logToggle().click()
+        XCTAssertFalse(viewFullLog().waitForExistence(timeout: 2))
+        app.terminate()
+        app.launch()
+        window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        XCTAssertFalse(viewFullLog().waitForExistence(timeout: 2))
+    }
+
+    // Epic 030: the sheet's two modes share the center and the radius but swap
+    // what sits under them — Random keeps the duration presets, Sweeping trades
+    // them for a lane spacing and derives distance/time from the geometry — and
+    // the mode itself is a remembered preference, like the presets around it.
+    // The segmented Picker exposes its segments as RadioButtons.
+    @MainActor
+    func testWanderSweepingModeSwapsControlsAndPersists() throws {
+        app.launchArguments += ["--uitest-open-wander"]
+        app.launch()
+
+        // Random is the factory default: duration presets, no spacing field.
+        var sheet = wanderSheet()
+        XCTAssertTrue(sheet.buttons["wander.duration.30"].waitForExistence(timeout: 5))
+        XCTAssertFalse(sheet.textFields["wander.sweep.spacing"].exists)
+
+        sheet.radioButtons["Sweeping"].click()
+        let spacing = sheet.textFields["wander.sweep.spacing"]
+        XCTAssertTrue(spacing.waitForExistence(timeout: 5))
+        XCTAssertEqual(String(describing: spacing.value ?? ""), "70")
+        // No duration control when sweeping — the route's length fixes its time.
+        XCTAssertFalse(sheet.buttons["wander.duration.30"].waitForExistence(timeout: 2))
+        // Radius stays shared, and Start only enables once the geometry built.
+        XCTAssertTrue(sheet.buttons["wander.radius.500"].exists)
+        XCTAssertTrue(sheet.buttons["Start"].isEnabled)
+
+        // Type a distinctive spacing. Every change persists (epic 018), so Close
+        // starts no sweep and loses nothing.
+        spacing.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("120")
+        sheet.buttons["Close"].click()
+
+        // Relaunch: the sheet must reopen already in Sweeping, with that spacing.
+        app.terminate()
+        app.launch()
+        sheet = wanderSheet()
+        let sweeping = sheet.radioButtons["Sweeping"]
+        XCTAssertTrue(sweeping.waitForExistence(timeout: 15))
+        XCTAssertEqual(switchValue(sweeping), "1")
+        let restored = sheet.textFields["wander.sweep.spacing"]
+        XCTAssertTrue(restored.waitForExistence(timeout: 5))
+        XCTAssertEqual(String(describing: restored.value ?? ""), "120")
+
+        // Switch back: the duration presets return. Park the sheet on the factory
+        // defaults (Random, 70 m) so suite order can't inherit this test's state.
+        restored.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("70")
+        sheet.radioButtons["Random"].click()
+        XCTAssertTrue(sheet.buttons["wander.duration.30"].waitForExistence(timeout: 5))
+        XCTAssertFalse(sheet.textFields["wander.sweep.spacing"].exists)
         sheet.buttons["Close"].click()
     }
 }

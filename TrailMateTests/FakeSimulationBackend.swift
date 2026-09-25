@@ -14,6 +14,7 @@ nonisolated final class FakeSimulationBackend: SimulationBackend, @unchecked Sen
     private var startCalls = 0
     private var stopCalls = 0
     private var quietLocations: [(Double, Double)] = []
+    private var sentCommands: [String] = []
 
     private var holdingStops = false
     private var heldStops: [CheckedContinuation<Void, Never>] = []
@@ -32,6 +33,8 @@ nonisolated final class FakeSimulationBackend: SimulationBackend, @unchecked Sen
     var stopCount: Int { lock.withLock { stopCalls } }
     var quietLocationCount: Int { lock.withLock { quietLocations.count } }
     var lastQuietLocation: (latitude: Double, longitude: Double)? { lock.withLock { quietLocations.last } }
+    var locations: [(Double, Double)] { lock.withLock { quietLocations } }
+    var commands: [String] { lock.withLock { sentCommands } }
 
     func start(rsdAddress: String, rsdPort: String) async throws {
         lock.withLock { startCalls += 1 }
@@ -53,7 +56,10 @@ nonisolated final class FakeSimulationBackend: SimulationBackend, @unchecked Sen
     }
 
     @discardableResult
-    func sendCommand(_ command: String) async throws -> String { "OK" }
+    func sendCommand(_ command: String) async throws -> String {
+        lock.withLock { sentCommands.append(command) }
+        return "OK"
+    }
 
     // Synchronous, as on the hot path. With blockNextQuietLocation() armed, the
     // first call blocks the calling actor thread until releaseQuietLocation():

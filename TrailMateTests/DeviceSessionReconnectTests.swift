@@ -664,6 +664,90 @@ struct DeviceSessionReconnectTests {
         await h.finish()
     }
 
+    @Test func disconnectWhileACommitAwaitsTheActorBeforeAttachNeverAttachesTheStaleBackend() async throws {
+        let h = try Harness()
+        let backend = await h.connectExplicitly()
+        await h.a.sim.teleport(to: CLLocationCoordinate2D(latitude: 25, longitude: 121))
+        backend.fail(.tunnelDown(line: "TUNNEL_DOWN"))
+        await h.waitForStatus(.reconnecting(attempt: 1, maxAttempts: Self.maxAttempts))
+        await h.elapseDelay()
+        await h.waitForAttempts(2)
+
+        // Resume the attempt and yield exactly once: the loop's job was queued
+        // before ours, so it runs up to the commit's first actor hop
+        // (updateBaseSpeed) and suspends there; our continuation, queued before
+        // that hop completed, then runs the teardown inside that window.
+        let replacement = FakeSimulationBackend()
+        h.attempter.succeedInFlight(with: replacement)
+        await Task.yield()
+        await h.a.disconnect()
+
+        #expect(h.a.connectionStatus == .disconnected)
+        #expect(h.a.connectedUDID == nil)
+        #expect(await eventually { replacement.stopCount == 1 }, "the stale backend is stopped")
+        #expect(replacement.quietLocationCount == 0, "and was never attached: no re-sync emit reached it")
+        await h.a.sim.teleport(to: CLLocationCoordinate2D(latitude: 26, longitude: 122))
+        #expect(replacement.quietLocationCount == 0)
+        #expect(!h.app.logMessages.contains { $0.contains("Reconnected on attempt") })
+        await h.expectNoFurtherAttempts()
+
+        let fresh = await h.connectExplicitly()
+        #expect(h.a.connectionStatus == .connected)
+        await h.a.sim.teleport(to: CLLocationCoordinate2D(latitude: 27, longitude: 123))
+        #expect(await eventually { fresh.quietLocationCount >= 1 })
+        #expect(replacement.quietLocationCount == 0)
+        await h.finish()
+    }
+
+    @Test func sleepWhileConnectWaitsForThePriorTeardownAbandonsIt() async throws {
+        let h = try Harness()
+        let old = await h.connectExplicitly()
+        old.holdStops()
+        let disconnecting = Task { await h.a.disconnect() }
+        #expect(await eventually { old.stopCount == 1 }, "the teardown is parked in the chain")
+        #expect(h.a.connectionStatus == .disconnected)
+
+        let connecting = Task { await h.a.connect() }
+        #expect(await eventually { h.a.connectionStatus == .connecting }, "Connect claims its state before waiting")
+        #expect(h.attempter.calls.count == 1, "no attempt until the prior teardown finishes")
+
+        await h.a.handleSystemSleep()
+        #expect(h.a.connectionStatus == .disconnected)
+
+        old.releaseHeldStops()
+        await disconnecting.value
+        await connecting.value
+        #expect(h.attempter.calls.count == 1, "the abandoned Connect never attempted")
+        #expect(h.a.connectionStatus == .disconnected)
+        #expect(!h.a.autoReconnectArmed)
+        await h.expectNoFurtherAttempts()
+        await h.finish()
+    }
+
+    @Test func aSecondConnectWhileOneIsWaitingIsRefused() async throws {
+        let h = try Harness()
+        let old = await h.connectExplicitly()
+        old.holdStops()
+        let disconnecting = Task { await h.a.disconnect() }
+        #expect(await eventually { old.stopCount == 1 })
+
+        let first = Task { await h.a.connect() }
+        #expect(await eventually { h.a.connectionStatus == .connecting })
+        let second = Task { await h.a.connect() }
+        await second.value   // refused at once: the state is already claimed
+        #expect(h.a.connectionStatus == .connecting)
+
+        old.releaseHeldStops()
+        await disconnecting.value
+        #expect(await eventually { h.attempter.inFlightCount == 1 })
+        #expect(h.attempter.calls.count == 2, "exactly one new attempt for two Connect presses")
+        h.attempter.succeedInFlight(with: FakeSimulationBackend())
+        await first.value
+        #expect(h.a.connectionStatus == .connected)
+        #expect(h.attempter.calls.count == 2)
+        await h.finish()
+    }
+
     // MARK: - Projection
 
     @Test func recoveryStatesProjectTheAttemptForEverySurface() {

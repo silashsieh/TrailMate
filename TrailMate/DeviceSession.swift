@@ -151,9 +151,6 @@ final class DeviceSession: Identifiable {
         // A recovery window owns the connection controls until it settles; the
         // explicit path only starts from a settled state.
         guard connectionStatus != .connecting, !connectionStatus.isRecovering else { return }
-        // The last teardown's detach/stop must finish before a replacement
-        // backend can attach; otherwise the old cleanup could detach it.
-        await mirrorChain?.value
         guard let udid = selectedDeviceUDID, !udid.isEmpty else {
             manager.addLog("Pick a device first.")
             connectionStatus = .error("No device selected")
@@ -163,11 +160,23 @@ final class DeviceSession: Identifiable {
         // while connecting; keep the prior name if discovery doesn't know it.
         deviceName = manager.discovery.devices.first { $0.udid == udid }?.name ?? deviceName
 
+        // Claim the connecting state and this connect's epoch before the first
+        // await: a second Connect is refused by the guard above from here on,
+        // and a teardown (quit, removal, sleep) at any point after this bumps
+        // the epoch and owns the status — every resumption below checks it
+        // and, on mismatch, leaves quietly.
+        connectionStatus = .connecting
+        let epoch = backendEpoch
+        // The last teardown's detach/stop must finish before a replacement
+        // backend can attach; otherwise the old cleanup could detach it.
+        await mirrorChain?.value
+        guard backendEpoch == epoch else { return }
+
         #if DEBUG
         // UI-test mock: skip the tunnel (admin prompt) and daemon entirely so
         // connected-only UI flows are testable with no device.
         if UITestSupport.mockConnection {
-            guard await commitLiveBackend(MockSimulationBackend(), udid: udid, epoch: backendEpoch) else { return }
+            guard await commitLiveBackend(MockSimulationBackend(), udid: udid, epoch: epoch) else { return }
             autoReconnectArmed = true
             manager.addLog("Connected (mock backend — UI test).")
             // Joystick arming is centralized in AppState.syncActiveJoystick()
@@ -177,11 +186,6 @@ final class DeviceSession: Identifiable {
         #endif
 
         manager.sweepStaleDaemonsIfNeeded()
-        connectionStatus = .connecting
-        // A teardown (quit, removal, sleep) while this connect is in flight
-        // bumps the epoch and owns the status from then on; every resumption
-        // below checks it and, on mismatch, leaves quietly.
-        let epoch = backendEpoch
 
         // Startup retry: each try is one connectOnce, re-querying a settled
         // endpoint and fully releasing a wedged daemon on failure so it can't
@@ -260,11 +264,22 @@ final class DeviceSession: Identifiable {
             return false
         }
         await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
+        // A teardown during that hop already chained its detach; an attach
+        // queued behind it would re-mirror a backend nobody owns. Recheck
+        // here, in the same turn that queues the attach.
+        guard backendEpoch == epoch else {
+            await backend.stop()
+            return false
+        }
         await enqueueMirrorOperation { [sim] in
             await sim.attach(backend: backend)
         }.value
         guard backendEpoch == epoch else {
-            await backend.stop()
+            // The teardown chained its detach behind this attach; stop behind
+            // that detach too, so the mirror is gone before the daemon quits.
+            await enqueueMirrorOperation {
+                await backend.stop()
+            }.value
             return false
         }
         eventsTask?.cancel()
@@ -1091,11 +1106,22 @@ extension DeviceSession {
         backend: any SimulationBackend,
         armAutoReconnect: Bool = false
     ) async {
+        let epoch = backendEpoch
         await mirrorChain?.value
         selectedDeviceUDID = udid
+        guard backendEpoch == epoch else {
+            await backend.stop()
+            return
+        }
         await enqueueMirrorOperation { [sim] in
             await sim.attach(backend: backend)
         }.value
+        guard backendEpoch == epoch else {
+            await enqueueMirrorOperation {
+                await backend.stop()
+            }.value
+            return
+        }
         eventsTask?.cancel()
         daemonBridge = backend
         liveBackendID = ObjectIdentifier(backend)

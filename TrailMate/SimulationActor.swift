@@ -48,6 +48,13 @@ nonisolated struct SimulationTiming: Sendable {
 actor SimulationActor {
     private let bridge: SimulationStateBridge
     private let timing: SimulationTiming
+    // One monotonic source paces both loops, the UI throttles, the deviation
+    // timer, and the recording capture, so a manual test clock advances all of
+    // them together. Live sessions inject the ContinuousClock-backed source.
+    private let monotonicTime: MonotonicTimeSource
+    // Sees every snapshot the actor pushes, synchronously on the actor before
+    // the MainActor hop. nil in production; tests count display pushes here.
+    private let snapshotObserver: (@Sendable (SimSnapshot) -> Void)?
     private var recordingCapture: RecordingCapture
 
     private let nav = NavigationEngine()
@@ -62,9 +69,9 @@ actor SimulationActor {
     private var controllerObservers: [NSObjectProtocol] = []
     private var activityToken: Any?
 
-    private var lastDisplayPush: ContinuousClock.Instant?
-    private var lastDeviationCheck: ContinuousClock.Instant?
-    private var deviationStartedAt: ContinuousClock.Instant?
+    private var lastDisplayPush: MonotonicTimeSource.Instant?
+    private var lastDeviationCheck: MonotonicTimeSource.Instant?
+    private var deviationStartedAt: MonotonicTimeSource.Instant?
 
     private var lastEmittedCoordinate: CLLocationCoordinate2D?
 
@@ -79,10 +86,13 @@ actor SimulationActor {
         bridge: SimulationStateBridge,
         monotonicTime: MonotonicTimeSource = .continuous,
         wallNow: @escaping @Sendable () -> Date = { Date() },
-        timing: SimulationTiming = .production
+        timing: SimulationTiming = .production,
+        snapshotObserver: (@Sendable (SimSnapshot) -> Void)? = nil
     ) {
         self.bridge = bridge
         self.timing = timing
+        self.monotonicTime = monotonicTime
+        self.snapshotObserver = snapshotObserver
         self.recordingCapture = RecordingCapture(monotonicTime: monotonicTime, wallNow: wallNow)
         var continuation: AsyncStream<SimulationEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
@@ -246,7 +256,7 @@ actor SimulationActor {
     // Transport actions (stop/load/teleport/clear) clear it so a lost release
     // event can't freeze playback.
     private var isScrubbing = false
-    private var lastScrubEmit: ContinuousClock.Instant?
+    private var lastScrubEmit: MonotonicTimeSource.Instant?
 
     func beginScrub() {
         isScrubbing = true
@@ -262,7 +272,7 @@ actor SimulationActor {
     func scrub(toProgress progress: Double) async {
         guard isScrubbing else { return }   // stale task landing after release
         guard let coord = applySeek(progress: progress) else { return }
-        let now = ContinuousClock.now
+        let now = monotonicTime.now
         if let last = lastScrubEmit, now - last < timing.scrubEmitInterval { return }
         lastScrubEmit = now
         emit(coord)
@@ -381,13 +391,16 @@ actor SimulationActor {
     private func startAggregator() {
         aggregatorTask?.cancel()
         let timing = self.timing
-        aggregatorTask = Task { [weak self, timing] in
+        let clock = self.monotonicTime
+        aggregatorTask = Task { [weak self, timing, clock] in
             let dt = timing.aggregatorDeltaTime
             let interval = timing.aggregatorInterval
-            var nextTick = ContinuousClock.now
+            // Deadlines accumulate from the loop start rather than from each
+            // wake, so one late tick doesn't push every later tick back with it.
+            var nextTick = clock.now
             while !Task.isCancelled {
-                nextTick = nextTick.advanced(by: interval)
-                try? await Task.sleep(until: nextTick, clock: .continuous)
+                nextTick += interval
+                try? await clock.sleep(for: nextTick - clock.now)
                 await self?.aggregatorTick(dt: dt)
             }
         }
@@ -395,9 +408,10 @@ actor SimulationActor {
 
     private func startIdleJitter() {
         idleJitterTask?.cancel()
-        idleJitterTask = Task { [weak self] in
+        let clock = self.monotonicTime
+        idleJitterTask = Task { [weak self, clock] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await clock.sleep(for: .seconds(1))
                 await self?.idleJitterTick()
             }
         }
@@ -460,7 +474,7 @@ actor SimulationActor {
     }
 
     private func maybeCheckDeviation(pos: CLLocationCoordinate2D) async {
-        let now = ContinuousClock.now
+        let now = monotonicTime.now
         if let last = lastDeviationCheck, now - last < .milliseconds(200) {
             return
         }
@@ -521,7 +535,7 @@ actor SimulationActor {
     // non-playing motion is capped at 10 Hz. The backend still gets every SETQ
     // tick because backend.setLocationQuiet is called from `emit`, not here.
     private func pushSnapshotThrottled(routeDeviationMeters: Double) async {
-        let now = ContinuousClock.now
+        let now = monotonicTime.now
         let interval = nav.playbackState == .playing
             ? timing.playbackSnapshotInterval
             : timing.activeSnapshotInterval
@@ -530,6 +544,7 @@ actor SimulationActor {
         lastDisplayPush = now
         bridge_routeDeviationMeters = routeDeviationMeters
         let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
+        snapshotObserver?(snap)
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }
@@ -538,8 +553,9 @@ actor SimulationActor {
     private func pushSnapshotNow(routeDeviationMeters: Double? = nil) async {
         let dev = routeDeviationMeters ?? bridge_routeDeviationMeters
         bridge_routeDeviationMeters = dev
-        lastDisplayPush = ContinuousClock.now
+        lastDisplayPush = monotonicTime.now
         let snap = makeSnapshot(routeDeviationMeters: dev)
+        snapshotObserver?(snap)
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }

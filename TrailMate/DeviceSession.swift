@@ -550,7 +550,7 @@ final class DeviceSession: Identifiable {
 
     func selectFrom(_ completion: MKLocalSearchCompletion) async {
         fromSearch.select(completion)
-        fromCoordinate = await fromSearch.resolve(completion)
+        fromCoordinate = await manager.resolveSearchResult(completion, in: fromSearch)
     }
 
     // One-tap fill: route from the red dot. Formatted coordinates rather than
@@ -564,7 +564,7 @@ final class DeviceSession: Identifiable {
 
     func selectTo(_ completion: MKLocalSearchCompletion) async {
         toSearch.select(completion)
-        toCoordinate = await toSearch.resolve(completion)
+        toCoordinate = await manager.resolveSearchResult(completion, in: toSearch)
     }
 
     func addStop() {
@@ -579,7 +579,7 @@ final class DeviceSession: Identifiable {
     func selectStop(id: UUID, completion: MKLocalSearchCompletion) async {
         guard let stop = stops.first(where: { $0.id == id }) else { return }
         stop.search.select(completion)
-        stop.coordinate = await stop.search.resolve(completion)
+        stop.coordinate = await manager.resolveSearchResult(completion, in: stop.search)
     }
 
     // Defined now so the model supports reorder; UI wiring (.onMove) is deferred.

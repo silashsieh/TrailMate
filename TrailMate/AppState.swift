@@ -200,7 +200,7 @@ final class AppState {
 
     // MARK: App-global services & libraries
 
-    let discovery = DeviceDiscoveryService()
+    let discovery: DeviceDiscoveryService
     // App-global tunnel broker (epic 012): one privileged `tunneld` for all
     // devices, one auth prompt per session. Sessions resolve their RSD endpoint
     // through it on connect; torn down only at app quit.
@@ -226,11 +226,13 @@ final class AppState {
     // the red dot rather than filling a route slot. App-global because it
     // targets the selected session's position, like teleport.
     let placeSearch = LocationSearch()
+    private let searchResultResolver: @MainActor (LocationSearch, MKLocalSearchCompletion) async -> CLLocationCoordinate2D?
+    private let coordinateWriter: @MainActor (String) -> Void
 
     // Routing kernel (D4). Swappable behind the protocol; MapKit today. Stateless
     // and shared across sessions (the MapKit throttle is per-process, not
     // per-route).
-    let router: any RoutingService = MapKitRoutingService()
+    let router: any RoutingService
 
     // Log
     var logMessages: [String] = []
@@ -241,6 +243,7 @@ final class AppState {
     var pendingWanderCenter: CLLocationCoordinate2D?
 
     private var didSweepStaleDaemons = false
+    private let shouldSweepStaleDaemons: Bool
 
     var effectiveBaseSpeedMPS: Double {
         let kmh = transportMode.fixedSpeedKmh ?? max(0.1, customSpeedKmh)
@@ -259,16 +262,30 @@ final class AppState {
         runtimePaths: AppRuntimePaths = AppProcessConfiguration.current.runtimePaths,
         monotonicTime: MonotonicTimeSource = .continuous,
         simulationMonotonicTime: MonotonicTimeSource? = nil,
-        connectionAttempter: (any DeviceConnectionAttempter)? = nil
+        connectionAttempter: (any DeviceConnectionAttempter)? = nil,
+        discovery: DeviceDiscoveryService = DeviceDiscoveryService(),
+        router: any RoutingService = MapKitRoutingService(),
+        searchResultResolver: @escaping @MainActor (LocationSearch, MKLocalSearchCompletion) async -> CLLocationCoordinate2D? = { search, completion in
+            await search.resolve(completion)
+        },
+        coordinateWriter: @escaping @MainActor (String) -> Void = { text in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
     ) {
         self.defaults = defaults
         self.runtimePaths = runtimePaths
         self.monotonicTime = monotonicTime
         self.simulationMonotonicTime = simulationMonotonicTime ?? monotonicTime
+        self.discovery = discovery
+        self.router = router
+        self.searchResultResolver = searchResultResolver
+        self.coordinateWriter = coordinateWriter
         let tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
         self.tunnelBroker = tunnelBroker
         self.connectionAttempter = connectionAttempter
             ?? (LiveDeviceConnectionAttempter(tunnelBroker: tunnelBroker) as any DeviceConnectionAttempter)
+        self.shouldSweepStaleDaemons = connectionAttempter == nil
         self.recordingsLibrary = RecordingsLibrary(baseURL: runtimePaths.recordingsDirectory)
         self.savedRoutes = SavedRoutesStore(baseURL: runtimePaths.savedRoutesDirectory)
         self.savedWaypointsStore = SavedWaypointsStore(defaults: defaults)
@@ -536,7 +553,7 @@ final class AppState {
     // the local dot and a connected device mirrors it (epic 028).
     func goToSearchResult(_ completion: MKLocalSearchCompletion) async {
         placeSearch.select(completion)
-        guard let coord = await placeSearch.resolve(completion) else {
+        guard let coord = await resolveSearchResult(completion, in: placeSearch) else {
             addLog("Couldn't resolve “\(completion.title)”.")
             return
         }
@@ -555,9 +572,15 @@ final class AppState {
     // Copy a coordinate to the clipboard as a paste-able "lat, lon" string (#52).
     func copyCoordinate(_ coordinate: CLLocationCoordinate2D) {
         let text = CoordinateFormat.string(from: coordinate)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        coordinateWriter(text)
         addLog("Copied coordinate: \(text)")
+    }
+
+    func resolveSearchResult(
+        _ completion: MKLocalSearchCompletion,
+        in search: LocationSearch
+    ) async -> CLLocationCoordinate2D? {
+        await searchResultResolver(search, completion)
     }
     func selectFrom(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectFrom(completion) }
     func useCurrentLocationAsFrom() { selectedSession.useCurrentLocationAsFrom() }
@@ -1158,6 +1181,9 @@ final class AppState {
     // First connect per session sweeps any orphan tm_daemon.py left over from
     // a prior host-app crash (parent watcher catches most, but isn't instant).
     func sweepStaleDaemonsIfNeeded() {
+        // An injected attempt never starts a real daemon. Its tests must not
+        // inspect or terminate a daemon owned by the user's live app.
+        guard shouldSweepStaleDaemons else { return }
         guard !didSweepStaleDaemons else { return }
         didSweepStaleDaemons = true
         let task = Process()

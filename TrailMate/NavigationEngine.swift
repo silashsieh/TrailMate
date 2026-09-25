@@ -46,6 +46,10 @@ nonisolated final class NavigationEngine {
     private var baseSpeedMPS: Double = 1.4
     private var speedMultiplier: Double = 1.0
 
+    #if DEBUG
+    var baseSpeedForTesting: Double { baseSpeedMPS }
+    #endif
+
     private static let metersPerDegLat = 111_320.0
 
     func loadRoute(coordinates: [CLLocationCoordinate2D], baseSpeed: Double) {

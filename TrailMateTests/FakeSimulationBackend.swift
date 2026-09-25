@@ -31,6 +31,7 @@ nonisolated final class FakeSimulationBackend: SimulationBackend, @unchecked Sen
     var startCount: Int { lock.withLock { startCalls } }
     var stopCount: Int { lock.withLock { stopCalls } }
     var quietLocationCount: Int { lock.withLock { quietLocations.count } }
+    var lastQuietLocation: (latitude: Double, longitude: Double)? { lock.withLock { quietLocations.last } }
 
     func start(rsdAddress: String, rsdPort: String) async throws {
         lock.withLock { startCalls += 1 }

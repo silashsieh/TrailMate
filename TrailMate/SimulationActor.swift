@@ -332,6 +332,12 @@ actor SimulationActor {
     var isJoystickActive: Bool { joy.isActive }
     var isPlaybackIdle: Bool { nav.playbackState == .idle }
 
+    #if DEBUG
+    var tuningForTesting: (baseSpeed: Double, noiseSigma: Double, loopMode: NavigationEngine.LoopMode, loopCount: Int) {
+        (nav.baseSpeedForTesting, noise.sigmaMeters, nav.loopMode, nav.loopCount)
+    }
+    #endif
+
     // The integrator's authoritative position. The bridge's simulatedCoordinate
     // lags until the next emit, so tests asserting on play()'s integrator
     // reset need the direct read.

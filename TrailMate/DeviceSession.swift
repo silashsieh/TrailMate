@@ -66,6 +66,8 @@ final class DeviceSession: Identifiable {
 
     private var daemonBridge: (any SimulationBackend)?
     private var eventsTask: Task<Void, Never>?
+    private var liveBackendID: ObjectIdentifier?
+    private var failedBackendCleanupTask: Task<Void, Never>?
 
     init(manager: AppState) {
         self.manager = manager
@@ -104,6 +106,10 @@ final class DeviceSession: Identifiable {
 
     func connect() async {
         guard connectionStatus != .connecting else { return }
+        // A prior failure's detach/stop must finish before a replacement
+        // backend can attach; otherwise the old cleanup could detach it.
+        await failedBackendCleanupTask?.value
+        failedBackendCleanupTask = nil
         guard let udid = selectedDeviceUDID, !udid.isEmpty else {
             manager.addLog("Pick a device first.")
             connectionStatus = .error("No device selected")
@@ -119,6 +125,7 @@ final class DeviceSession: Identifiable {
         if UITestSupport.mockConnection {
             let backend = MockSimulationBackend()
             daemonBridge = backend
+            liveBackendID = ObjectIdentifier(backend)
             connectionStatus = .connected
             connectedUDID = udid
             manager.addLog("Connected (mock backend — UI test).")
@@ -170,35 +177,21 @@ final class DeviceSession: Identifiable {
             manager.addLog("Connecting to [\(rsdAddress)]:\(rsdPort)…\(suffix)")
 
             let bridge = DaemonBridge()
-            // Consume out-of-band events (daemon death, tunnel down) for THIS
-            // bridge. The stream is Sendable so the iterator runs off MainActor;
-            // each event hops back here to mutate UI-bound state.
-            let stream = bridge.events
-            let attemptEvents = Task { [weak self] in
-                for await event in stream {
-                    guard let self else { return }
-                    await MainActor.run {
-                        switch event {
-                        case .unexpectedExit(let status, let reason):
-                            self.handleDaemonExit(status: status, reason: reason)
-                        case .tunnelDown(let line):
-                            self.handleTunnelDown(line: line)
-                        }
-                    }
-                }
-            }
-
             do {
                 try await bridge.start(rsdAddress: rsdAddress, rsdPort: rsdPort)
                 // Success — commit this bridge as the live one.
                 eventsTask?.cancel()
-                eventsTask = attemptEvents
                 daemonBridge = bridge
+                liveBackendID = ObjectIdentifier(bridge)
                 connectionStatus = .connected
                 connectedUDID = udid
                 manager.addLog("Connected — ready for commands.")
                 await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
                 await sim.attach(backend: bridge)
+                // Subscribe only after the live backend is attached. The
+                // stream buffers any loss since READY, so an immediate exit
+                // cannot be discarded while the session is still connecting.
+                eventsTask = makeEventsTask(for: bridge)
                 // Joystick arming is centralized in AppState.syncActiveJoystick()
                 // (selected device only); every connect path calls it after.
                 if simState.simulatedCoordinate == nil {
@@ -207,7 +200,6 @@ final class DeviceSession: Identifiable {
                 return
             } catch {
                 lastError = error
-                attemptEvents.cancel()
                 // start() already terminates+SIGKILLs the daemon on failure;
                 // stop() is a no-op then but harmless, and covers any path that
                 // left the process alive. Releases the device's DVT session.
@@ -230,6 +222,9 @@ final class DeviceSession: Identifiable {
     func disconnect() async {
         eventsTask?.cancel()
         eventsTask = nil
+        liveBackendID = nil
+        await failedBackendCleanupTask?.value
+        failedBackendCleanupTask = nil
         await sim.detach()
         if let bridge = daemonBridge {
             await bridge.stop()
@@ -715,33 +710,44 @@ final class DeviceSession: Identifiable {
 
     // MARK: - Private
 
-    // Invoked from the events stream when the daemon dies on its own (crash,
-    // kill, our SIGKILL escalator). Tear down Swift-side state that assumed
-    // the daemon was alive. Don't auto-restart — the user clicks Connect.
-    private func handleDaemonExit(status: Int32, reason: ExitReason) {
-        let detail: String
-        switch (status, reason) {
-        case (0, _):        detail = "Daemon exited"
-        case (_, .signal):  detail = "Daemon killed (signal)"
-        default:            detail = "Daemon crashed (exit \(status))"
+    private func makeEventsTask(for backend: any SimulationBackend) -> Task<Void, Never> {
+        let stream = backend.events
+        let backendID = ObjectIdentifier(backend)
+        return Task { [weak self] in
+            for await event in stream {
+                guard let self else { return }
+                await MainActor.run {
+                    switch event {
+                    case .connectionLost(let failure):
+                        self.handleConnectionLoss(failure, backendID: backendID)
+                    }
+                }
+            }
         }
-        manager.addLog(detail)
-        teardownLiveState(statusMessage: detail)
     }
 
-    private func handleTunnelDown(line: String) {
-        manager.addLog("Tunnel down: \(line)")
-        teardownLiveState(statusMessage: "Tunnel down")
-    }
-
-    private func teardownLiveState(statusMessage: String) {
+    // First failure for the currently attached backend wins. Stale or racing
+    // callbacks cannot tear down a replacement backend or overwrite its reason.
+    // Retry policy is deliberately absent; epic 043 consumes this stable loss.
+    private func handleConnectionLoss(
+        _ failure: SimulationBackendFailure,
+        backendID: ObjectIdentifier
+    ) {
+        guard liveBackendID == backendID else { return }
+        manager.addLog(failure.logMessage)
         eventsTask?.cancel(); eventsTask = nil
+        liveBackendID = nil
+        let failedBridge = daemonBridge
         daemonBridge = nil
         connectedUDID = nil
         // Detach this device's sim; leave the shared broker up (tunneld may
-        // re-establish the tunnel, and other devices still need it).
-        Task { await sim.detach() }
-        connectionStatus = .error(statusMessage)
+        // re-establish the tunnel, and other devices still need it). Stopping
+        // this failed daemon does not stop the local actor or its recording.
+        failedBackendCleanupTask = Task {
+            await sim.detach()
+            await failedBridge?.stop()
+        }
+        connectionStatus = .error(failure.statusMessage)
     }
 
     // MARK: - Routing
@@ -798,6 +804,24 @@ extension DeviceSession {
         selectedDeviceUDID = udid
         connectedUDID = udid
         connectionStatus = .connected
+    }
+
+    // Unit-test connection seam: attach an injected backend through the same
+    // event-consumption and actor path as a successful daemon launch.
+    func bindConnectedForTesting(
+        udid: String,
+        backend: any SimulationBackend
+    ) async {
+        await failedBackendCleanupTask?.value
+        failedBackendCleanupTask = nil
+        selectedDeviceUDID = udid
+        connectedUDID = udid
+        daemonBridge = backend
+        liveBackendID = ObjectIdentifier(backend)
+        eventsTask?.cancel()
+        connectionStatus = .connected
+        await sim.attach(backend: backend)
+        eventsTask = makeEventsTask(for: backend)
     }
 }
 #endif

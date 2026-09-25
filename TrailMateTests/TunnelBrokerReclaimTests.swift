@@ -5,6 +5,13 @@ import Testing
 // injected probe/shutdown so it needs no networking or a real tunneld.
 @MainActor
 struct TunnelBrokerReclaimTests {
+    private func instantClock() -> MonotonicTimeSource {
+        let clock = ManualMonotonicClock()
+        return MonotonicTimeSource(
+            now: { clock.now },
+            sleep: { duration in clock.advance(by: duration) }
+        )
+    }
 
     // Fake tunneld: reports alive until asked to shut down, then alive for
     // `diesAfter` more probes before reporting gone.
@@ -26,7 +33,7 @@ struct TunnelBrokerReclaimTests {
         let fake = FakeTunneld(alive: false)
         let freed = await TunnelBroker.reclaimStaleTunneld(
             isAlive: { fake.isAlive() }, shutdown: { fake.shutdown() },
-            pollInterval: .milliseconds(1), timeout: .milliseconds(50))
+            pollInterval: .milliseconds(1), timeout: .milliseconds(50), time: instantClock())
         #expect(freed)                      // port already free
         #expect(fake.shutdownCalls == 0)    // no orphan → never shuts anything down
     }
@@ -35,7 +42,7 @@ struct TunnelBrokerReclaimTests {
         let fake = FakeTunneld(alive: true, diesAfter: 2)
         let freed = await TunnelBroker.reclaimStaleTunneld(
             isAlive: { fake.isAlive() }, shutdown: { fake.shutdown() },
-            pollInterval: .milliseconds(1), timeout: .seconds(1))
+            pollInterval: .milliseconds(1), timeout: .seconds(1), time: instantClock())
         #expect(freed)                      // saw it go after /shutdown
         #expect(fake.shutdownCalls == 1)
     }
@@ -44,7 +51,7 @@ struct TunnelBrokerReclaimTests {
         let fake = FakeTunneld(alive: true, diesAfter: .max)   // never frees
         let freed = await TunnelBroker.reclaimStaleTunneld(
             isAlive: { fake.isAlive() }, shutdown: { fake.shutdown() },
-            pollInterval: .milliseconds(1), timeout: .milliseconds(50))
+            pollInterval: .milliseconds(1), timeout: .milliseconds(50), time: instantClock())
         #expect(!freed)                     // caller lets the bind error surface
         #expect(fake.shutdownCalls == 1)
     }

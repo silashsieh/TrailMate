@@ -67,7 +67,16 @@ final class DeviceSession: Identifiable {
     private var daemonBridge: (any SimulationBackend)?
     private var eventsTask: Task<Void, Never>?
     private var liveBackendID: ObjectIdentifier?
-    private var failedBackendCleanupTask: Task<Void, Never>?
+    // All sim mirror operations — attach on commit, detach + daemon stop on
+    // teardown — run through this one chain, so they execute in the order the
+    // session issued them regardless of actor scheduling: a teardown issued
+    // while a commit's attach is in flight always detaches after that attach.
+    private var mirrorChain: Task<Void, Never>?
+    // Bumped by every teardown (Disconnect, loss, sleep, removal). A commit
+    // captures it when its attempt starts and publishes only if it is
+    // unchanged, so a backend started for a session that was torn down
+    // meanwhile is stopped instead of published.
+    private var backendEpoch = 0
 
     init(manager: AppState) {
         self.manager = manager
@@ -142,10 +151,9 @@ final class DeviceSession: Identifiable {
         // A recovery window owns the connection controls until it settles; the
         // explicit path only starts from a settled state.
         guard connectionStatus != .connecting, !connectionStatus.isRecovering else { return }
-        // A prior failure's detach/stop must finish before a replacement
+        // The last teardown's detach/stop must finish before a replacement
         // backend can attach; otherwise the old cleanup could detach it.
-        await failedBackendCleanupTask?.value
-        failedBackendCleanupTask = nil
+        await mirrorChain?.value
         guard let udid = selectedDeviceUDID, !udid.isEmpty else {
             manager.addLog("Pick a device first.")
             connectionStatus = .error("No device selected")
@@ -159,7 +167,7 @@ final class DeviceSession: Identifiable {
         // UI-test mock: skip the tunnel (admin prompt) and daemon entirely so
         // connected-only UI flows are testable with no device.
         if UITestSupport.mockConnection {
-            await commitLiveBackend(MockSimulationBackend(), udid: udid)
+            guard await commitLiveBackend(MockSimulationBackend(), udid: udid, epoch: backendEpoch) else { return }
             autoReconnectArmed = true
             manager.addLog("Connected (mock backend — UI test).")
             // Joystick arming is centralized in AppState.syncActiveJoystick()
@@ -170,6 +178,10 @@ final class DeviceSession: Identifiable {
 
         manager.sweepStaleDaemonsIfNeeded()
         connectionStatus = .connecting
+        // A teardown (quit, removal, sleep) while this connect is in flight
+        // bumps the epoch and owns the status from then on; every resumption
+        // below checks it and, on mismatch, leaves quietly.
+        let epoch = backendEpoch
 
         // Startup retry: each try is one connectOnce, re-querying a settled
         // endpoint and fully releasing a wedged daemon on failure so it can't
@@ -178,7 +190,7 @@ final class DeviceSession: Identifiable {
         for attempt in 1...Self.startupMaxAttempts {
             do {
                 let backend = try await connectOnce(udid: udid, promptPolicy: .allowPrompt)
-                await commitLiveBackend(backend, udid: udid)
+                guard await commitLiveBackend(backend, udid: udid, epoch: epoch) else { return }
                 // An explicit Connect arms recovery for everything the app
                 // loses on its own from here until an explicit Disconnect.
                 autoReconnectArmed = true
@@ -188,12 +200,15 @@ final class DeviceSession: Identifiable {
                 }
                 return
             } catch ConnectionAttemptFailure.daemonStartFailed(let underlying) {
+                guard backendEpoch == epoch else { return }
                 lastError = underlying
                 manager.addLog("Connect attempt \(attempt) failed: \(underlying.localizedDescription)")
                 if attempt < Self.startupMaxAttempts {
                     try? await manager.monotonicTime.sleep(for: Self.startupRetryDelay)
+                    guard backendEpoch == epoch else { return }
                 }
             } catch {
+                guard backendEpoch == epoch else { return }
                 // No tunnel for this device, or authorization declined — not a
                 // transient; stop.
                 connectionStatus = .error(error.localizedDescription)
@@ -202,6 +217,7 @@ final class DeviceSession: Identifiable {
             }
         }
 
+        guard backendEpoch == epoch else { return }
         connectionStatus = .error(lastError?.localizedDescription ?? "Connection failed")
         manager.addLog("Connection failed after \(Self.startupMaxAttempts) attempts.")
         // Leave the broker running — it's shared across devices.
@@ -224,54 +240,97 @@ final class DeviceSession: Identifiable {
         )
     }
 
-    // Make a started backend the live one: attach the sim's device mirror and
-    // subscribe to its loss events. The same commit for explicit connects,
-    // reconnects, and the UI-test mock, so the session keeps one actor and one
-    // recording capture across every reconnect.
-    private func commitLiveBackend(_ backend: any SimulationBackend, udid: String) async {
+    // Make a started backend the live one. The sim's mirror is wired first and
+    // the backend published only afterwards — synchronously, in one MainActor
+    // turn — so the session never claims a connection whose mirror is not up.
+    // `epoch` is the caller's snapshot from before its attempt: any teardown
+    // since then (Disconnect, removal, sleep) bumped it, and the backend is then
+    // stopped instead of published. A teardown that lands while the attach is
+    // in flight chained its detach behind that attach, so the mirror ends
+    // detached without this commit having to undo anything. The same commit
+    // serves explicit connects, reconnects, and the UI-test mock, so a session
+    // keeps one actor and one recording capture across every reconnect.
+    private func commitLiveBackend(
+        _ backend: any SimulationBackend,
+        udid: String,
+        epoch: Int
+    ) async -> Bool {
+        guard backendEpoch == epoch else {
+            await backend.stop()
+            return false
+        }
+        await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
+        await enqueueMirrorOperation { [sim] in
+            await sim.attach(backend: backend)
+        }.value
+        guard backendEpoch == epoch else {
+            await backend.stop()
+            return false
+        }
         eventsTask?.cancel()
         daemonBridge = backend
         liveBackendID = ObjectIdentifier(backend)
         connectionStatus = .connected
         connectedUDID = udid
-        await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
-        await sim.attach(backend: backend)
-        // Subscribe only after the live backend is attached. The stream buffers
-        // any loss since READY, so an immediate exit cannot be discarded while
-        // the session is still connecting.
+        // Subscribe only now. The stream buffers any loss since READY, so an
+        // immediate exit cannot be discarded while the mirror was being wired.
         eventsTask = makeEventsTask(for: backend)
+        return true
     }
 
-    // Drop the device mirror: stop listening, detach the sim, stop the daemon.
-    // Leaves the shared broker up (other devices use it, and a live tunnel is
-    // what keeps reconnects promptless) and the local engine + recording
-    // running. The daemon's QUIT/CLEAR runs over the still-live tunnel.
-    private func releaseBackend() async {
+    // Forget the live backend synchronously — stop listening, drop the
+    // routing key — and hand it back for stopping. No await in here, so no
+    // other lifecycle event can interleave with these flips.
+    private func unpublishLiveBackend() -> (any SimulationBackend)? {
         eventsTask?.cancel()
         eventsTask = nil
         liveBackendID = nil
-        await failedBackendCleanupTask?.value
-        failedBackendCleanupTask = nil
-        await sim.detach()
-        if let bridge = daemonBridge {
-            await bridge.stop()
-        }
+        let bridge = daemonBridge
         daemonBridge = nil
         connectedUDID = nil
+        return bridge
+    }
+
+    // Every teardown passes here: it invalidates any commit still wiring the
+    // mirror and chains the detach + daemon stop behind whatever the chain
+    // already holds. The shared broker stays up (other devices use it, and a
+    // live tunnel is what keeps reconnects promptless); the local engine and
+    // recording keep running. The daemon's QUIT/CLEAR runs over the still-live
+    // tunnel.
+    private func invalidateMirror(stopping bridge: (any SimulationBackend)?) {
+        backendEpoch += 1
+        enqueueMirrorOperation { [sim] in
+            await sim.detach()
+            await bridge?.stop()
+        }
+    }
+
+    @discardableResult
+    private func enqueueMirrorOperation(
+        _ operation: @escaping @Sendable () async -> Void
+    ) -> Task<Void, Never> {
+        let previous = mirrorChain
+        let task = Task {
+            await previous?.value
+            await operation()
+        }
+        mirrorChain = task
+        return task
     }
 
     func disconnect() async {
         // An explicit Disconnect is the user's decision: it ends the armed
         // window, abandons any recovery in progress, and never reconnects.
+        // Every flip is synchronous; the trailing await only lets quit and
+        // removal wait for the daemon's QUIT/CLEAR handshake, and nothing is
+        // written after it, so a Connect issued meanwhile cannot be overwritten.
         autoReconnectArmed = false
         wakeRecoveryUDID = nil
         abandonRecovery()
-        await releaseBackend()
-        // Don't stop the broker — it's app-global (other devices may use it, and
-        // keeping it up makes reconnect promptless). It's torn down at app quit
-        // (AppState.prepareForQuit).
+        invalidateMirror(stopping: unpublishLiveBackend())
         connectionStatus = .disconnected
         manager.addLog("Disconnected.")
+        await mirrorChain?.value
     }
 
     // MARK: - Auto-reconnect (epic 043)
@@ -325,11 +384,11 @@ final class DeviceSession: Identifiable {
                 return
             }
             guard recoveryID == id, let udid = recoveryUDID else { return }
-            await failedBackendCleanupTask?.value
-            failedBackendCleanupTask = nil
+            await mirrorChain?.value
             guard recoveryID == id else { return }
 
             recoveryPhase = .attempting(attempt: attempt)
+            let epoch = backendEpoch
             manager.addLog("Reconnect attempt \(attempt)/\(maxAttempts)…")
             do {
                 let backend = try await connectOnce(udid: udid, promptPolicy: .neverPrompt)
@@ -338,9 +397,14 @@ final class DeviceSession: Identifiable {
                     await backend.stop()
                     return
                 }
-                let cancelledMeanwhile = recoveryPhase == .cancelling(attempt: attempt)
-                await commitLiveBackend(backend, udid: udid)
+                guard await commitLiveBackend(backend, udid: udid, epoch: epoch) else {
+                    // Torn down while the mirror was being wired; that teardown
+                    // cleared the window and owns the status.
+                    if recoveryID == id { clearRecovery() }
+                    return
+                }
                 guard recoveryID == id else { return }
+                let cancelledMeanwhile = recoveryPhase == .cancelling(attempt: attempt)
                 clearRecovery()
                 if cancelledMeanwhile {
                     // Cancel was a deliberate disarm; honoring it does not mean
@@ -881,17 +945,33 @@ final class DeviceSession: Identifiable {
             : nil
         if daemonBridge != nil {
             manager.addLog("Pausing — system sleeping (DVT session would drop)")
-            await releaseBackend()
+            // Every flip happens before the first await, so a wake that lands
+            // while the daemon is still quitting sees its target and a settled
+            // status — and nothing here writes state after that wake could
+            // have started a window.
+            wakeRecoveryUDID = resumeUDID
+            invalidateMirror(stopping: unpublishLiveBackend())
             connectionStatus = .disconnected
             manager.addLog("Disconnected.")
-            wakeRecoveryUDID = resumeUDID
+            await mirrorChain?.value
         } else if recoveryID != nil {
             // A window interrupted by sleep is stale on wake (tunneld reassigns
             // every endpoint), so wake starts a fresh ten instead of resuming.
+            // Invalidating the mirror discards a commit this window may have
+            // in flight.
+            wakeRecoveryUDID = resumeUDID
             abandonRecovery()
+            invalidateMirror(stopping: nil)
             connectionStatus = .disconnected
             manager.addLog("Reconnect paused — system sleeping")
-            wakeRecoveryUDID = resumeUDID
+        } else if connectionStatus == .connecting {
+            // An explicit Connect still in flight would publish a backend the
+            // sleeping Mac is about to drop; invalidating it makes connect()
+            // discard whatever its attempt returns. Never armed, so no wake
+            // recovery — the user presses Connect again.
+            invalidateMirror(stopping: nil)
+            connectionStatus = .disconnected
+            manager.addLog("Connect abandoned — system sleeping")
         }
     }
 
@@ -929,19 +1009,11 @@ final class DeviceSession: Identifiable {
     ) {
         guard liveBackendID == backendID else { return }
         manager.addLog(failure.logMessage)
-        eventsTask?.cancel(); eventsTask = nil
-        liveBackendID = nil
-        let failedBridge = daemonBridge
-        daemonBridge = nil
         let lostUDID = connectedUDID
-        connectedUDID = nil
-        // Detach this device's sim; leave the shared broker up (tunneld may
-        // re-establish the tunnel, and other devices still need it). Stopping
-        // this failed daemon does not stop the local actor or its recording.
-        failedBackendCleanupTask = Task {
-            await sim.detach()
-            await failedBridge?.stop()
-        }
+        // Detach this device's sim and stop the failed daemon; leave the shared
+        // broker up (tunneld may re-establish the tunnel, and other devices
+        // still need it). Neither stops the local actor or its recording.
+        invalidateMirror(stopping: unpublishLiveBackend())
         // Recovery policy (epic 043): an armed session recovers a loss it did
         // not choose while the Settings policy allows it; otherwise this is the
         // plain manual-reconnect state. The toggle is read here, at the moment
@@ -1010,24 +1082,26 @@ extension DeviceSession {
     }
 
     // Unit-test connection seam: attach an injected backend through the same
-    // event-consumption and actor path as a successful daemon launch. Unarmed
-    // by default so pipe-failure tests see the manual-reconnect state;
-    // `armAutoReconnect` stands in for the explicit Connect that arms recovery.
+    // mirror chain, event-consumption, and publication order as a successful
+    // daemon launch. Unarmed by default so pipe-failure tests see the
+    // manual-reconnect state; `armAutoReconnect` stands in for the explicit
+    // Connect that arms recovery.
     func bindConnectedForTesting(
         udid: String,
         backend: any SimulationBackend,
         armAutoReconnect: Bool = false
     ) async {
-        await failedBackendCleanupTask?.value
-        failedBackendCleanupTask = nil
+        await mirrorChain?.value
         selectedDeviceUDID = udid
-        connectedUDID = udid
+        await enqueueMirrorOperation { [sim] in
+            await sim.attach(backend: backend)
+        }.value
+        eventsTask?.cancel()
         daemonBridge = backend
         liveBackendID = ObjectIdentifier(backend)
-        eventsTask?.cancel()
+        connectedUDID = udid
         connectionStatus = .connected
         autoReconnectArmed = armAutoReconnect
-        await sim.attach(backend: backend)
         eventsTask = makeEventsTask(for: backend)
     }
 }

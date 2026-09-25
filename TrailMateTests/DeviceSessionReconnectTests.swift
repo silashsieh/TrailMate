@@ -119,7 +119,13 @@ struct DeviceSessionReconnectTests {
         await h.waitForStatus(.connected)
         #expect(h.a.connectedUDID == "DEVICE-A")
         #expect(h.a.sim === actorBefore)
-        #expect(await h.a.sim.recordingStatus() == .init(isActive: true, pointCount: 1))
+        // Same capture, still running: the pre-drop point is retained and the
+        // reconnect's device re-sync emit is recorded on top of it (the actor
+        // records every mirrored emit), never a second capture.
+        let capture = await h.a.sim.recordingStatus()
+        #expect(capture.isActive)
+        #expect(capture.pointCount >= 1)
+        #expect(await eventually { replacement.quietLocationCount == 1 }, "the replacement mirrors the red dot once on attach")
         #expect(h.a.autoReconnectArmed, "a successful reconnect keeps the window armed")
         #expect(h.clock.pendingSleepCount == 0)
         // The log line lands after the commit's actor hops, so wait for it.
@@ -534,6 +540,127 @@ struct DeviceSessionReconnectTests {
         #expect(h.attempter.calls.count == 3)
         #expect(!h.a.autoReconnectArmed)
         #expect(h.clock.outstandingSleepCount == 0)
+        await h.finish()
+    }
+
+    // MARK: - Lifecycle races (review findings, 2026-09-25)
+
+    @Test func wakeDuringTheSleepTeardownStillReconnectsAfterTheTeardownFinishes() async throws {
+        let h = try Harness()
+        let backend = await h.connectExplicitly()
+        backend.holdStops()
+        let sleeping = Task { await h.a.handleSystemSleep() }
+        // The daemon is still quitting, but the session's state already settled.
+        #expect(await eventually { backend.stopCount == 1 })
+        #expect(h.a.connectionStatus == .disconnected)
+        #expect(h.a.connectedUDID == nil)
+        #expect(h.a.autoReconnectArmed)
+
+        // Wake lands mid-teardown: it must still find its target.
+        h.a.handleSystemWake()
+        #expect(h.a.connectionStatus == .reconnecting(attempt: 1, maxAttempts: Self.maxAttempts))
+        // The delay elapses, but attempt 1 waits for the old daemon to finish quitting.
+        await h.elapseDelay()
+        await settle()
+        #expect(h.attempter.calls.count == 1, "no attempt while the old daemon is still quitting")
+
+        backend.releaseHeldStops()
+        await sleeping.value
+        #expect(h.a.connectionStatus == .reconnecting(attempt: 1, maxAttempts: Self.maxAttempts),
+                "the sleep tail must not overwrite the window wake started")
+        await h.waitForAttempts(2)
+        h.attempter.succeedInFlight(with: FakeSimulationBackend())
+        await h.waitForStatus(.connected)
+        await h.finish()
+    }
+
+    @Test func disconnectWhileAReconnectCommitIsWiringTheMirrorNeverPublishesTheStaleBackend() async throws {
+        let h = try Harness()
+        let backend = await h.connectExplicitly()
+        // A red dot, so attach() emits — that emit is the deterministic hook below.
+        await h.a.sim.teleport(to: CLLocationCoordinate2D(latitude: 25, longitude: 121))
+        backend.fail(.tunnelDown(line: "TUNNEL_DOWN"))
+        await h.waitForStatus(.reconnecting(attempt: 1, maxAttempts: Self.maxAttempts))
+        await h.elapseDelay()
+        await h.waitForAttempts(2)
+
+        // Park the commit inside sim.attach: the replacement blocks on its first
+        // mirrored emit, so the mirror is wired but nothing is published yet.
+        let replacement = FakeSimulationBackend()
+        replacement.blockNextQuietLocation()
+        defer { replacement.releaseQuietLocation() }   // never leave the actor parked on a failed expectation
+        h.attempter.succeedInFlight(with: replacement)
+        #expect(await eventually { replacement.isBlockedInQuietLocation })
+        #expect(h.a.connectionStatus == .reconnecting(attempt: 1, maxAttempts: Self.maxAttempts),
+                "nothing is published while the mirror is being wired")
+        #expect(h.a.connectedUDID == nil)
+
+        let disconnecting = Task { await h.a.disconnect() }
+        #expect(await eventually { h.a.connectionStatus == .disconnected })
+        replacement.releaseQuietLocation()
+        await disconnecting.value
+
+        #expect(h.a.connectionStatus == .disconnected)
+        #expect(h.a.connectedUDID == nil)
+        #expect(!h.a.autoReconnectArmed)
+        #expect(await eventually { replacement.stopCount == 1 }, "the stale backend is stopped, not published")
+        #expect(!h.app.logMessages.contains { $0.contains("Reconnected on attempt") })
+        // The mirror is detached: a later move reaches the stale backend no more.
+        let emitsBefore = replacement.quietLocationCount
+        await h.a.sim.teleport(to: CLLocationCoordinate2D(latitude: 26, longitude: 122))
+        #expect(replacement.quietLocationCount == emitsBefore)
+        await h.expectNoFurtherAttempts()
+
+        // And a fresh Connect afterwards is ordinary.
+        let fresh = await h.connectExplicitly()
+        #expect(h.a.connectionStatus == .connected)
+        await h.a.sim.teleport(to: CLLocationCoordinate2D(latitude: 27, longitude: 123))
+        #expect(await eventually { fresh.quietLocationCount >= 1 })
+        #expect(replacement.quietLocationCount == emitsBefore)
+        await h.finish()
+    }
+
+    @Test func sleepWhileAnExplicitConnectIsInFlightDiscardsItsBackend() async throws {
+        let h = try Harness()
+        let connecting = Task { await h.a.connect() }
+        #expect(await eventually { h.attempter.inFlightCount == 1 })
+        #expect(h.a.connectionStatus == .connecting)
+
+        await h.a.handleSystemSleep()
+        #expect(h.a.connectionStatus == .disconnected)
+
+        let late = FakeSimulationBackend()
+        h.attempter.succeedInFlight(with: late)
+        await connecting.value
+        #expect(h.a.connectionStatus == .disconnected, "a late daemon start must not resurrect the connection")
+        #expect(h.a.connectedUDID == nil)
+        #expect(!h.a.autoReconnectArmed)
+        #expect(late.stopCount == 1)
+        #expect(!h.app.logMessages.contains { $0.contains("Connected — ready") })
+        // Never armed, so wake does nothing; Connect works by hand.
+        h.a.handleSystemWake()
+        #expect(h.a.connectionStatus == .disconnected)
+        await h.expectNoFurtherAttempts()
+        await h.connectExplicitly()
+        #expect(h.a.connectionStatus == .connected)
+        await h.finish()
+    }
+
+    @Test func sleepDuringTheStartupRetryPauseAbandonsTheConnect() async throws {
+        let h = try Harness()
+        h.attempter.script(.fail(ConnectionAttemptFailure.daemonStartFailed(
+            underlying: FakeDeviceConnectionAttempter.AttemptError(message: "no READY")
+        )))
+        let connecting = Task { await h.a.connect() }
+        #expect(await eventually { h.clock.pendingSleepCount == 1 })
+        #expect(h.a.connectionStatus == .connecting)
+
+        await h.a.handleSystemSleep()
+        #expect(h.a.connectionStatus == .disconnected)
+        h.clock.advance(by: .seconds(3))
+        await connecting.value
+        #expect(h.attempter.calls.count == 1, "no second startup try after the connect was abandoned")
+        #expect(h.a.connectionStatus == .disconnected)
         await h.finish()
     }
 

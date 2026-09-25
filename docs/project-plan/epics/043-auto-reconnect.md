@@ -172,6 +172,17 @@ Disconnect never reconnects, and a re-authorization is never forced silently.
   an attempt show that attempt's error; a cancel during the first delay shows the drop's reason
   (`Tunnel down`, `Daemon crashed (exit n)`, …). Exhaustion logs
   "Reconnect gave up after 10 attempts — press Connect to try again."
+- **Lifecycle flips are synchronous; mirror operations are chained (2026-09-25, after review).**
+  Review found two races in the first cut: sleep stored its wake target only after awaiting the
+  daemon's QUIT, so a wake landing mid-teardown found nothing to retry; and a commit published
+  the backend before awaiting the sim's attach, so a Disconnect or sleep during that await could
+  detach and stop it and the commit then re-attached a dead backend. Now every teardown
+  (Disconnect, loss, sleep, removal) flips its state before its first await and bumps a
+  `backendEpoch`; all attach/detach/stop calls run through one session-owned FIFO chain
+  (`mirrorChain`), so a teardown issued during a commit's attach always detaches after it; and a
+  commit wires the mirror first, then publishes synchronously only if its attempt's epoch is
+  unchanged, otherwise it stops the backend. Sleep also abandons an explicit Connect still in
+  flight (never armed, so no wake recovery). Covered by the four "Lifecycle races" tests.
 - **Recovery is projected, not duplicated (2026-09-25).** `ConnectionStatus` gains
   `.reconnecting(attempt:maxAttempts:)` and `.cancellingRetry`; every surface (sidebar row, the
   control area, the map hint, the menu bar) reads the same `recoveryText`. AI `STATUS` reports
@@ -250,4 +261,8 @@ device; each line names the test that proves its deterministic half.
       persisted key).
 - Per-session isolation (from [[v2.3.0-design]] §2.4): `retryStateIsSessionScopedAndSelectionDoesNotLeakOrMutateIt`,
   `sessionRemovalAbandonsRecoveryAndDiscardsItsRecording`. Explicit Connect's retained startup
-  policy: `explicitConnectRetriesOnlyDaemonStartOnTheSharedClockAndMayPrompt`.
+  policy: `explicitConnectRetriesOnlyDaemonStartOnTheSharedClockAndMayPrompt`. Lifecycle races
+  (review, 2026-09-25): `wakeDuringTheSleepTeardownStillReconnectsAfterTheTeardownFinishes`,
+  `disconnectWhileAReconnectCommitIsWiringTheMirrorNeverPublishesTheStaleBackend`,
+  `sleepWhileAnExplicitConnectIsInFlightDiscardsItsBackend`,
+  `sleepDuringTheStartupRetryPauseAbandonsTheConnect`.

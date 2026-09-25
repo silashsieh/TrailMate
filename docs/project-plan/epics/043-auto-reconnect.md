@@ -188,7 +188,9 @@ Disconnect never reconnects, and a re-authorization is never forced silently.
   would re-mirror an orphan), and a stale-after-attach backend is stopped *behind* the chained
   detach; and `connect()` claims `.connecting` and its epoch before waiting for the prior
   teardown, so a second Connect is refused and a sleep/Disconnect during that wait is noticed.
-  Covered by the seven "Lifecycle races" tests.
+  The backend being attached is registered as pending before the attach is queued. Teardown
+  takes that backend into its own detach/stop operation, so Disconnect and a subsequent Connect
+  cannot overtake its daemon stop. Covered by the seven "Lifecycle races" tests.
 - **Recovery is projected, not duplicated (2026-09-25).** `ConnectionStatus` gains
   `.reconnecting(attempt:maxAttempts:)` and `.cancellingRetry`; every surface (sidebar row, the
   control area, the map hint, the menu bar) reads the same `recoveryText`. AI `STATUS` reports

@@ -99,6 +99,10 @@ final class AppState {
     let defaults: UserDefaults
     let runtimePaths: AppRuntimePaths
     let monotonicTime: MonotonicTimeSource
+    // Defaults to the same live ContinuousClock-backed source. Tests can keep
+    // the simulation loops parked on a separate manual clock while advancing
+    // reconnect delays, without a large jump replaying thousands of sim ticks.
+    let simulationMonotonicTime: MonotonicTimeSource
 
     // The device sessions — one per connectable slot. Always ≥ 1: launch creates
     // a single unbound session (it holds the restored red dot + pre-connect route
@@ -254,11 +258,13 @@ final class AppState {
         defaults: UserDefaults = AppProcessConfiguration.current.defaults,
         runtimePaths: AppRuntimePaths = AppProcessConfiguration.current.runtimePaths,
         monotonicTime: MonotonicTimeSource = .continuous,
+        simulationMonotonicTime: MonotonicTimeSource? = nil,
         connectionAttempter: (any DeviceConnectionAttempter)? = nil
     ) {
         self.defaults = defaults
         self.runtimePaths = runtimePaths
         self.monotonicTime = monotonicTime
+        self.simulationMonotonicTime = simulationMonotonicTime ?? monotonicTime
         let tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
         self.tunnelBroker = tunnelBroker
         self.connectionAttempter = connectionAttempter

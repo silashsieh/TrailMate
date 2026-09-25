@@ -18,6 +18,7 @@ struct DeviceSessionReconnectTests {
     final class Harness {
         let runtime: IsolatedTestRuntime
         let clock = ManualMonotonicClock()
+        let simulationClock = ManualMonotonicClock()
         let attempter = FakeDeviceConnectionAttempter()
         let app: AppState
         let a: DeviceSession
@@ -29,6 +30,7 @@ struct DeviceSessionReconnectTests {
                 defaults: runtime.defaults,
                 runtimePaths: runtime.runtimePaths,
                 monotonicTime: clock.timeSource,
+                simulationMonotonicTime: simulationClock.timeSource,
                 connectionAttempter: attempter
             )
             a = app.selectedSession
@@ -251,6 +253,7 @@ struct DeviceSessionReconnectTests {
             defaults: h.runtime.defaults,
             runtimePaths: h.runtime.runtimePaths,
             monotonicTime: h.clock.timeSource,
+            simulationMonotonicTime: h.simulationClock.timeSource,
             connectionAttempter: h.attempter
         )
         #expect(!reloaded.autoReconnectEnabled)
@@ -587,23 +590,36 @@ struct DeviceSessionReconnectTests {
         // Park the commit inside sim.attach: the replacement blocks on its first
         // mirrored emit, so the mirror is wired but nothing is published yet.
         let replacement = FakeSimulationBackend()
+        replacement.holdStops()
         replacement.blockNextQuietLocation()
-        defer { replacement.releaseQuietLocation() }   // never leave the actor parked on a failed expectation
+        defer {
+            replacement.releaseQuietLocation()
+            replacement.releaseHeldStops()
+        }   // never leave the actor or daemon stop parked on a failed expectation
         h.attempter.succeedInFlight(with: replacement)
         #expect(await eventually { replacement.isBlockedInQuietLocation })
         #expect(h.a.connectionStatus == .reconnecting(attempt: 1, maxAttempts: Self.maxAttempts),
                 "nothing is published while the mirror is being wired")
         #expect(h.a.connectedUDID == nil)
 
-        let disconnecting = Task { await h.a.disconnect() }
+        var disconnectFinished = false
+        let disconnecting = Task { @MainActor in
+            await h.a.disconnect()
+            disconnectFinished = true
+        }
         #expect(await eventually { h.a.connectionStatus == .disconnected })
         replacement.releaseQuietLocation()
+        #expect(await eventually { replacement.stopCount == 1 }, "the teardown owns the unpublished backend's stop")
+        await settle()
+        #expect(!disconnectFinished, "Disconnect must wait for the unpublished daemon to finish quitting")
+        replacement.releaseHeldStops()
         await disconnecting.value
+        #expect(disconnectFinished)
 
         #expect(h.a.connectionStatus == .disconnected)
         #expect(h.a.connectedUDID == nil)
         #expect(!h.a.autoReconnectArmed)
-        #expect(await eventually { replacement.stopCount == 1 }, "the stale backend is stopped, not published")
+        #expect(replacement.stopCount == 1, "the stale backend is stopped exactly once, not published")
         #expect(!h.app.logMessages.contains { $0.contains("Reconnected on attempt") })
         // The mirror is detached: a later move reaches the stale backend no more.
         let emitsBefore = replacement.quietLocationCount
@@ -667,20 +683,26 @@ struct DeviceSessionReconnectTests {
     @Test func disconnectWhileACommitAwaitsTheActorBeforeAttachNeverAttachesTheStaleBackend() async throws {
         let h = try Harness()
         let backend = await h.connectExplicitly()
+        let gate = PreAttachGate()
+        h.a.beforeMirrorAttachForTesting = { await gate.pause() }
+        defer {
+            gate.release()
+            h.a.beforeMirrorAttachForTesting = nil
+        }
         await h.a.sim.teleport(to: CLLocationCoordinate2D(latitude: 25, longitude: 121))
         backend.fail(.tunnelDown(line: "TUNNEL_DOWN"))
         await h.waitForStatus(.reconnecting(attempt: 1, maxAttempts: Self.maxAttempts))
         await h.elapseDelay()
         await h.waitForAttempts(2)
 
-        // Resume the attempt and yield exactly once: the loop's job was queued
-        // before ours, so it runs up to the commit's first actor hop
-        // (updateBaseSpeed) and suspends there; our continuation, queued before
-        // that hop completed, then runs the teardown inside that window.
+        // Park after the actor hop but before the epoch recheck and attach.
+        // A yield is not an ordering guarantee under a loaded full suite.
         let replacement = FakeSimulationBackend()
         h.attempter.succeedInFlight(with: replacement)
-        await Task.yield()
+        #expect(await eventually { gate.isEntered })
         await h.a.disconnect()
+        gate.release()
+        h.a.beforeMirrorAttachForTesting = nil
 
         #expect(h.a.connectionStatus == .disconnected)
         #expect(h.a.connectedUDID == nil)
@@ -769,6 +791,24 @@ struct DeviceSessionReconnectTests {
 @MainActor
 private func settle() async {
     for _ in 0..<100 { await Task.yield() }
+}
+
+@MainActor
+private final class PreAttachGate {
+    private var parked: CheckedContinuation<Void, Never>?
+    private(set) var isEntered = false
+
+    func pause() async {
+        await withCheckedContinuation { continuation in
+            parked = continuation
+            isEntered = true
+        }
+    }
+
+    func release() {
+        parked?.resume()
+        parked = nil
+    }
 }
 
 @MainActor

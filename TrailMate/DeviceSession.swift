@@ -65,6 +65,10 @@ final class DeviceSession: Identifiable {
     var isCalculatingRoute = false
 
     private var daemonBridge: (any SimulationBackend)?
+    // A started backend whose mirror attach is queued but not yet published.
+    // Teardown takes ownership of stopping it, so Disconnect cannot finish
+    // before that daemon quits even if commit resumes after the detach.
+    private var pendingBackend: (any SimulationBackend)?
     private var eventsTask: Task<Void, Never>?
     private var liveBackendID: ObjectIdentifier?
     // All sim mirror operations — attach on commit, detach + daemon stop on
@@ -77,11 +81,16 @@ final class DeviceSession: Identifiable {
     // unchanged, so a backend started for a session that was torn down
     // meanwhile is stopped instead of published.
     private var backendEpoch = 0
+    #if DEBUG
+    // Deterministically park a test commit after its first actor hop and
+    // before the final epoch check/attach. nil in the live app.
+    var beforeMirrorAttachForTesting: (@MainActor () async -> Void)?
+    #endif
 
     init(manager: AppState) {
         self.manager = manager
         self.simState = SimulationStateBridge(defaults: manager.defaults)
-        self.sim = SimulationActor(bridge: simState, monotonicTime: manager.monotonicTime)
+        self.sim = SimulationActor(bridge: simState, monotonicTime: manager.simulationMonotonicTime)
 
         // Consume simulation events (route abort) for log writes.
         let stream = sim.events
@@ -264,6 +273,9 @@ final class DeviceSession: Identifiable {
             return false
         }
         await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
+        #if DEBUG
+        await beforeMirrorAttachForTesting?()
+        #endif
         // A teardown during that hop already chained its detach; an attach
         // queued behind it would re-mirror a backend nobody owns. Recheck
         // here, in the same turn that queues the attach.
@@ -271,17 +283,17 @@ final class DeviceSession: Identifiable {
             await backend.stop()
             return false
         }
+        pendingBackend = backend
         await enqueueMirrorOperation { [sim] in
             await sim.attach(backend: backend)
         }.value
         guard backendEpoch == epoch else {
-            // The teardown chained its detach behind this attach; stop behind
-            // that detach too, so the mirror is gone before the daemon quits.
-            await enqueueMirrorOperation {
-                await backend.stop()
-            }.value
+            // Teardown took the pending backend into its detach/stop operation.
+            // Its caller waits for that operation; do not queue a late stop
+            // that a new Connect could overtake.
             return false
         }
+        pendingBackend = nil
         eventsTask?.cancel()
         daemonBridge = backend
         liveBackendID = ObjectIdentifier(backend)
@@ -314,9 +326,14 @@ final class DeviceSession: Identifiable {
     // tunnel.
     private func invalidateMirror(stopping bridge: (any SimulationBackend)?) {
         backendEpoch += 1
+        let pending = pendingBackend
+        pendingBackend = nil
         enqueueMirrorOperation { [sim] in
             await sim.detach()
             await bridge?.stop()
+            if let pending, bridge.map({ ObjectIdentifier($0) }) != ObjectIdentifier(pending) {
+                await pending.stop()
+            }
         }
     }
 

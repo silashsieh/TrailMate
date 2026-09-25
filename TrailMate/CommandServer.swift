@@ -21,9 +21,11 @@ import os
 //   - All mutable state is guarded by `lock`. stop() flips isRunning, closes the
 //     listen fd, and shutdown()s every live client fd so their read() loops wake.
 //
-// Every command hops to MainActor and calls appState.dispatch(), which routes
-// through the *same* session/AppState methods the GUI uses so every move passes
-// the SimulationActor.emit() chokepoint (noise + recording).
+// Every command hops to MainActor and calls the injected dispatcher — AppState
+// in the live app — whose dispatch() routes through the *same* session/AppState
+// methods the GUI uses so every move passes the SimulationActor.emit()
+// chokepoint (noise + recording). Tests inject a recording fake and a
+// temporary socket path, so the socket lifecycle is provable without sessions.
 // `nonisolated` is load-bearing: this project builds with default main-actor
 // isolation, so without it the class and its closures would be @MainActor and
 // trap at runtime when the accept/connection threads run off-main — e.g. the
@@ -31,8 +33,25 @@ import os
 // is a background-thread server; it only touches MainActor via explicit
 // `Task { @MainActor in }` hops (dispatch, addLog).
 nonisolated final class CommandServer: @unchecked Sendable {
-    private let appState: AppState
+    // Limits that are fixed in production but injectable for tests, so the
+    // oversized-line and dispatch-timeout paths can be proven without a 15 s
+    // real-time wait or a wedged tunnel.
+    nonisolated struct Configuration: Sendable {
+        // A legal command is well under 1 KiB; cap the per-connection read
+        // buffer so a client streaming newline-less bytes can't grow it without
+        // bound (OOM).
+        var maxLineBytes: Int = 64 * 1024
+        // Upper bound a connection thread waits for a dispatched command before
+        // it returns a timeout — a wedged tunnel (TUNNEL_DOWN) must not park it
+        // forever.
+        var dispatchTimeout: Duration = .seconds(15)
+
+        static let live = Configuration()
+    }
+
+    private let dispatcher: any CommandDispatching
     private let socketURL: URL
+    private let configuration: Configuration
     private let log = Logger(subsystem: "com.harry.trailmate", category: "CommandServer")
 
     // Guards all mutable state below. The lock — not a confining queue — is the
@@ -43,18 +62,42 @@ nonisolated final class CommandServer: @unchecked Sendable {
     private var listenFD: Int32 = -1
     private var socketPath: String?
     private var clientFDs: Set<Int32> = []
+    // Incremented by every start(). An accept loop belongs to exactly one epoch:
+    // after a rapid stop()/start(), a loop thread that had not yet reached
+    // accept() would otherwise see the *new* epoch as "running" and either
+    // serve it as a second accept loop or log a spurious failure when its
+    // closed fd number has been reused. Threads bound to a stale epoch exit
+    // silently instead.
+    private var epoch: UInt64 = 0
+    private var acceptLoops = 0
 
-    // A legal command is well under 1 KiB; cap the per-connection read buffer so
-    // a client streaming newline-less bytes can't grow it without bound (OOM).
-    private static let maxLineBytes = 64 * 1024
-    // Upper bound a connection thread waits for a dispatched command before it
-    // returns a timeout — a wedged tunnel (TUNNEL_DOWN) must not park it forever.
-    private static let dispatchTimeout: DispatchTimeInterval = .seconds(15)
-
-    init(appState: AppState, socketURL: URL = AppProcessConfiguration.current.runtimePaths.aiSocketURL) {
-        self.appState = appState
+    init(dispatcher: any CommandDispatching,
+         socketURL: URL,
+         configuration: Configuration = .live) {
+        self.dispatcher = dispatcher
         self.socketURL = socketURL.standardizedFileURL
+        self.configuration = configuration
     }
+
+    // The live composition: AppState is both the dispatcher and the log sink.
+    convenience init(appState: AppState, socketURL: URL = AppProcessConfiguration.current.runtimePaths.aiSocketURL) {
+        self.init(dispatcher: appState, socketURL: socketURL)
+    }
+
+    #if DEBUG
+    // Observability for the lifecycle tests: proves stop() actually retires
+    // the accept thread and that a closed peer is untracked (no fd leak),
+    // neither of which is visible from outside the process otherwise.
+    var acceptLoopCountForTesting: Int {
+        lock.lock(); defer { lock.unlock() }
+        return acceptLoops
+    }
+
+    var connectionCountForTesting: Int {
+        lock.lock(); defer { lock.unlock() }
+        return clientFDs.count
+    }
+    #endif
 
     // MARK: - Lifecycle
 
@@ -123,13 +166,16 @@ nonisolated final class CommandServer: @unchecked Sendable {
         listenFD = fd
         socketPath = path
         isRunning = true
+        epoch &+= 1
+        acceptLoops += 1
+        let loopEpoch = epoch
         lock.unlock()
 
         logEvent("AI control: listening at \(path)")
 
         // Dedicated thread for the blocking accept loop — see the type comment.
         let thread = Thread { [weak self] in
-            self?.acceptLoop(fd: fd)
+            self?.acceptLoop(fd: fd, epoch: loopEpoch)
         }
         thread.name = "com.harry.trailmate.CommandServer.accept"
         thread.start()
@@ -163,19 +209,20 @@ nonisolated final class CommandServer: @unchecked Sendable {
 
     // MARK: - Accept loop
 
-    private func acceptLoop(fd: Int32) {
-        while running() {
+    private func acceptLoop(fd: Int32, epoch loopEpoch: UInt64) {
+        defer { retireAcceptLoop() }
+        while running(epoch: loopEpoch) {
             let clientFD = accept(fd, nil, nil)
             if clientFD < 0 {
                 // accept() returns -1 when stop() closes the listening fd;
                 // that's the normal shutdown path, not an error.
-                if running() {
+                if running(epoch: loopEpoch) {
                     logEvent("AI control: accept() failed (errno \(errno)).")
                 }
                 return
             }
             // Reject the connection if we've stopped between accept() and now.
-            guard track(clientFD) else {
+            guard track(clientFD, epoch: loopEpoch) else {
                 close(clientFD)
                 return
             }
@@ -222,9 +269,9 @@ nonisolated final class CommandServer: @unchecked Sendable {
             // A client streaming bytes with no newline must not grow the buffer
             // without bound (local OOM). Past the cap, reject and drop the
             // connection — every legal command is far smaller.
-            if buffer.count > Self.maxLineBytes {
+            if buffer.count > configuration.maxLineBytes {
                 writeLine(CommandResponse.failure(code: "line_too_long",
-                    message: "command exceeds \(Self.maxLineBytes) bytes").line(), to: clientFD)
+                    message: "command exceeds \(configuration.maxLineBytes) bytes").line(), to: clientFD)
                 break
             }
         }
@@ -240,18 +287,18 @@ nonisolated final class CommandServer: @unchecked Sendable {
         case .failure(let error):
             return .failure(code: "parse_error", message: error.message)
         case .success(let command):
-            let appState = self.appState
+            let dispatcher = self.dispatcher
             let box = ResultBox()
             let semaphore = DispatchSemaphore(value: 0)
             Task { @MainActor in
-                let response = await appState.dispatch(command)
+                let response = await dispatcher.dispatch(command)
                 box.store(response)
                 semaphore.signal()
             }
             // Bounded wait: ROUTE/CLEAR await the daemon, and a wedged tunnel
             // (TUNNEL_DOWN is anticipated) could make that never return, parking
             // this connection thread forever. The late signal/store is harmless.
-            if semaphore.wait(timeout: .now() + Self.dispatchTimeout) == .timedOut {
+            if semaphore.wait(timeout: .now() + Self.dispatchInterval(configuration.dispatchTimeout)) == .timedOut {
                 return .failure(code: "timeout", message: "command timed out")
             }
             return box.take() ?? .failure(code: "internal_error", message: "dispatch produced no response")
@@ -265,14 +312,38 @@ nonisolated final class CommandServer: @unchecked Sendable {
         return isRunning
     }
 
+    // True only while the epoch that spawned the caller is the live one, so a
+    // loop or connection from before a stop()/start() pair never mistakes the
+    // restarted server for its own.
+    private func running(epoch: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return isRunning && self.epoch == epoch
+    }
+
     // Registers a client fd for shutdown-on-stop. Returns false (caller closes
     // the fd) if we've already stopped, so a connection accepted during the
     // teardown window is dropped cleanly.
-    private func track(_ fd: Int32) -> Bool {
+    private func track(_ fd: Int32, epoch: UInt64) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard isRunning else { return false }
+        guard isRunning, self.epoch == epoch else { return false }
         clientFDs.insert(fd)
         return true
+    }
+
+    private func retireAcceptLoop() {
+        lock.lock(); defer { lock.unlock() }
+        acceptLoops -= 1
+    }
+
+    // DispatchSemaphore only speaks DispatchTimeInterval; clamp so an absurd
+    // Duration can't overflow the nanosecond conversion.
+    private static func dispatchInterval(_ duration: Duration) -> DispatchTimeInterval {
+        let (seconds, attoseconds) = duration.components
+        let nanoseconds = seconds.multipliedReportingOverflow(by: 1_000_000_000)
+        guard !nanoseconds.overflow else { return .never }
+        let total = nanoseconds.partialValue.addingReportingOverflow(attoseconds / 1_000_000_000)
+        guard !total.overflow else { return .never }
+        return .nanoseconds(Int(clamping: total.partialValue))
     }
 
     // The sole closer of a client fd. Closes only if the fd is still tracked, so
@@ -307,10 +378,22 @@ nonisolated final class CommandServer: @unchecked Sendable {
 
     private func logEvent(_ message: String) {
         log.info("\(message, privacy: .public)")
-        let appState = self.appState
-        Task { @MainActor in appState.addLog(message) }
+        let dispatcher = self.dispatcher
+        Task { @MainActor in dispatcher.addLog(message) }
     }
 }
+
+// The MainActor facade the socket drives: one call per parsed command plus
+// the log sink for lifecycle events. AppState is the live implementation; the
+// conformance lives here so the seam is owned by the socket layer and AppState
+// itself needs no change. Sendable so the existential can cross from the
+// connection threads into the MainActor hops.
+@MainActor protocol CommandDispatching: AnyObject, Sendable {
+    func dispatch(_ command: Command) async -> CommandResponse
+    func addLog(_ message: String)
+}
+
+extension AppState: CommandDispatching {}
 
 // One-shot box handing the dispatch result from the MainActor Task back to the
 // blocked connection thread. The semaphore establishes the happens-before edge

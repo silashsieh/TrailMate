@@ -61,6 +61,10 @@ private struct SidebarView: View {
                     Button("Disconnect") {
                         Task { await appState.disconnect() }
                     }
+                } else if appState.connectionStatus.isRecovering {
+                    // Auto-reconnect (epic 043): the same action surface, now
+                    // reading Cancel retry with the attempt shown beside it.
+                    ReconnectControls()
                 } else {
                     DevicePickerArea()
                     ConnectionButton()
@@ -1520,6 +1524,37 @@ private struct ConnectionButton: View {
     }
 }
 
+// The action surface while auto-reconnect is running (epic 043). The attempt
+// count sits beside the control, so the user reaching to stop it sees which
+// attempt is running, and the button always names what pressing it will do:
+// Cancel retry while attempts are being scheduled, a disabled Cancelling…
+// while an already-running attempt is allowed to finish.
+private struct ReconnectControls: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        let status = appState.connectionStatus
+        let cancelling = status == .cancellingRetry
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(verbatim: status.recoveryText ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("connection.reconnectStatus")
+            }
+            Button {
+                appState.cancelRetry()
+            } label: {
+                Text(cancelling ? "Cancelling…" : "Cancel retry")
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(cancelling)
+            .accessibilityIdentifier("connection.cancelRetry")
+        }
+    }
+}
+
 // One row in the device switcher. Tap selects which device the control surface
 // and map planning target; a color swatch ties the row to that device's marker
 // and route on the map. Context menu disconnects this specific session or
@@ -1584,6 +1619,8 @@ private struct DeviceSwitcherRow: View {
                 : String(localized: "Disconnected")
         case .connecting: return String(localized: "Connecting…")
         case .connected: return String(localized: "Connected")
+        case .reconnecting, .cancellingRetry:
+            return session.connectionStatus.recoveryText ?? ""
         case .error(let message): return String(localized: "Error: \(message)")
         }
     }
@@ -2159,6 +2196,8 @@ private struct MapArea: View {
         switch appState.connectionStatus {
         case .connecting:
             return String(localized: "Connecting…")
+        case .reconnecting, .cancellingRetry:
+            return appState.connectionStatus.recoveryText ?? ""
         case .error:
             return String(localized: "Connection error — check sidebar")
         case .connected, .disconnected:

@@ -62,6 +62,9 @@ struct MenuBarStatusView: View {
         case .disconnected: connection = String(localized: "Disconnected")
         case .connecting: connection = String(localized: "Connecting…")
         case .connected: connection = String(localized: "Connected")
+        case .reconnecting, .cancellingRetry:
+            // Auto-reconnect (epic 043): same attempt wording as the sidebar.
+            connection = appState.connectionStatus.recoveryText ?? ""
         case .error(let message): connection = String(localized: "Error: \(message)")
         }
 

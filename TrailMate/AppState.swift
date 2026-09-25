@@ -6,9 +6,37 @@ enum ConnectionStatus: Equatable {
     case disconnected
     case connecting
     case connected
+    // Automatic recovery window (epic 043): `attempt` is the numbered attempt
+    // being waited for or run, so "Reconnecting… 3/10" reads straight off it.
+    case reconnecting(attempt: Int, maxAttempts: Int)
+    // Cancel retry pressed while an attempt was in flight; settles once that
+    // attempt finishes on its own.
+    case cancellingRetry
     case error(String)
 
     var isConnected: Bool { self == .connected }
+
+    // True while automatic recovery owns the session's connection controls.
+    var isRecovering: Bool {
+        switch self {
+        case .reconnecting, .cancellingRetry: true
+        default: false
+        }
+    }
+
+    // Localized wording for the recovery states, shared by the sidebar row,
+    // the action surface, the map hint, and the menu bar so every surface
+    // agrees on the attempt number. Nil for every other state.
+    var recoveryText: String? {
+        switch self {
+        case .reconnecting(let attempt, let maxAttempts):
+            String(localized: "Reconnecting… \(attempt)/\(maxAttempts)")
+        case .cancellingRetry:
+            String(localized: "Cancelling…")
+        default:
+            nil
+        }
+    }
 }
 
 enum TransportMode: String, CaseIterable {
@@ -155,6 +183,17 @@ final class AppState {
         }
     }
 
+    // Auto-reconnect (epic 043). On by default; off reproduces the manual
+    // reconnect behavior for users who prefer to press Connect themselves. Each
+    // session reads it at the moment a loss or wake would start recovery.
+    var autoReconnectEnabled: Bool {
+        didSet {
+            guard autoReconnectEnabled != oldValue else { return }
+            defaults.set(autoReconnectEnabled, forKey: Self.autoReconnectEnabledKey)
+        }
+    }
+    nonisolated static let autoReconnectEnabledKey = "autoReconnectEnabled"
+
     // MARK: App-global services & libraries
 
     let discovery = DeviceDiscoveryService()
@@ -162,6 +201,10 @@ final class AppState {
     // devices, one auth prompt per session. Sessions resolve their RSD endpoint
     // through it on connect; torn down only at app quit.
     let tunnelBroker: TunnelBroker
+    // One tunnel/daemon attempt at a time, for every session (epic 043). The
+    // live one wraps the shared broker + a DaemonBridge; tests inject a fake so
+    // retry timing is provable with no tunnel, daemon, or admin prompt.
+    let connectionAttempter: any DeviceConnectionAttempter
     let recordingsLibrary: RecordingsLibrary
     let savedRoutes: SavedRoutesStore
     let savedWaypointsStore: SavedWaypointsStore
@@ -210,17 +253,26 @@ final class AppState {
     init(
         defaults: UserDefaults = AppProcessConfiguration.current.defaults,
         runtimePaths: AppRuntimePaths = AppProcessConfiguration.current.runtimePaths,
-        monotonicTime: MonotonicTimeSource = .continuous
+        monotonicTime: MonotonicTimeSource = .continuous,
+        connectionAttempter: (any DeviceConnectionAttempter)? = nil
     ) {
         self.defaults = defaults
         self.runtimePaths = runtimePaths
         self.monotonicTime = monotonicTime
-        self.tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
+        let tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
+        self.tunnelBroker = tunnelBroker
+        self.connectionAttempter = connectionAttempter
+            ?? (LiveDeviceConnectionAttempter(tunnelBroker: tunnelBroker) as any DeviceConnectionAttempter)
         self.recordingsLibrary = RecordingsLibrary(baseURL: runtimePaths.recordingsDirectory)
         self.savedRoutes = SavedRoutesStore(baseURL: runtimePaths.savedRoutesDirectory)
         self.savedWaypointsStore = SavedWaypointsStore(defaults: defaults)
         self.restoreLastSimulatedLocation = SimulatedPositionPersistence.restoreOnLaunch(in: defaults)
         self.aiControlEnabled = defaults.bool(forKey: "aiControlEnabled")
+        // Absent key = on: the policy is the default, and a never-written
+        // UserDefaults.bool would silently read as off.
+        self.autoReconnectEnabled = defaults.object(forKey: Self.autoReconnectEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.autoReconnectEnabledKey)
 
         // Build the first (unbound) session before anything reads selectedSession
         // or the tuning didSets fan out. selectedSessionID isn't Optional, so it
@@ -247,8 +299,10 @@ final class AppState {
         Task { await first.sim.updateNoiseSigma(initialSigma) }
 
         // System sleep tears down the DVT session unconditionally (Apple's
-        // design — see v2-features.md). Drop every connection cleanly so the
-        // UI doesn't claim any device is still connected after wake.
+        // design). Release every connection cleanly so the UI doesn't claim any
+        // device is still connected after wake; an armed session then recovers
+        // on wake under the same auto-reconnect policy as any other drop
+        // (epic 043).
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
@@ -258,6 +312,18 @@ final class AppState {
                 guard let self else { return }
                 for s in self.sessions {
                     await s.handleSystemSleep()
+                }
+            }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                for s in self.sessions {
+                    s.handleSystemWake()
                 }
             }
         }
@@ -437,6 +503,8 @@ final class AppState {
         await selectedSession.disconnect()
         syncActiveJoystick()
     }
+    // Cancel retry on the selected session's recovery window (epic 043).
+    func cancelRetry() { selectedSession.cancelRetry() }
 
     // Quit cleanup: stop the AI command socket (unlinks ai.sock) before the
     // device disconnects, so a leftover socket node isn't left behind at quit.
@@ -730,6 +798,7 @@ final class AppState {
         var fields: [String: JSONValue] = ["state": .string(connectionStateString(session.connectionStatus))]
         if let udid = session.connectedUDID ?? session.selectedDeviceUDID { fields["udid"] = .string(udid) }
         if case .error(let message) = session.connectionStatus { fields["error"] = .string(message) }
+        addRecoveryFields(&fields, for: session.connectionStatus)
         return .object(fields)
     }
 
@@ -738,7 +807,18 @@ final class AppState {
         case .disconnected: return "disconnected"
         case .connecting: return "connecting"
         case .connected: return "connected"
+        case .reconnecting: return "reconnecting"
+        case .cancellingRetry: return "cancelling"
         case .error: return "error"
+        }
+    }
+
+    // While auto-reconnect is running, an agent polling STATUS can see which
+    // numbered attempt is pending, mirroring the sidebar's "n/10".
+    private func addRecoveryFields(_ fields: inout [String: JSONValue], for status: ConnectionStatus) {
+        if case .reconnecting(let attempt, let maxAttempts) = status {
+            fields["attempt"] = .int(attempt)
+            fields["maxAttempts"] = .int(maxAttempts)
         }
     }
 
@@ -762,6 +842,7 @@ final class AppState {
         if let slot {
             fields["state"] = .string(connectionStateString(slot.connectionStatus))
             if case .error(let message) = slot.connectionStatus { fields["error"] = .string(message) }
+            addRecoveryFields(&fields, for: slot.connectionStatus)
         }
         if isConnected, let slot {
             let s = slot.simState

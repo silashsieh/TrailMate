@@ -104,8 +104,44 @@ final class DeviceSession: Identifiable {
 
     // MARK: - Connection
 
+    // Auto-reconnect policy (epic 043): a fixed post-failure delay before each
+    // of at most ten single attempts. Attempt runtime is not part of the delay,
+    // so this is a cadence, not a fixed wall-clock window.
+    static let autoReconnectMaxAttempts = 10
+    static let autoReconnectDelay: Duration = .seconds(5)
+
+    // Explicit Connect keeps its own startup policy: a freshly added device's
+    // tunnel can still be rotating its RSD endpoint, so a failed daemon start is
+    // retried a few times before the user is told it failed.
+    private static let startupMaxAttempts = 3
+    private static let startupRetryDelay: Duration = .seconds(3)
+
+    // Armed by a successful explicit Connect; disarmed by explicit Disconnect,
+    // Cancel retry, exhaustion, or a recovery that would need a new admin
+    // prompt. Only an armed session recovers a connection it loses on its own.
+    private(set) var autoReconnectArmed = false
+
+    private enum RecoveryPhase: Equatable {
+        case idle
+        case delaying(attempt: Int)
+        case attempting(attempt: Int)
+        case cancelling(attempt: Int)
+    }
+    private var recoveryPhase: RecoveryPhase = .idle
+    // Identity of the running recovery window. Every await in the loop
+    // re-checks it, so a window abandoned by disconnect, removal, or sleep can
+    // neither commit a late backend nor overwrite the settled status.
+    private var recoveryID: UUID?
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryUDID: String?
+    private var lastRecoveryFailureReason = ""
+    // The device to recover on wake, set at sleep for an armed, enabled session.
+    private var wakeRecoveryUDID: String?
+
     func connect() async {
-        guard connectionStatus != .connecting else { return }
+        // A recovery window owns the connection controls until it settles; the
+        // explicit path only starts from a settled state.
+        guard connectionStatus != .connecting, !connectionStatus.isRecovering else { return }
         // A prior failure's detach/stop must finish before a replacement
         // backend can attach; otherwise the old cleanup could detach it.
         await failedBackendCleanupTask?.value
@@ -123,14 +159,9 @@ final class DeviceSession: Identifiable {
         // UI-test mock: skip the tunnel (admin prompt) and daemon entirely so
         // connected-only UI flows are testable with no device.
         if UITestSupport.mockConnection {
-            let backend = MockSimulationBackend()
-            daemonBridge = backend
-            liveBackendID = ObjectIdentifier(backend)
-            connectionStatus = .connected
-            connectedUDID = udid
+            await commitLiveBackend(MockSimulationBackend(), udid: udid)
+            autoReconnectArmed = true
             manager.addLog("Connected (mock backend — UI test).")
-            await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
-            await sim.attach(backend: backend)
             // Joystick arming is centralized in AppState.syncActiveJoystick()
             // (selected device only); every connect path calls it after.
             return
@@ -138,88 +169,84 @@ final class DeviceSession: Identifiable {
         #endif
 
         manager.sweepStaleDaemonsIfNeeded()
-
         connectionStatus = .connecting
-        manager.addLog("Authenticating tunnel broker for device …\(udid.suffix(8))")
-        do {
-            // Shared broker: ensureRunning() prompts once per session (idempotent
-            // thereafter).
-            try await manager.tunnelBroker.ensureRunning()
-        } catch {
-            connectionStatus = .error(error.localizedDescription)
-            manager.addLog("Tunnel failed: \(error.localizedDescription)")
-            return
-        }
 
-        // Connect with retry. When a second device is freshly added, tunneld is
-        // still settling its tunnel and keeps reassigning the device's RSD
-        // address+port (they're ephemeral). A daemon spawned against an address
-        // that then rotates wedges at the DVT handshake. So each attempt
-        // re-queries a *settled* endpoint (rsdEndpoint waits for stability), and
-        // on failure we fully release the (possibly wedged) daemon — freeing the
-        // device's DVT session so it can't block the next try — then pause to let
-        // tunneld settle and the device reclaim the session before retrying.
-        let maxAttempts = 3
-        var lastError: Error?
-        for attempt in 1...maxAttempts {
-            let info: TunnelBroker.TunnelInfo
+        // Startup retry: each try is one connectOnce, re-querying a settled
+        // endpoint and fully releasing a wedged daemon on failure so it can't
+        // block the next try, then pausing to let tunneld settle.
+        var lastError: (any Error)?
+        for attempt in 1...Self.startupMaxAttempts {
             do {
-                info = try await manager.tunnelBroker.rsdEndpoint(udid: udid)
-            } catch {
-                // No tunnel for this device at all — not a transient; stop.
-                connectionStatus = .error(error.localizedDescription)
-                manager.addLog("Tunnel failed: \(error.localizedDescription)")
-                return
-            }
-            rsdAddress = info.address
-            rsdPort = String(info.port)
-            let suffix = attempt > 1 ? " (attempt \(attempt)/\(maxAttempts))" : ""
-            manager.addLog("Connecting to [\(rsdAddress)]:\(rsdPort)…\(suffix)")
-
-            let bridge = DaemonBridge()
-            do {
-                try await bridge.start(rsdAddress: rsdAddress, rsdPort: rsdPort)
-                // Success — commit this bridge as the live one.
-                eventsTask?.cancel()
-                daemonBridge = bridge
-                liveBackendID = ObjectIdentifier(bridge)
-                connectionStatus = .connected
-                connectedUDID = udid
+                let backend = try await connectOnce(udid: udid, promptPolicy: .allowPrompt)
+                await commitLiveBackend(backend, udid: udid)
+                // An explicit Connect arms recovery for everything the app
+                // loses on its own from here until an explicit Disconnect.
+                autoReconnectArmed = true
                 manager.addLog("Connected — ready for commands.")
-                await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
-                await sim.attach(backend: bridge)
-                // Subscribe only after the live backend is attached. The
-                // stream buffers any loss since READY, so an immediate exit
-                // cannot be discarded while the session is still connecting.
-                eventsTask = makeEventsTask(for: bridge)
-                // Joystick arming is centralized in AppState.syncActiveJoystick()
-                // (selected device only); every connect path calls it after.
                 if simState.simulatedCoordinate == nil {
                     manager.addLog("Long-press the map to set a starting location")
                 }
                 return
-            } catch {
-                lastError = error
-                // start() already terminates+SIGKILLs the daemon on failure;
-                // stop() is a no-op then but harmless, and covers any path that
-                // left the process alive. Releases the device's DVT session.
-                await bridge.stop()
-                manager.addLog("Connect attempt \(attempt) failed: \(error.localizedDescription)")
-                if attempt < maxAttempts {
-                    // Let tunneld finish settling and the device reclaim its DVT
-                    // session before re-querying a fresh endpoint.
-                    try? await Task.sleep(for: .seconds(3))
+            } catch ConnectionAttemptFailure.daemonStartFailed(let underlying) {
+                lastError = underlying
+                manager.addLog("Connect attempt \(attempt) failed: \(underlying.localizedDescription)")
+                if attempt < Self.startupMaxAttempts {
+                    try? await manager.monotonicTime.sleep(for: Self.startupRetryDelay)
                 }
+            } catch {
+                // No tunnel for this device, or authorization declined — not a
+                // transient; stop.
+                connectionStatus = .error(error.localizedDescription)
+                manager.addLog("Tunnel failed: \(error.localizedDescription)")
+                return
             }
         }
 
         connectionStatus = .error(lastError?.localizedDescription ?? "Connection failed")
-        manager.addLog("Connection failed after \(maxAttempts) attempts.")
-        daemonBridge = nil
+        manager.addLog("Connection failed after \(Self.startupMaxAttempts) attempts.")
         // Leave the broker running — it's shared across devices.
     }
 
-    func disconnect() async {
+    // Exactly one tunnel/daemon attempt for `udid`, returning the started
+    // backend for the caller to commit. This is the primitive both policies
+    // wrap — explicit Connect's startup loop and every numbered auto-reconnect
+    // attempt — so a displayed "n/10" always maps to one daemon/tunnel try.
+    // `promptPolicy` decides whether the broker may raise the admin dialog;
+    // automatic recovery never allows it.
+    private func connectOnce(
+        udid: String,
+        promptPolicy: ConnectionPromptPolicy
+    ) async throws -> any SimulationBackend {
+        try await manager.connectionAttempter.attempt(
+            udid: udid,
+            promptPolicy: promptPolicy,
+            log: { manager.addLog($0) }
+        )
+    }
+
+    // Make a started backend the live one: attach the sim's device mirror and
+    // subscribe to its loss events. The same commit for explicit connects,
+    // reconnects, and the UI-test mock, so the session keeps one actor and one
+    // recording capture across every reconnect.
+    private func commitLiveBackend(_ backend: any SimulationBackend, udid: String) async {
+        eventsTask?.cancel()
+        daemonBridge = backend
+        liveBackendID = ObjectIdentifier(backend)
+        connectionStatus = .connected
+        connectedUDID = udid
+        await sim.updateBaseSpeed(manager.effectiveBaseSpeedMPS)
+        await sim.attach(backend: backend)
+        // Subscribe only after the live backend is attached. The stream buffers
+        // any loss since READY, so an immediate exit cannot be discarded while
+        // the session is still connecting.
+        eventsTask = makeEventsTask(for: backend)
+    }
+
+    // Drop the device mirror: stop listening, detach the sim, stop the daemon.
+    // Leaves the shared broker up (other devices use it, and a live tunnel is
+    // what keeps reconnects promptless) and the local engine + recording
+    // running. The daemon's QUIT/CLEAR runs over the still-live tunnel.
+    private func releaseBackend() async {
         eventsTask?.cancel()
         eventsTask = nil
         liveBackendID = nil
@@ -230,13 +257,156 @@ final class DeviceSession: Identifiable {
             await bridge.stop()
         }
         daemonBridge = nil
+        connectedUDID = nil
+    }
+
+    func disconnect() async {
+        // An explicit Disconnect is the user's decision: it ends the armed
+        // window, abandons any recovery in progress, and never reconnects.
+        autoReconnectArmed = false
+        wakeRecoveryUDID = nil
+        abandonRecovery()
+        await releaseBackend()
         // Don't stop the broker — it's app-global (other devices may use it, and
         // keeping it up makes reconnect promptless). It's torn down at app quit
-        // (AppState.prepareForQuit). The daemon's QUIT/CLEAR ran above over the
-        // still-live tunnel.
+        // (AppState.prepareForQuit).
         connectionStatus = .disconnected
-        connectedUDID = nil
         manager.addLog("Disconnected.")
+    }
+
+    // MARK: - Auto-reconnect (epic 043)
+
+    // Cancel retry: stop scheduling attempts and disarm the session. During a
+    // delay it settles immediately; during an in-flight attempt it lets only
+    // that attempt finish — the control reads a disabled "Cancelling…" until
+    // then — and schedules neither a delay nor another attempt afterward.
+    func cancelRetry() {
+        guard recoveryID != nil else { return }
+        autoReconnectArmed = false
+        switch recoveryPhase {
+        case .delaying:
+            recoveryTask?.cancel()
+            finishRecovery(reason: lastRecoveryFailureReason, log: "Reconnect cancelled.")
+        case .attempting(let attempt):
+            recoveryPhase = .cancelling(attempt: attempt)
+            connectionStatus = .cancellingRetry
+            manager.addLog("Cancelling reconnect — letting attempt \(attempt) finish.")
+        case .cancelling, .idle:
+            break
+        }
+    }
+
+    private func beginRecovery(udid: String, reason: String) {
+        let id = UUID()
+        recoveryID = id
+        recoveryUDID = udid
+        lastRecoveryFailureReason = reason
+        recoveryPhase = .delaying(attempt: 1)
+        connectionStatus = .reconnecting(attempt: 1, maxAttempts: Self.autoReconnectMaxAttempts)
+        manager.addLog("Reconnecting in \(Self.autoReconnectDelay.components.seconds) s (attempt 1/\(Self.autoReconnectMaxAttempts))…")
+        recoveryTask = Task { [weak self] in
+            await self?.runRecovery(id: id)
+        }
+    }
+
+    // The retry loop. Runs on MainActor like the rest of the session, so every
+    // state transition below is ordered against Cancel retry, Disconnect, and
+    // sleep; the awaits are the only places another actor can interleave.
+    private func runRecovery(id: UUID) async {
+        let maxAttempts = Self.autoReconnectMaxAttempts
+        var attempt = 1
+        while attempt <= maxAttempts {
+            // The five seconds are a post-failure delay: after the triggering
+            // loss before attempt 1, and after each failed attempt before the
+            // next. Cancel retry during a delay cancels this sleep outright.
+            do {
+                try await manager.monotonicTime.sleep(for: Self.autoReconnectDelay)
+            } catch {
+                return
+            }
+            guard recoveryID == id, let udid = recoveryUDID else { return }
+            await failedBackendCleanupTask?.value
+            failedBackendCleanupTask = nil
+            guard recoveryID == id else { return }
+
+            recoveryPhase = .attempting(attempt: attempt)
+            manager.addLog("Reconnect attempt \(attempt)/\(maxAttempts)…")
+            do {
+                let backend = try await connectOnce(udid: udid, promptPolicy: .neverPrompt)
+                guard recoveryID == id else {
+                    // Abandoned (disconnect, removal, or sleep) while in flight.
+                    await backend.stop()
+                    return
+                }
+                let cancelledMeanwhile = recoveryPhase == .cancelling(attempt: attempt)
+                await commitLiveBackend(backend, udid: udid)
+                guard recoveryID == id else { return }
+                clearRecovery()
+                if cancelledMeanwhile {
+                    // Cancel was a deliberate disarm; honoring it does not mean
+                    // throwing away a connection that landed anyway.
+                    manager.addLog("Reconnected on attempt \(attempt)/\(maxAttempts) — retry was cancelled, so auto-reconnect stays off until the next Connect.")
+                } else {
+                    manager.addLog("Reconnected on attempt \(attempt)/\(maxAttempts).")
+                }
+                manager.syncActiveJoystick()
+                return
+            } catch ConnectionAttemptFailure.authorizationRequired {
+                guard recoveryID == id else { return }
+                finishRecovery(
+                    reason: ConnectionAttemptFailure.authorizationRequired.localizedDescription,
+                    log: "Reconnect needs admin access — press Connect to authorize."
+                )
+                return
+            } catch {
+                guard recoveryID == id else { return }
+                let reason = error.localizedDescription
+                lastRecoveryFailureReason = reason
+                manager.addLog("Reconnect attempt \(attempt)/\(maxAttempts) failed: \(reason)")
+                if case .cancelling = recoveryPhase {
+                    finishRecovery(reason: reason, log: "Reconnect cancelled.")
+                    return
+                }
+                if attempt == maxAttempts {
+                    // Exhaustion is not an error state of its own: it lands in
+                    // the ordinary disconnected state, no final delay.
+                    finishRecovery(reason: reason, log: "Reconnect gave up after \(maxAttempts) attempts — press Connect to try again.")
+                    return
+                }
+                attempt += 1
+                recoveryPhase = .delaying(attempt: attempt)
+                connectionStatus = .reconnecting(attempt: attempt, maxAttempts: maxAttempts)
+            }
+        }
+    }
+
+    // Settle a recovery window into the ordinary disconnected state with the
+    // most recent failure as the reason. Connect works out of it like any
+    // other failure.
+    private func finishRecovery(reason: String, log: String) {
+        clearRecovery()
+        autoReconnectArmed = false
+        connectionStatus = .error(reason)
+        manager.addLog(log)
+    }
+
+    // Drop the recovery window without settling it as a failure. A delay is
+    // cancelled outright; an in-flight attempt is never cancelled (the live
+    // tunnel query and daemon start are not cancellation-safe) — it settles on
+    // its own and the stale id discards whatever it produced.
+    private func abandonRecovery() {
+        guard recoveryID != nil else { return }
+        if case .delaying = recoveryPhase {
+            recoveryTask?.cancel()
+        }
+        clearRecovery()
+    }
+
+    private func clearRecovery() {
+        recoveryID = nil
+        recoveryTask = nil
+        recoveryPhase = .idle
+        recoveryUDID = nil
     }
 
     // MARK: - Joystick arming (centralized: selected device only)
@@ -702,10 +872,35 @@ final class DeviceSession: Identifiable {
 
     // MARK: - System sleep
 
+    // Sleep is an app-initiated drop, not an intentional Disconnect: the DVT
+    // session cannot survive it, so the backend is released cleanly, but the
+    // armed window stays open and wake runs the same recovery policy.
     func handleSystemSleep() async {
-        guard daemonBridge != nil else { return }
-        manager.addLog("Pausing — system sleeping (DVT session would drop)")
-        await disconnect()
+        let resumeUDID = (autoReconnectArmed && manager.autoReconnectEnabled)
+            ? (connectedUDID ?? recoveryUDID ?? selectedDeviceUDID)
+            : nil
+        if daemonBridge != nil {
+            manager.addLog("Pausing — system sleeping (DVT session would drop)")
+            await releaseBackend()
+            connectionStatus = .disconnected
+            manager.addLog("Disconnected.")
+            wakeRecoveryUDID = resumeUDID
+        } else if recoveryID != nil {
+            // A window interrupted by sleep is stale on wake (tunneld reassigns
+            // every endpoint), so wake starts a fresh ten instead of resuming.
+            abandonRecovery()
+            connectionStatus = .disconnected
+            manager.addLog("Reconnect paused — system sleeping")
+            wakeRecoveryUDID = resumeUDID
+        }
+    }
+
+    func handleSystemWake() {
+        guard let udid = wakeRecoveryUDID else { return }
+        wakeRecoveryUDID = nil
+        guard autoReconnectArmed, manager.autoReconnectEnabled, !udid.isEmpty else { return }
+        manager.addLog("System woke — reconnecting")
+        beginRecovery(udid: udid, reason: "Disconnected during sleep")
     }
 
     // MARK: - Private
@@ -728,7 +923,6 @@ final class DeviceSession: Identifiable {
 
     // First failure for the currently attached backend wins. Stale or racing
     // callbacks cannot tear down a replacement backend or overwrite its reason.
-    // Retry policy is deliberately absent; epic 043 consumes this stable loss.
     private func handleConnectionLoss(
         _ failure: SimulationBackendFailure,
         backendID: ObjectIdentifier
@@ -739,6 +933,7 @@ final class DeviceSession: Identifiable {
         liveBackendID = nil
         let failedBridge = daemonBridge
         daemonBridge = nil
+        let lostUDID = connectedUDID
         connectedUDID = nil
         // Detach this device's sim; leave the shared broker up (tunneld may
         // re-establish the tunnel, and other devices still need it). Stopping
@@ -747,7 +942,15 @@ final class DeviceSession: Identifiable {
             await sim.detach()
             await failedBridge?.stop()
         }
-        connectionStatus = .error(failure.statusMessage)
+        // Recovery policy (epic 043): an armed session recovers a loss it did
+        // not choose while the Settings policy allows it; otherwise this is the
+        // plain manual-reconnect state. The toggle is read here, at the moment
+        // recovery would start, not re-read mid-window.
+        if autoReconnectArmed, manager.autoReconnectEnabled, let udid = lostUDID ?? selectedDeviceUDID {
+            beginRecovery(udid: udid, reason: failure.statusMessage)
+        } else {
+            connectionStatus = .error(failure.statusMessage)
+        }
     }
 
     // MARK: - Routing
@@ -807,10 +1010,13 @@ extension DeviceSession {
     }
 
     // Unit-test connection seam: attach an injected backend through the same
-    // event-consumption and actor path as a successful daemon launch.
+    // event-consumption and actor path as a successful daemon launch. Unarmed
+    // by default so pipe-failure tests see the manual-reconnect state;
+    // `armAutoReconnect` stands in for the explicit Connect that arms recovery.
     func bindConnectedForTesting(
         udid: String,
-        backend: any SimulationBackend
+        backend: any SimulationBackend,
+        armAutoReconnect: Bool = false
     ) async {
         await failedBackendCleanupTask?.value
         failedBackendCleanupTask = nil
@@ -820,6 +1026,7 @@ extension DeviceSession {
         liveBackendID = ObjectIdentifier(backend)
         eventsTask?.cancel()
         connectionStatus = .connected
+        autoReconnectArmed = armAutoReconnect
         await sim.attach(backend: backend)
         eventsTask = makeEventsTask(for: backend)
     }

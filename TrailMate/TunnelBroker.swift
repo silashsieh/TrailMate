@@ -37,7 +37,9 @@ final class TunnelBroker {
     static let port = 49151
 
     private var controlFile: URL?
-    private var isRunning = false
+    // Readable so a promptless reconnect can check for a live tunnel without
+    // launching one (epic 043); only ensureRunning()/stop() write it.
+    private(set) var isRunning = false
     let controlDirectory: URL
 
     init(controlDirectory: URL = AppProcessConfiguration.current.runtimePaths.tunnelControlDirectory) {

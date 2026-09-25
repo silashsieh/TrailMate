@@ -58,37 +58,37 @@ Disconnect never reconnects, and a re-authorization is never forced silently.
 
 ## Stories
 
-- [ ] Arm on explicit Connect; disarm on explicit Disconnect or Cancel retry. Only intentional
+- [x] Arm on explicit Connect; disarm on explicit Disconnect or Cancel retry. Only intentional
       user actions suppress an armed retry — every app-observed loss inside that window retries
       while the Settings policy is enabled.
-- [ ] Retry policy: **10 attempts, each after a fixed 5 s post-failure delay**, then stop and settle
+- [x] Retry policy: **10 attempts, each after a fixed 5 s post-failure delay**, then stop and settle
       into the disconnected state — never retry forever at a device that is powered off or unplugged.
       The first delay starts when the abnormal drop is observed; later delays start only after the
       preceding attempt has failed, so attempts never overlap and attempt runtime does not consume
       the five seconds. Attempt 10 fails directly to disconnected with no final delay. The attempt
       counter resets after any successful reconnect, so a later drop gets a fresh 10.
-- [ ] Split the existing connection machinery into a single-attempt primitive and its callers'
+- [x] Split the existing connection machinery into a single-attempt primitive and its callers'
       policies. Explicit Connect may retain its current startup retry behavior; auto-reconnect must
       invoke exactly one prompt-free connection attempt per numbered retry and must not nest the
       existing three-attempt loop.
-- [ ] Surface the *reconnecting* state in **both** places: the status string (sidebar row
+- [x] Surface the *reconnecting* state in **both** places: the status string (sidebar row
       `statusText`, `ContentView.swift:1545`, and the menu-bar item, `MenuBarStatusView.swift`)
       **and** beside the Connect/Disconnect control (`ContentView.swift:60`), including which
       attempt is running (e.g. "Reconnecting… 3/10").
-- [ ] While retrying, the Connect/Disconnect button becomes **Cancel retry**. Clicking it stops
+- [x] While retrying, the Connect/Disconnect button becomes **Cancel retry**. Clicking it stops
       scheduling further attempts and disarms auto-reconnect for the session; an attempt already
       in flight is *not* force-killed — it is allowed to run to its timeout, after which the
       device settles into the ordinary disconnected state and the button returns to Connect.
-- [ ] Cancellation during the five-second delay settles immediately and prevents the pending
+- [x] Cancellation during the five-second delay settles immediately and prevents the pending
       attempt. Cancellation during an in-flight attempt follows the graceful wind-down above; when
       that attempt fails or times out, no five-second delay and no subsequent attempt are scheduled.
-- [ ] During that wind-down the button reads **"Cancelling…"** and is disabled, so the control
+- [x] During that wind-down the button reads **"Cancelling…"** and is disabled, so the control
       never claims an action it is no longer offering.
-- [ ] Once the attempts are exhausted (or cancelled), show the ordinary disconnected state with
+- [x] Once the attempts are exhausted (or cancelled), show the ordinary disconnected state with
       the reason.
-- [ ] Skip silently when re-authorization would be needed: prompt the user instead of popping an
+- [x] Skip silently when re-authorization would be needed: prompt the user instead of popping an
       admin dialog on its own.
-- [ ] Sub-case — wake from sleep runs the **same** ten-attempt, five-second post-failure-delay
+- [x] Sub-case — wake from sleep runs the **same** ten-attempt, five-second post-failure-delay
       policy (same UI, same Cancel).
       Sleep is currently a graceful disconnect (`willSleep` disconnects and releases the wake
       token) with no wake handler, so waking needs a manual Connect today; `willSleep` must be
@@ -96,8 +96,8 @@ Disconnect never reconnects, and a re-authorization is never forced silently.
       handler must start the retry loop. tunneld survives sleep and `connect()` re-queries the
       RSD endpoint (which tunneld reassigns across sleep/wake — see the `TunnelBroker` comment),
       so reconnect-on-wake is password-free like any other retry.
-- [ ] Settings toggle; off = today's behavior, for users who prefer to reconnect by hand.
-- [ ] Localize the new strings ("Reconnecting… n/10", "Cancel retry", "Cancelling…") in the
+- [x] Settings toggle; off = today's behavior, for users who prefer to reconnect by hand.
+- [x] Localize the new strings ("Reconnecting… n/10", "Cancel retry", "Cancelling…") in the
       String Catalog for en + zh-Hant — see [[015-localization]].
 
 ## Open questions
@@ -142,28 +142,112 @@ Disconnect never reconnects, and a re-authorization is never forced silently.
   This requires `willSleep` to stop taking the `expectingExit` path.
 - **Scheduled into v2.3.0 (2026-09-03) alongside [[042-survive-closed-daemon-pipe]]**, which
   fixes the crash on the same disconnect path this epic has to recover from.
+- **One attempt seam, one commit path (2026-09-25, WP5).** `DeviceSession.connectOnce` performs
+  exactly one tunnel-endpoint + daemon-start attempt through a new `DeviceConnectionAttempter`
+  protocol (`LiveDeviceConnectionAttempter` wraps the shared `TunnelBroker` and spawns a
+  `DaemonBridge`; tests inject a scriptable fake). Explicit Connect keeps its three-try startup
+  loop *over* that primitive, retrying only a failed daemon start; every numbered auto-reconnect
+  attempt is one call with `promptPolicy: .neverPrompt`. Explicit, automatic, and UI-test-mock
+  connects all commit through the same `commitLiveBackend`, so a session keeps one
+  `SimulationActor` and one recording capture across every reconnect.
+- **A promptless attempt that would need authorization ends the window at once (2026-09-25).**
+  `.neverPrompt` requires `TunnelBroker.isRunning`; otherwise the attempt throws
+  `authorizationRequired`, the session settles into `Error: Authentication required` with a log
+  line pointing at Connect, and no further attempt is scheduled. It is not counted as one of ten.
+- **A cancelled in-flight attempt that succeeds anyway stays connected but disarmed (2026-09-25).**
+  Cancel retry is a deliberate disarm, so honoring it means no *automatic* recovery until the
+  next explicit Connect — not throwing away a connection that already landed. The log says so.
+- **The Settings toggle is read when recovery would start, not mid-window (2026-09-25).** A loss
+  or wake checks `autoReconnectEnabled` once; turning it off while "Reconnecting… n/10" is showing
+  does not stop that window — Cancel retry does. Default is on; the key is absent-means-on so an
+  unwritten preference never silently disables the policy.
+- **Sleep abandons an active window; wake always starts a fresh ten (2026-09-25).** tunneld
+  reassigns every endpoint across sleep/wake, so resuming a half-spent window would be stale. An
+  in-flight attempt is never task-cancelled (the tunnel query and daemon start are not
+  cancellation-safe); it settles on its own and, if it lands a backend after the window was
+  abandoned, that backend is stopped and never committed. The wake target is the UDID that was
+  connected at sleep, and the drop target is the UDID that was connected at loss — never the
+  picker's current value.
+- **The settled reason is the most recent failure (2026-09-25).** Exhaustion and a cancel during
+  an attempt show that attempt's error; a cancel during the first delay shows the drop's reason
+  (`Tunnel down`, `Daemon crashed (exit n)`, …). Exhaustion logs
+  "Reconnect gave up after 10 attempts — press Connect to try again."
+- **Recovery is projected, not duplicated (2026-09-25).** `ConnectionStatus` gains
+  `.reconnecting(attempt:maxAttempts:)` and `.cancellingRetry`; every surface (sidebar row, the
+  control area, the map hint, the menu bar) reads the same `recoveryText`. AI `STATUS` reports
+  `state: "reconnecting"` / `"cancelling"` plus `attempt`/`maxAttempts`; an explicit Connect (GUI
+  or `CONNECT <udid>`) while a window is open is a no-op, because the window owns the controls.
 
 ## Bugs / follow-ups found while building
 
+- **WP10 shared-doc handoff (2026-09-25).** `features.md` §Connection (line 13: sleep now
+  reconnects on wake; line 196: the dropped "Reconnect button" note is superseded by this epic),
+  `risks.md` Wi-Fi row ("Auto-reconnect is not implemented" is no longer true),
+  `architecture.md` Command Protocol (new `STATUS` state values `reconnecting`/`cancelling` and
+  `attempt`/`maxAttempts` fields) and the DeviceSession row of the layer diagram (connection
+  lifecycle now includes the recovery window), `testing.md` suite table
+  (`DeviceSessionReconnectTests`, shared fakes `FakeDeviceConnectionAttempter` /
+  `FakeSimulationBackend`) and manual smoke item 11 (sleep/wake now expects
+  "Reconnecting… 1/10" after wake, not a plain disconnected state), and
+  `decisions.md` if the owner wants the reversal recorded there.
+- **Startup retry pause moved onto the shared clock (2026-09-25).** Explicit Connect's 3 s pause
+  between daemon-start tries now uses `MonotonicTimeSource` instead of `Task.sleep`, so it is
+  deterministic in tests. Same production duration.
+- **Hosted unit-test roots accumulate (2026-09-25).** Each test-host process creates
+  `/tmp/com.sh.TrailMate.Tests.<pid>` through the WP1 fallback and nothing removes it (18 were
+  present after the WP5 runs). Not caused by this epic; WP10 may want a cleanup policy.
+- **Menu bar shows the attempt wording only.** No Cancel retry quick action was added there —
+  the epic places Cancel on the sidebar's Connect/Disconnect control. Revisit if wanted.
+
 ## Acceptance criteria
 
+Unit coverage is `TrailMateTests/DeviceSessionReconnectTests.swift` (manual clock + scripted
+attempt seam, no tunnel/daemon/prompt). The boxes are ticked by the WP10 manual gate on a real
+device; each line names the test that proves its deterministic half.
+
 - [ ] A drop with tunneld still alive reconnects without user action and without an admin prompt.
+      — `armedDropReconnectsAfterFiveSecondsWithoutPromptOnTheSameActorAndCapture` (every
+      recovery attempt carries `.neverPrompt`; same actor and capture survive);
+      `recoveryThatWouldNeedAuthorizationSettlesWithoutPrompting`. Manual: real tunneld reuse.
 - [ ] A user-initiated Disconnect never triggers a reconnect.
+      — `explicitDisconnectNeverReconnects`; `unarmedLossStaysInTheManualState`.
 - [ ] A device that stays unreachable produces exactly 10 non-overlapping attempts. Attempt 1 starts
       about 5 s after the triggering failure; attempts 2–10 each start about 5 s after the preceding
       attempt finishes with failure. Attempt 10 settles immediately into the ordinary disconnected
       state — no final wait, no eleventh attempt, and no error-only dead end.
+      — `unreachableDeviceMakesExactlyTenNonOverlappingAttemptsThenSettles` (nothing fires at
+      4.999 s, one attempt at 5.000 s, no timer while an attempt runs, no sleep after attempt 10).
 - [ ] A reconnect that succeeds on attempt *n* cancels the remaining attempts and resets the
       counter for the next drop.
+      — `successOnAttemptNResetsTheCounterForTheNextDrop`.
 - [ ] While retrying, the attempt state is visible in the status string *and* beside the
       Connect/Disconnect control, and the button reads "Cancel retry".
+      — `recoveryStatesProjectTheAttemptForEverySurface` (shared `recoveryText`); the sidebar
+      `ReconnectControls` / switcher row / menu bar / map hint wiring is a WP9 UI-test candidate
+      (identifiers `connection.reconnectStatus`, `connection.cancelRetry`). Manual until then.
 - [ ] Cancel retry schedules no further attempt; the in-flight one finishes on its own timeout,
       after which the session is plainly disconnected and the button reads Connect again.
+      — `cancelDuringInFlightAttemptShowsCancellingThenSettlesWithoutScheduling`.
 - [ ] Cancel during a post-failure delay prevents the pending attempt immediately; cancel during an
       attempt allows only that attempt to finish and schedules neither a delay nor another attempt.
+      — `cancelDuringDelaySettlesImmediatelyAndPreventsThePendingAttempt`;
+      `cancelDuringInFlightAttemptShowsCancellingThenSettlesWithoutScheduling`;
+      `cancelledInFlightAttemptThatSucceedsConnectsButStaysDisarmed`.
 - [ ] Between the cancel press and that settle, the button reads a disabled "Cancelling…".
+      — `.cancellingRetry` asserted in the two in-flight cancel tests; the disabled control itself
+      is a WP9 UI check.
 - [ ] After a cancel, nothing reconnects on its own until the user presses Connect.
+      — both cancel tests advance the clock an hour and count no attempt; Connect re-arms.
 - [ ] Sleeping and waking the Mac reconnects the device under the same ten-attempt,
       five-second post-failure-delay policy, with the same status strings and Cancel retry control,
       and without an admin prompt.
+      — `sleepThenWakeRunsTheSamePolicyWithTheSameControls`;
+      `sleepDuringRecoveryStartsAFreshWindowOnWakeAndDiscardsTheStaleAttempt`;
+      `wakeDoesNothingWithoutAnArmedSessionOrWithThePolicyOff`. Manual: real
+      `NSWorkspace` sleep/wake notifications and tunneld endpoint reassignment.
 - [ ] The Settings toggle off reproduces today's manual behavior exactly.
+      — `policyOffReproducesManualBehaviorAndPersists` (also proves the on-by-default and the
+      persisted key).
+- Per-session isolation (from [[v2.3.0-design]] §2.4): `retryStateIsSessionScopedAndSelectionDoesNotLeakOrMutateIt`,
+  `sessionRemovalAbandonsRecoveryAndDiscardsItsRecording`. Explicit Connect's retained startup
+  policy: `explicitConnectRetriesOnlyDaemonStartOnTheSharedClockAndMayPrompt`.

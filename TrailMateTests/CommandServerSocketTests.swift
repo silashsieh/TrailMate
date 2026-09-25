@@ -73,7 +73,8 @@ struct CommandServerSocketTests {
     @Test func startCreatesOwnerOnlySocketAndStopUnlinksIt() async throws {
         let h = try makeHarness()
         defer { h.runtime.cleanup() }
-        #expect(h.socketPath.hasPrefix("/tmp/TrailMate-Tests-"))
+        #expect(h.socketURL.deletingLastPathComponent().deletingLastPathComponent()
+            == h.runtime.rootDirectory)
         #expect(h.socketURL != AppRuntimePaths.live.aiSocketURL)
         #expect(!FileManager.default.fileExists(atPath: h.socketDirectory.path))
 

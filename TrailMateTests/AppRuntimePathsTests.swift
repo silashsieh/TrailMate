@@ -23,7 +23,8 @@ struct AppRuntimePathsTests {
         let configuration = AppProcessConfiguration.current
 
         #expect(configuration.runtimePaths != .live)
-        #expect(configuration.runtimePaths.rootDirectory.path.hasPrefix("/tmp/"))
+        let rootPath = configuration.runtimePaths.rootDirectory.path
+        #expect(rootPath.hasPrefix("/tmp/") || rootPath.hasPrefix("/private/tmp/"))
         #expect(configuration.defaults !== UserDefaults.standard)
     }
 

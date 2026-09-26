@@ -15,7 +15,7 @@ tags: [testing, quality]
 > The first pass re-baselined the v2.1.0 UI and added focused tests for 024–031. A second audit on
 > 2026-09-03 compared every shipped v2.0.0–v2.2.0 contract (plus the v2.1.3 updater repair) against
 > the actual 133 unit tests and 11 UI tests on `main`. The audit gaps below now have implemented
-> test homes on `integration/v2.3.0`; their full integrated run remains a release gate.
+> test homes on `integration/v2.3.0`; the unit suite passed, while the UI and manual gates remain open.
 
 ## Why
 
@@ -98,7 +98,10 @@ must also land the tests specified in their own acceptance criteria before this 
 ### Integrated acceptance-to-test mapping
 
 The table above records the 2026-09-03 audit. These are the implemented homes on the integration
-branch; **build-for-testing passes, but the combined hosted unit/UI suites have not yet run**.
+branch. **The integrated unit suite passed 241 tests.** The first UI run passed 15 of 17 tests;
+the Save Route test's accessibility queries were corrected and passed focused, while the saved-route
+drag probe still produced no order sidecar. A later run with an isolated bundle ID lost macOS
+accessibility authorization after five passes. See [[v2.3.0-release-readiness]] for result bundles.
 
 | Audit area | Automated tests | Environment-bound check |
 |---|---|---|
@@ -117,8 +120,10 @@ The audit found that an isolated `UserDefaults` suite alone did not isolate rout
 `AppRuntimePaths` now injects one runtime root for recordings, routes, tunnel control, and the AI
 socket; hosted unit fixtures use temporary roots/defaults, and each UI test launches with a unique
 suite and root. A DEBUG test process skips the real lister and Sparkle updater, and fake connection
-attempts skip the stale-daemon sweep. The integrated test run must still verify this isolation and
-confirm the owner's personal Application Support/defaults files remain unchanged.
+attempts skip the stale-daemon sweep. Runtime comparison found personal Application Support
+unchanged, but the initial UI run under the production bundle ID changed the personal preferences
+plist through AppKit state persistence. Later UI runs used a test-only bundle ID override and left
+that plist unchanged. The original preference delta cannot be safely restored without a backup.
 
 ## Release-level implementation plan
 
@@ -128,8 +133,8 @@ cross-cutting quality gate; it does not own the implementation plans for 039, 04
 
 ## Remaining (keeps this epic open)
 
-Run and fix the integrated unit and UI suites, inspect any failed `.xcresult`, and verify test
-isolation before checking off the automated criteria. Keep these checks manual because the missing
+Resolve the drag UI finding and macOS accessibility-run failure, then pass the integrated UI suite
+and verify test isolation before checking off the automated criteria. Keep these checks manual because the missing
 dependency is the environment rather than a unit seam:
 
 - live MapKit place search and road routing;
@@ -137,7 +142,8 @@ dependency is the environment rather than a unit seam:
   teardown;
 - MenuBarExtra interaction and 024's visual map-control occlusion;
 - signed/notarized DMG integrity and the production Sparkle download/install/relaunch path;
-- the full 039 drag matrix; the focused saved-route drag XCUITest candidate still needs a run.
+- the full 039 drag matrix; its focused saved-route drag XCUITest candidate ran and failed to
+  persist an order change on macOS 27.0.
 
 The permanent [manual plan](../../../TrailMateTests/ManualSmokeTestPlan.md) assigns each item an
 owner and expected result. Everything else in the gap table is deterministic and must pass its

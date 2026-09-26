@@ -1,6 +1,8 @@
 # Testing Strategy
 
-**Status:** The v2.3.0 unit and UI coverage branches are integrated. The full integrated test run and the written manual smoke plan remain release gates.
+**Status (2026-09-26):** The integrated unit suite passed (241 tests). The UI gate remains open:
+the saved-route drag probe did not persist an order change, and a later isolated-bundle-ID UI run
+lost macOS accessibility authorization after five passes. Manual smoke checks remain pending.
 
 ## Running the tests
 
@@ -9,9 +11,9 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 ```
 
 - The test target is hosted in TrailMate.app (`TEST_HOST`), so `xcodebuild test` builds and
-  launches the app bundle. **Don't run it while a live TrailMate session is open** — the test
-  host is a second instance with the same bundle id. Test launches use isolated defaults and
-  runtime paths; build-only verification (`xcodebuild build-for-testing`) is safe alongside a live session.
+  launches the app bundle. **Don't run it while a live TrailMate session is open.** Test
+  launches use isolated defaults and runtime paths; build-only verification
+  (`xcodebuild build-for-testing`) is safe alongside a live session.
 - Because the app bundle embeds `PythonResources/` (gitignored), a fresh checkout or worktree
   needs it present before any test build: run `./packaging/build.sh`, or in a worktree symlink
   it from the main checkout (`ln -s ../TrailMate/PythonResources PythonResources`).
@@ -21,6 +23,13 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
   via accessibility, so the Mac must have a GUI session (and the terminal may need an
   Automation/Accessibility grant on first run). Unit-only:
   `-skip-testing:TrailMateUITests`; UI-only: `-only-testing:TrailMateUITests`.
+- Local app-hosted UI runs should build with a unique test-only `PRODUCT_BUNDLE_IDENTIFIER`
+  override and unique DerivedData, then use the same DerivedData for `test-without-building`.
+  On the first WP10 UI run, macOS wrote to the personal
+  `com.shihlien.TrailMate.plist` despite the injected defaults suite. AppKit window/status-item
+  state follows the bundle ID; `com.sh.TrailMate.WP10.Isolated` wrote to its own plist and
+  left the personal plist unchanged in later comparisons. The project and release bundle ID
+  remain unchanged. Hold the test-run lease and close the personal instance first.
 
 ## CI
 
@@ -106,14 +115,16 @@ Coverage:
   `CoverageRouteBuilderTests`, not here.
 - **Integrated v2.3.0 UI flows.** Isolated fixtures drive offline route Play/Stop/Save Route,
   two-device selection and recording visibility, retry cancellation, updater toggle round-trips
-  and command presence, and menu/Dock reachability settings. One saved-route drag test checks
-  order persistence; the complete drag matrix and MenuBarExtra interaction remain in the manual plan.
+  and command presence, and menu/Dock reachability settings. The saved-route drag probe currently
+  fails to produce the order sidecar, so its UI wiring remains a release finding. The complete
+  drag matrix and MenuBarExtra interaction remain in the manual plan.
 
 Every UI test launches with its own `UserDefaults` suite and temporary runtime root, then removes
 those fixtures after the app terminates. Hosted unit tests use a separate process-level domain/root
 and explicit temporary roots for AppState fixtures. Sparkle's test controller does not construct
-the live updater, read its app-domain preferences, or contact the feed. Tests still must not run
-beside a personal TrailMate instance because they launch the same bundle identifier.
+the live updater, read its app-domain preferences, or contact the feed. The UI app still needs the
+test-only bundle ID override above to isolate AppKit's own preference writes. Tests must not run
+beside a personal TrailMate instance.
 
 **Test-only launch hooks (DEBUG builds only; `UITestSupport.swift`).**
 
@@ -148,9 +159,9 @@ Query gotcha for future tests: SwiftUI exposes sidebar headers/buttons as access
 The acceptance-level matrix remains in [[033-refresh-test-coverage]]. Its deterministic cases now
 have dedicated unit or UI suites for multi-session ownership, AI dispatch and socket framing,
 connection/discovery failure, offline routing, saved-item persistence, recording isolation,
-simulation cadence, updater preferences, and menu/Dock decisions. The full integrated unit/UI run
-is still required before these suites can be marked passing. Any failed `.xcresult` must be
-inspected and the affected suite rerun after a fix.
+simulation cadence, updater preferences, and menu/Dock decisions. The full integrated unit suite
+passed; the UI drag probe and later accessibility failure keep the UI gate open. Failed `.xcresult`
+bundles are recorded in [v2.3.0-release-readiness](v2.3.0-release-readiness.md).
 
 Real USB/Wi-Fi discovery, tunneld authorization, device location delivery, live MapKit search and
 routing, sleep/wake, saved-item drag across every section, MenuBarExtra interaction, and the signed

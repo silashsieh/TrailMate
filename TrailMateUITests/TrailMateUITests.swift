@@ -401,17 +401,17 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(window.buttons["Play"].waitForExistence(timeout: 5))
 
         saveRoute.click()
-        let alert = app.alerts["Save Route"]
+        let alert = window.sheets.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
-        let name = alert.textFields["Name"]
+        XCTAssertTrue(staticText(withValue: "Save Route", in: alert).exists)
+        let name = alert.textFields.firstMatch
         XCTAssertTrue(name.exists)
         name.click()
         name.typeText("Offline UI route")
         alert.buttons["Save"].click()
         XCTAssertTrue(window.staticTexts["Saved Routes"].waitForExistence(timeout: 5))
-        XCTAssertTrue(window.buttons.containing(
-            NSPredicate(format: "label CONTAINS %@", "Offline UI route")
-        ).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(staticText(withValue: "Offline UI route", in: window)
+            .waitForExistence(timeout: 5))
         let routeFiles = try FileManager.default.contentsOfDirectory(
             at: isolatedRuntimeRoot.appendingPathComponent("routes"),
             includingPropertiesForKeys: nil
@@ -535,9 +535,16 @@ final class TrailMateUITests: XCTestCase {
             .matching(identifier: "saved-route-00000000-0000-4000-8000-0000000000B2").firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertTrue(second.waitForExistence(timeout: 5))
+        let sidebar = window.scrollViews.firstMatch
+        XCTAssertTrue(sidebar.exists)
+        for _ in 0..<4 where !first.isHittable || !second.isHittable {
+            sidebar.swipeUp()
+        }
+        XCTAssertTrue(first.isHittable)
+        XCTAssertTrue(second.isHittable)
         // Newer B starts above A. Drag A onto B's top half to insert before B.
         first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
-            forDuration: 1,
+            forDuration: 2,
             thenDragTo: second.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
         )
         let sidecar = isolatedRuntimeRoot.appendingPathComponent("routes/order.json")

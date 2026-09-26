@@ -16,7 +16,9 @@ struct RecordingsLibraryTests {
 
         let persisted = try library.persist(draft)
         let fileURL = try #require(persisted)
-        #expect(fileURL.path.hasPrefix(runtime.runtimePaths.recordingsDirectory.path + "/"))
+        #expect(fileURL.resolvingSymlinksInPath().path.hasPrefix(
+            runtime.runtimePaths.recordingsDirectory.resolvingSymlinksInPath().path + "/"
+        ))
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
         #expect(library.recordings.count == 1)
         #expect(library.recordings[0].points == draft.points)
@@ -26,7 +28,7 @@ struct RecordingsLibraryTests {
         let session = try #require(reloaded.recordings.first)
         #expect(session.startedAt == draft.startedAt)
         #expect(session.points == draft.points)
-        #expect(session.fileURL == fileURL)
+        #expect(session.fileURL?.resolvingSymlinksInPath() == fileURL.resolvingSymlinksInPath())
 
         reloaded.delete(session)
         #expect(reloaded.recordings.isEmpty)

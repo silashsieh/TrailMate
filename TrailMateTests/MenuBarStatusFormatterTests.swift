@@ -6,7 +6,7 @@ struct MenuBarStatusFormatterTests {
     @Test func selectedDeviceAndActivityFollowConnectionAndPlayback() {
         let name = "A very long iPhone device name"
         #expect(summary(name: name, status: .connected, playback: .playing, progress: 0.426, recording: true)
-            == "A very long iPhone dev… · Connected · Playing 43%")
+            == "A very long iPhone devi… · Connected · Playing 43%")
         #expect(summary(name: "Alpha", status: .connected, playback: .paused, recording: true)
             == "Alpha · Connected · Paused")
         #expect(summary(name: "Beta", status: .connected, recording: true)

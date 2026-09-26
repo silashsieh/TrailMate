@@ -51,7 +51,9 @@ struct RecordingLifecycleTests {
         #expect(await eventually { app.recordingsLibrary.recordings.count == 1 })
         let recording = try #require(app.recordingsLibrary.recordings.first)
         #expect(recording.points.count == 2)
-        #expect(recording.fileURL?.path.hasPrefix(runtime.runtimePaths.recordingsDirectory.path + "/") == true)
+        #expect(recording.fileURL?.resolvingSymlinksInPath().path.hasPrefix(
+            runtime.runtimePaths.recordingsDirectory.resolvingSymlinksInPath().path + "/"
+        ) == true)
         #expect(await session.sim.recordingStatus() == .init(isActive: false, pointCount: 0))
 
         await app.prepareForQuit()

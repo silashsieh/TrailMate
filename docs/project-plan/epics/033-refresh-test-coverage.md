@@ -14,8 +14,8 @@ tags: [testing, quality]
 
 > The first pass re-baselined the v2.1.0 UI and added focused tests for 024–031. A second audit on
 > 2026-09-03 compared every shipped v2.0.0–v2.2.0 contract (plus the v2.1.3 updater repair) against
-> the actual 133 unit tests and 11 UI tests on `main`. The suites cover the pure math well, but
-> several app-level ownership, persistence, IPC, and lifecycle paths still have no regression test.
+> the actual 133 unit tests and 11 UI tests on `main`. The audit gaps below now have implemented
+> test homes on `integration/v2.3.0`; their full integrated run remains a release gate.
 
 ## Why
 
@@ -95,19 +95,30 @@ must also land the tests specified in their own acceptance criteria before this 
 | **Simulation loop and performance (034, 035)** | Dead-zone and deviation math are tested; timing constants and “device emits while UI is throttled” are tested. | Directly assert disconnected-idle produces no emit/snapshot churn, connected idle re-emits at the intended cadence, active joystick display pushes cap at 10 Hz, playback pushes cap at 2 Hz, Rejoin resets deviation, and >200 m for >10 s emits one route-abort and stops playback. Timing tests need an injected clock/tick driver rather than long sleeps. | Expand actor-level tests around a recording backend, bridge spy, and controllable clock/tick source. |
 | **Background and updater UI (021, 038, 047)** | XCUITest sees the two update toggles; `UpdaterConfigurationTests` pins the paired Sparkle security keys. Production release checks covered the signed update. | No test proves update preference round-trips, the “Check for Updates…” command exists/enables correctly, menu/Dock preferences cannot make the app unreachable, closing/reopening uses one main window, or menu-bar summary/actions follow the selected session. | XCUITest update/menu/Dock preference round-trips; extract the menu summary/activation decision into pure presenters for unit tests. `MenuBarExtra` interaction and the signed update remain release-smoke items. |
 
-### Test-isolation defect found during the audit
+### Integrated acceptance-to-test mapping
 
-`AppState(defaults:)` accepts an isolated defaults suite, but still constructs `RecorderService` and
-`SavedRoutesStore` with fixed production Application Support paths. Existing `CommandDispatchTests`
-and `SweepAreaHandoffTests` therefore read the user's real recording/route indexes during setup.
-Separately, several XCUITests claim to restore preferences but reset language, Wander, and Log to
-factory values rather than the exact prior values. Before adding more app-hosted/UI coverage:
+The table above records the 2026-09-03 audit. These are the implemented homes on the integration
+branch; **build-for-testing passes, but the combined hosted unit/UI suites have not yet run**.
 
-- inject all filesystem roots (`RecordingsLibrary`, `SavedRoutesStore`, socket) and use one temporary
-  test root per test;
-- use isolated defaults where the app-hosted seam permits it;
-- make XCUITests snapshot and restore the exact values they mutate, or add a DEBUG-only isolated
-  preferences domain so parallel/suite-order execution cannot alter personal settings.
+| Audit area | Automated tests | Environment-bound check |
+|---|---|---|
+| Multi-session ownership | `AppStateSessionTests`, `testSelectedDeviceOwnsRouteAndRecordingControls`, `MenuBarStatusFormatterTests` | Two real devices and MenuBarExtra in manual F10/F17 |
+| AI socket and dispatch | `CommandProtocolTests`, `CommandServerSocketTests`, `CommandDispatchTests` | Test account's live AI socket after one-device loss in F13 |
+| Connection/discovery lifecycle | `DeviceDiscoveryServiceTests`, `TunnelBrokerMapTests`, `TunnelBrokerReclaimTests`, `DaemonPipeTests`, `DeviceSessionLossTests`, `DeviceSessionReconnectTests`, `testCancelRetryReturnsToManualConnect` | USB/Wi-Fi, admin prompt, pipe/tunnel failure, retry timing, sleep/wake, and root teardown in F02–F04/F12–F16/F19 |
+| Offline control workflow | `DeviceSessionRouteTests`, `AppStateSessionTests`, `testOfflineRoutePlayStopAndSaveThroughSidebar`, `CoordinateFormatTests` | Live MapKit search/road routing and offline device re-attach in F01/F04/F05 |
+| Saved-item persistence and wiring | `SavedItemsLibraryTests`, `SavedItemsPersistenceTests`, `testSavedRouteDragPersistsOrder` | Full location/route drag and category matrix in F08 |
+| Recording | `RecordingCaptureTests`, `RecordingsLibraryTests`, `RecordingLifecycleTests`, `testSelectedDeviceOwnsRouteAndRecordingControls` | Two-device capture, quit/removal discard, and loss continuity in F10–F12 |
+| Simulation loop and performance | `SimulationLoopTests`, `NavigationEngineLoopTests`, `SimulationActorAttachTests` | Hardware joystick, map-control occlusion, and real device movement in F04–F07 |
+| Background and updater | `ActivationPolicyDecisionTests`, `MenuBarStatusFormatterTests`, `testUpdaterPreferencesRoundTripAndCommandExists`, `testMenuBarDockPreferencesKeepAReopenPath`, `UpdaterConfigurationTests` | MenuBarExtra, signed feed/DMG, and production Sparkle update in F17/F18/R01–R05 |
+
+### Test isolation
+
+The audit found that an isolated `UserDefaults` suite alone did not isolate route/recording files.
+`AppRuntimePaths` now injects one runtime root for recordings, routes, tunnel control, and the AI
+socket; hosted unit fixtures use temporary roots/defaults, and each UI test launches with a unique
+suite and root. A DEBUG test process skips the real lister and Sparkle updater, and fake connection
+attempts skip the stale-daemon sweep. The integrated test run must still verify this isolation and
+confirm the owner's personal Application Support/defaults files remain unchanged.
 
 ## Release-level implementation plan
 
@@ -117,7 +128,8 @@ cross-cutting quality gate; it does not own the implementation plans for 039, 04
 
 ## Remaining (keeps this epic open)
 
-The table above is the automated closure backlog. Keep these checks manual because the missing
+Run and fix the integrated unit and UI suites, inspect any failed `.xcresult`, and verify test
+isolation before checking off the automated criteria. Keep these checks manual because the missing
 dependency is the environment rather than a unit seam:
 
 - live MapKit place search and road routing;
@@ -125,9 +137,11 @@ dependency is the environment rather than a unit seam:
   teardown;
 - MenuBarExtra interaction and 024's visual map-control occlusion;
 - signed/notarized DMG integrity and the production Sparkle download/install/relaunch path;
-- the 039 drag matrix only if XCUITest remains unreliable after the data-source fix.
+- the full 039 drag matrix; the focused saved-route drag XCUITest candidate still needs a run.
 
-Everything else in the gap table is deterministic and must not be waived to the manual checklist.
+The permanent [manual plan](../../../TrailMateTests/ManualSmokeTestPlan.md) assigns each item an
+owner and expected result. Everything else in the gap table is deterministic and must pass its
+automated test before this epic closes.
 
 ## Open questions
 
@@ -185,10 +199,11 @@ Everything else in the gap table is deterministic and must not be waived to the 
 ## Bugs / follow-ups found while building
 
 - The second audit found that `AppState` tests using isolated `UserDefaults` still read production
-  recording/route directories because those two services have fixed roots. Treat the injectable
-  roots in 039/040 as a prerequisite before expanding app-hosted tests.
+  recording/route directories because those two services had fixed roots. The integrated runtime
+  now injects them and the socket/tunnel paths; the full suite must verify that guard.
 - Epic 039 documents a real saved-items reorder failure even though the pure `LibraryOrderTests`
-  suite is green. This is the concrete proof that helper-only coverage cannot close a UI contract.
+  suite was green. The persistence suite and one focused drag UI candidate now cover the lower
+  layers; the complete interaction matrix remains manual until its UI test is verified.
 
 ## Acceptance criteria
 

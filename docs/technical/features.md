@@ -10,8 +10,9 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 - **Simultaneous multi-device (epic 012).** Connect and drive several paired iPhones at once. A sidebar device *switcher* lists one row per device (color-coded, with status); selecting a row binds the shared control surface — route planner, playback bar, joystick — to that device. "Add Device" opens another slot. The map shows every connected device's route + simulated dot in its own color, with the selected device emphasized. Designed for *a few* devices (each is an independent 10 Hz loop + daemon), not dozens.
 - `TunnelBroker` opens one privileged `pymobiledevice3 remote tunneld` (`PythonDaemon/tm_tunneld.sh`) via `osascript … with administrator privileges` — **one auth dialog per session, N tunnels**, with hot-plug and promptless sleep/wake recovery. Each device's RSD endpoint is resolved fresh from tunneld's HTTP API at connect (the address+port are ephemeral — tunneld reassigns them on every (re)establishment), keyed by the stable UDID. Teardown on quit/host-death force-kills the daemon (SIGTERM → grace → SIGKILL) so a tunneld wedged on an active tunnel can't leak (epic 032); as a backstop, a fresh launch also reclaims any leftover via tunneld's `/shutdown` before binding (epic 031, best-effort).
 - Each connected device runs its own `tm_daemon.py`; commands route to a device by its bound UDID end-to-end, so a command for one device never reaches another.
-- macOS sleep (`NSWorkspace.willSleepNotification`) triggers a clean disconnect of every device, since the DVT session can't survive sleep.
-- Tunnel-down / daemon-exit callbacks tear the affected device's live state down automatically — no polling heartbeat, no stale "connected" state.
+- macOS sleep (`NSWorkspace.willSleepNotification`) releases every live DVT connection. An armed session starts a fresh recovery window after wake when automatic reconnect is enabled; otherwise it remains available for manual Connect.
+- Tunnel-down / daemon-exit callbacks tear down only the affected device's live backend without stopping its local red dot, route, or active recording. Another connected device keeps running. Closed daemon pipes are handled without terminating the Mac app.
+- A successful explicit Connect arms automatic recovery. An unexpected loss waits 5 seconds, then makes up to 10 sequential attempts with a 5-second delay after each failure. Recovery never raises a new administrator prompt; Cancel retry, explicit Disconnect, exhaustion, or authorization-required failure disarms it. The sidebar shows the numbered attempt or cancellation state. The Settings toggle can leave unexpected drops for manual recovery.
 
 ### Map view
 
@@ -133,7 +134,7 @@ Single inventory of what ships in TrailMate today, plus items that were consider
 
 ### Session recording
 
-- Record button on the map overlay (shown whether or not a device is connected); captures the clean (pre-noise) coordinate on every `SimulationActor.emit()` call, so it records the local red-dot path even with no device attached.
+- Record button on the map overlay (shown whether or not a device is connected); each session's `SimulationActor` owns its own capture and records the clean (pre-noise) coordinate on every `emit()` call, even with no device attached. Switching sessions shows the selected session's capture status without stopping another capture. An unexpected disconnect/reconnect keeps its capture continuous; explicit Stop persists it, while session removal or app quit discards an unfinished capture.
 - Sessions persist as GPX with per-point timestamps under `~/Library/Application Support/TrailMate/recordings/YYYY-MM-DD/`.
 - Recordings sidebar lists sessions newest-first; per-row Replay, Export, Delete, and "Save as Route…". (On disk they're grouped into per-date folders, per the path above.)
 - Replay plays the recorded coordinates at the current transport speed and multiplier (constant-speed); the per-point timestamps in the GPX are not used to pace playback.

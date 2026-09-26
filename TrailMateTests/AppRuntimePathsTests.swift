@@ -22,6 +22,7 @@ struct AppRuntimePathsTests {
     @Test func appHostedTestProcessUsesAnIsolatedConfiguration() {
         let configuration = AppProcessConfiguration.current
 
+        #expect(ProcessInfo.processInfo.environment["TRAILMATE_TEST_HOST"] == "1")
         #expect(configuration.runtimePaths != .live)
         let rootPath = configuration.runtimePaths.rootDirectory.path
         #expect(rootPath.hasPrefix("/tmp/") || rootPath.hasPrefix("/private/tmp/"))

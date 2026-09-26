@@ -264,14 +264,11 @@ struct WanderModePersistenceTests {
 @MainActor
 struct SweepAreaHandoffTests {
     @Test func sweepLoadsTheRouteAndStartsFromTheFirstEdgePoint() async throws {
-        let suiteName = "com.sh.TrailMateTests.SweepArea.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        SimulatedPositionPersistence.setRestoreOnLaunch(false, in: defaults)
+        let runtime = try IsolatedTestRuntime()
+        defer { runtime.cleanup() }
+        SimulatedPositionPersistence.setRestoreOnLaunch(false, in: runtime.defaults)
 
-        let app = AppState(defaults: defaults)
-        // Keep dispatch's lazy discovery scan from shelling out to the real lister.
-        app.discovery.hasScanned = true
+        let app = AppState(defaults: runtime.defaults, runtimePaths: runtime.runtimePaths)
         let session = app.sessions[0]
 
         let center = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
@@ -296,21 +293,21 @@ struct SweepAreaHandoffTests {
             .distance(from: CLLocation(latitude: center.latitude, longitude: center.longitude))
         #expect(toFirst < 10)                  // at the edge point (a tick of travel at most)
         #expect(toCenter > halfSide * 0.9)     // and nowhere near the center
+        await app.prepareForQuit()
     }
 
     @Test func aFailedSweepLeavesTheLoadedRouteAlone() async throws {
-        let suiteName = "com.sh.TrailMateTests.SweepAreaInvalid.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        SimulatedPositionPersistence.setRestoreOnLaunch(false, in: defaults)
+        let runtime = try IsolatedTestRuntime()
+        defer { runtime.cleanup() }
+        SimulatedPositionPersistence.setRestoreOnLaunch(false, in: runtime.defaults)
 
-        let app = AppState(defaults: defaults)
-        app.discovery.hasScanned = true
+        let app = AppState(defaults: runtime.defaults, runtimePaths: runtime.runtimePaths)
         let session = app.sessions[0]
 
         let center = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
         await app.sweepArea(center: center, halfSideMeters: 0, laneSpacingMeters: 100)
         #expect(session.routeCoordinates.isEmpty)
         #expect(app.logMessages.contains { $0.contains("Sweep failed") })
+        await app.prepareForQuit()
     }
 }

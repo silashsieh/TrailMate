@@ -275,7 +275,12 @@ final class AppState {
     ) {
         self.defaults = defaults
         self.runtimePaths = runtimePaths
+        #if DEBUG
+        self.monotonicTime = UITestSupport.reconnecting
+            ? UITestSupport.parkedRecoveryTime : monotonicTime
+        #else
         self.monotonicTime = monotonicTime
+        #endif
         self.simulationMonotonicTime = simulationMonotonicTime ?? monotonicTime
         self.discovery = discovery
         self.router = router
@@ -386,6 +391,7 @@ final class AppState {
             pendingWanderCenter = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
             showWanderSheet = true
         }
+        UITestSupport.configureFixture(self)
         #endif
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 
 #if DEBUG
 // Launch-argument switches for UI tests, DEBUG-only so release builds carry
@@ -10,9 +11,11 @@ nonisolated enum UITestSupport {
     // Unit tests host their bundle in TrailMate.app. Starting Sparkle there can
     // present its first-run consent window on a clean runner and keep the host
     // alive after the suite finishes. UI tests carry an explicit launch flag;
-    // hosted unit tests carry Xcode's XCTest configuration environment value.
+    // hosted unit tests carry Xcode's configuration or bundle-injection value.
     static let isTesting = isUITesting
         || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        || ProcessInfo.processInfo.environment["DYLD_INSERT_LIBRARIES"]?
+            .contains("libXCTestBundleInject.dylib") == true
 
     // True for any UI-test launch (every flag below starts with --uitest, and
     // the harness also passes a bare --uitest). Used to skip the real device
@@ -65,5 +68,76 @@ nonisolated enum UITestSupport {
     // test can't assume the section's contents are rendered; this hook makes
     // them deterministically present without touching the persisted preference.
     static let expandLog = ProcessInfo.processInfo.arguments.contains("--uitest-expand-log")
+
+    static let twoDevices = ProcessInfo.processInfo.arguments.contains("--uitest-two-devices")
+    static let offlineRoute = ProcessInfo.processInfo.arguments.contains("--uitest-offline-route")
+    static let reconnecting = ProcessInfo.processInfo.arguments.contains("--uitest-reconnecting")
+    static let savedRouteDrag = ProcessInfo.processInfo.arguments.contains("--uitest-saved-route-drag")
+
+    static let dragRouteAID = UUID(uuidString: "00000000-0000-4000-8000-0000000000A1")!
+    static let dragRouteBID = UUID(uuidString: "00000000-0000-4000-8000-0000000000B2")!
+
+    // A recovery fixture parks its retry clock until cancellation. UI tests
+    // can inspect/cancel the first attempt without waiting five real seconds.
+    static let parkedRecoveryTime = MonotonicTimeSource(
+        now: { .zero },
+        sleep: { _ in try await Task.sleep(for: .seconds(86_400)) }
+    )
+
+    @MainActor
+    static func configureFixture(_ app: AppState) {
+        if twoDevices {
+            let alpha = app.selectedSession
+            alpha.deviceName = "Alpha iPhone"
+            alpha.bindConnectedForTesting(udid: "UITEST-ALPHA")
+            app.addSession()
+            let beta = app.selectedSession
+            beta.deviceName = "Beta iPhone"
+            beta.bindConnectedForTesting(udid: "UITEST-BETA")
+            Task { @MainActor in
+                await alpha.loadDrawnRoute([
+                    .init(latitude: 25.0339, longitude: 121.5645),
+                    .init(latitude: 25.0349, longitude: 121.5655),
+                ])
+            }
+        }
+        if offlineRoute {
+            Task { @MainActor in
+                await app.loadDrawnRoute([
+                    .init(latitude: 25.0339, longitude: 121.5645),
+                    .init(latitude: 25.0349, longitude: 121.5655),
+                ])
+            }
+        }
+        if reconnecting {
+            app.selectedSession.deviceName = "Recovering iPhone"
+            app.selectedSession.beginRecoveryForUITesting(udid: "UITEST-RECOVERY")
+        }
+        if savedRouteDrag {
+            for (id, name, timestamp) in [
+                (dragRouteAID, "Drag route A", 1_000.0),
+                (dragRouteBID, "Drag route B", 2_000.0),
+            ] {
+                let route = SavedRoute(
+                    id: id,
+                    name: name,
+                    createdAt: Date(timeIntervalSince1970: timestamp),
+                    transportModeRaw: TransportMode.walk.rawValue,
+                    customSpeedKmh: nil,
+                    coordinates: [
+                        .init(lat: 25.0339, lon: 121.5645),
+                        .init(lat: 25.0349, lon: 121.5655),
+                    ],
+                    source: "direct",
+                    sourceDetail: nil,
+                    fromWaypoint: nil,
+                    toWaypoint: nil,
+                    stopWaypoints: nil,
+                    category: nil
+                )
+                try? app.savedRoutes.save(route)
+            }
+        }
+    }
 }
 #endif

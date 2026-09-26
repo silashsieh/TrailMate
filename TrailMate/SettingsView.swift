@@ -79,6 +79,7 @@ struct SettingsView: View {
 
             Section("Menu Bar") {
                 Toggle("Show menu bar item", isOn: $showMenuBarItem)
+                    .accessibilityIdentifier("settings.menuBar.show")
                     .help("A status item with quick actions, so TrailMate stays controllable when the window is closed.")
 
                 // Coupled to the menu bar toggle to dodge the unreachable-app
@@ -88,6 +89,7 @@ struct SettingsView: View {
                 // disabled), and AppDelegate.applyActivationPolicy enforces the
                 // same guard at runtime.
                 Toggle("Hide Dock icon when the window is closed", isOn: $hideDockWhenWindowClosed)
+                    .accessibilityIdentifier("settings.dock.hideWhenClosed")
                     .disabled(!showMenuBarItem)
                     .help("Run in the background as a menu bar app. Requires the menu bar item so the app stays reachable.")
 

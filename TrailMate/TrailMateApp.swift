@@ -164,18 +164,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menuBarShown = defaults.bool(forKey: Self.showMenuBarItemKey)
         let hideDockWhenClosed = defaults.bool(forKey: Self.hideDockWhenWindowClosedKey)
 
-        let policy: NSApplication.ActivationPolicy
-        if windowVisible {
-            policy = .regular
-        } else if !menuBarShown {
-            // No window and no menu bar item → forcing .accessory would hide
-            // the Dock icon too and strand the app. Keep the Dock icon.
-            policy = .regular
-        } else if hideDockWhenClosed {
-            policy = .accessory
-        } else {
-            policy = .regular
-        }
+        let decision = ActivationPolicyDecision.decide(
+            windowVisible: windowVisible,
+            menuBarShown: menuBarShown,
+            hideDockWhenClosed: hideDockWhenClosed
+        )
+        let policy: NSApplication.ActivationPolicy = decision == .regular ? .regular : .accessory
 
         if NSApp.activationPolicy() != policy {
             NSApp.setActivationPolicy(policy)

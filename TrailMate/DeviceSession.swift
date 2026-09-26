@@ -1102,6 +1102,12 @@ final class DeviceSession: Identifiable {
 
 #if DEBUG
 extension DeviceSession {
+    func beginRecoveryForUITesting(udid: String) {
+        selectedDeviceUDID = udid
+        autoReconnectArmed = true
+        beginRecovery(udid: udid, reason: "Fixture tunnel loss")
+    }
+
     // Test seam (same file, so it can set the private(set) connectedUDID): mark
     // this session connected to a UDID without a tunnel or daemon, so
     // CommandDispatchTests can prove dispatch routes a command to exactly the

@@ -382,4 +382,178 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertFalse(sheet.textFields["wander.sweep.spacing"].exists)
         sheet.buttons["Close"].click()
     }
+
+    // A canned polyline enters the same local actor as an imported or drawn
+    // route. No MapKit search, GPX file panel, device, or network is involved.
+    @MainActor
+    func testOfflineRoutePlayStopAndSaveThroughSidebar() throws {
+        app.launchArguments += ["--uitest-offline-route"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let saveRoute = window.buttons["Save Route…"]
+        XCTAssertTrue(saveRoute.waitForExistence(timeout: 10))
+        XCTAssertFalse(window.buttons["Disconnect"].exists)
+
+        window.buttons["Play"].click()
+        XCTAssertTrue(window.buttons["Pause"].waitForExistence(timeout: 5))
+        window.buttons["Stop"].click()
+        XCTAssertTrue(window.buttons["Play"].waitForExistence(timeout: 5))
+
+        saveRoute.click()
+        let alert = app.alerts["Save Route"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        let name = alert.textFields["Name"]
+        XCTAssertTrue(name.exists)
+        name.click()
+        name.typeText("Offline UI route")
+        alert.buttons["Save"].click()
+        XCTAssertTrue(window.staticTexts["Saved Routes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(window.buttons.containing(
+            NSPredicate(format: "label CONTAINS %@", "Offline UI route")
+        ).firstMatch.waitForExistence(timeout: 5))
+        let routeFiles = try FileManager.default.contentsOfDirectory(
+            at: isolatedRuntimeRoot.appendingPathComponent("routes"),
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(routeFiles.filter { $0.pathExtension == "json" && $0.lastPathComponent != "order.json" }.count, 1)
+    }
+
+    @MainActor
+    func testSelectedDeviceOwnsRouteAndRecordingControls() throws {
+        app.launchArguments += ["--uitest-two-devices"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let alpha = window.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Alpha iPhone")).firstMatch
+        let beta = window.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Beta iPhone")).firstMatch
+        XCTAssertTrue(alpha.waitForExistence(timeout: 10))
+        XCTAssertTrue(beta.waitForExistence(timeout: 10))
+        XCTAssertTrue(alpha.label.contains("Connected"))
+        XCTAssertTrue(beta.label.contains("Connected"))
+
+        alpha.click()
+        XCTAssertTrue(window.buttons["Save Route…"].waitForExistence(timeout: 10))
+        let record = window.buttons["Record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 5))
+        record.click()
+        XCTAssertTrue(window.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop ·")).firstMatch
+            .waitForExistence(timeout: 5))
+
+        beta.click()
+        XCTAssertFalse(window.buttons["Save Route…"].exists)
+        XCTAssertTrue(window.buttons["Record"].waitForExistence(timeout: 5))
+        alpha.click()
+        XCTAssertTrue(window.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop ·")).firstMatch
+            .waitForExistence(timeout: 5))
+        // Explicit Stop persists only to this test's temporary recording root.
+        window.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop ·")).firstMatch.click()
+    }
+
+    @MainActor
+    func testCancelRetryReturnsToManualConnect() throws {
+        app.launchArguments += ["--uitest-reconnecting"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        XCTAssertTrue(window.staticTexts["connection.reconnectStatus"].waitForExistence(timeout: 5))
+        XCTAssertTrue(window.buttons["connection.cancelRetry"].waitForExistence(timeout: 5))
+        window.buttons["connection.cancelRetry"].click()
+        XCTAssertFalse(window.buttons["connection.cancelRetry"].waitForExistence(timeout: 2))
+        XCTAssertTrue(window.buttons["Connect"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testUpdaterPreferencesRoundTripAndCommandExists() throws {
+        app.launch()
+        let applicationMenu = app.menuBars.menuBarItems["TrailMate"]
+        XCTAssertTrue(applicationMenu.waitForExistence(timeout: 10))
+        applicationMenu.click()
+        let check = app.menuItems["Check for Updates…"]
+        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        XCTAssertTrue(check.isEnabled)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+
+        var settings = openSettings()
+        var checks = settings.switches["settings.updates.automaticChecks"]
+        var downloads = settings.switches["settings.updates.automaticDownloads"]
+        XCTAssertTrue(checks.waitForExistence(timeout: 5))
+        let originalChecks = switchValue(checks)
+        let originalDownloads = switchValue(downloads)
+        if originalChecks == "0" { checks.click() }
+        downloads.click()
+        let changedDownloads = switchValue(downloads)
+        XCTAssertNotEqual(originalDownloads, changedDownloads)
+        checks.click()
+        XCTAssertFalse(downloads.isEnabled)
+
+        app.terminate()
+        app.launch()
+        settings = openSettings()
+        checks = settings.switches["settings.updates.automaticChecks"]
+        downloads = settings.switches["settings.updates.automaticDownloads"]
+        XCTAssertEqual(switchValue(checks), "0")
+        XCTAssertFalse(downloads.isEnabled)
+        checks.click()
+        XCTAssertEqual(switchValue(downloads), changedDownloads)
+    }
+
+    @MainActor
+    func testMenuBarDockPreferencesKeepAReopenPath() throws {
+        app.launch()
+        var settings = openSettings()
+        var menuBar = settings.switches["settings.menuBar.show"]
+        var hideDock = settings.switches["settings.dock.hideWhenClosed"]
+        XCTAssertTrue(menuBar.waitForExistence(timeout: 5))
+        XCTAssertTrue(hideDock.isEnabled)
+        menuBar.click()
+        XCTAssertFalse(hideDock.isEnabled)
+
+        app.terminate()
+        app.launch()
+        settings = openSettings()
+        menuBar = settings.switches["settings.menuBar.show"]
+        hideDock = settings.switches["settings.dock.hideWhenClosed"]
+        XCTAssertEqual(switchValue(menuBar), "0")
+        XCTAssertFalse(hideDock.isEnabled)
+        menuBar.click()
+        XCTAssertTrue(hideDock.isEnabled)
+    }
+
+    // One accessibility probe for epic 039's fixed drop destination. The
+    // deterministic IDs let us check the persisted sidecar, not just a list
+    // animation. The wider drag/category matrix remains a manual release row.
+    @MainActor
+    func testSavedRouteDragPersistsOrder() throws {
+        app.launchArguments += ["--uitest-saved-route-drag"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let first = window.descendants(matching: .any)
+            .matching(identifier: "saved-route-00000000-0000-4000-8000-0000000000A1").firstMatch
+        let second = window.descendants(matching: .any)
+            .matching(identifier: "saved-route-00000000-0000-4000-8000-0000000000B2").firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(second.waitForExistence(timeout: 5))
+        // Newer B starts above A. Drag A onto B's top half to insert before B.
+        first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+            forDuration: 1,
+            thenDragTo: second.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+        )
+        let sidecar = isolatedRuntimeRoot.appendingPathComponent("routes/order.json")
+        let expected = [
+            "00000000-0000-4000-8000-0000000000A1",
+            "00000000-0000-4000-8000-0000000000B2",
+        ]
+        let deadline = Date().addingTimeInterval(5)
+        var persisted: [String] = []
+        repeat {
+            if let data = try? Data(contentsOf: sidecar) {
+                persisted = (try? JSONDecoder().decode([String].self, from: data)) ?? []
+            }
+            if persisted == expected { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        XCTAssertEqual(persisted, expected)
+    }
 }

@@ -1,8 +1,9 @@
 # Testing Strategy
 
-**Status (2026-09-26):** The integrated unit suite passed (241 tests). The UI gate remains open:
-the saved-route drag probe did not persist an order change, and a later isolated-bundle-ID UI run
-lost macOS accessibility authorization after five passes. Manual smoke checks remain pending.
+**Status (2026-10-11):** The integrated unit suite passed (241 tests). The latest isolated UI run
+passed 16 tests and explicitly skipped the saved-route drag probe: XCUITest's synthetic gesture
+did not reach SwiftUI's drop destination on this macOS host. The real drag remains a mandatory
+manual check in F08. Signed-candidate manual and release checks remain pending.
 
 ## Running the tests
 
@@ -115,9 +116,10 @@ Coverage:
   `CoverageRouteBuilderTests`, not here.
 - **Integrated v2.3.0 UI flows.** Isolated fixtures drive offline route Play/Stop/Save Route,
   two-device selection and recording visibility, retry cancellation, updater toggle round-trips
-  and command presence, and menu/Dock reachability settings. The saved-route drag probe currently
-  fails to produce the order sidecar, so its UI wiring remains a release finding. The complete
-  drag matrix and MenuBarExtra interaction remain in the manual plan.
+  and command presence, and menu/Dock reachability settings. The saved-route XCUITest is skipped:
+  repeated text and full-row synthetic drags did not produce the order sidecar. A direct drag of
+  the isolated fixture did reach the indexed drop handler and persist the reordered routes, but
+  the complete drag matrix and MenuBarExtra interaction remain in the manual plan.
 
 Every UI test launches with its own `UserDefaults` suite and temporary runtime root, then removes
 those fixtures after the app terminates. Hosted unit tests use a separate process-level domain/root
@@ -160,8 +162,9 @@ The acceptance-level matrix remains in [[033-refresh-test-coverage]]. Its determ
 have dedicated unit or UI suites for multi-session ownership, AI dispatch and socket framing,
 connection/discovery failure, offline routing, saved-item persistence, recording isolation,
 simulation cadence, updater preferences, and menu/Dock decisions. The full integrated unit suite
-passed; the UI drag probe and later accessibility failure keep the UI gate open. Failed `.xcresult`
-bundles are recorded in [v2.3.0-release-readiness](v2.3.0-release-readiness.md).
+passed. The latest isolated UI run completed with 16 passes, one documented drag skip, and no
+failures; F08 remains a manual release gate. Earlier failed `.xcresult` bundles and the current
+result are recorded in [v2.3.0-release-readiness](v2.3.0-release-readiness.md).
 
 Real USB/Wi-Fi discovery, tunneld authorization, device location delivery, live MapKit search and
 routing, sleep/wake, saved-item drag across every section, MenuBarExtra interaction, and the signed

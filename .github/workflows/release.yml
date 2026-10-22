@@ -23,7 +23,7 @@ jobs:
     # Production signing credentials and the Sparkle key are isolated in the
     # protected release environment and exist only for this job.
     environment: release
-    runs-on: macos-26
+    runs-on: xcode-27
     permissions:
       contents: write
     outputs:

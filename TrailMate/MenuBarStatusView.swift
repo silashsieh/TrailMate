@@ -19,7 +19,13 @@ struct MenuBarStatusView: View {
     var body: some View {
         // Status summary. MenuBarExtra (.menu style) renders plain controls as
         // menu rows; disabled Text reads as a non-interactive header.
-        Text(statusSummary)
+        Text(MenuBarStatusFormatter.summary(
+            deviceName: appState.connectedDeviceName,
+            connection: appState.connectionStatus,
+            playback: appState.simState.navigationPlaybackState,
+            progress: appState.simState.navigationProgress,
+            isRecording: appState.simState.isRecording
+        ))
 
         Divider()
 
@@ -52,45 +58,6 @@ struct MenuBarStatusView: View {
         // applicationShouldTerminate handshake runs the clean daemon/tunnel
         // disconnect — don't reimplement teardown here.
         Button("Quit TrailMate") { NSApp.terminate(nil) }
-    }
-
-    // MARK: - Derived state
-
-    private var statusSummary: String {
-        let connection: String
-        switch appState.connectionStatus {
-        case .disconnected: connection = String(localized: "Disconnected")
-        case .connecting: connection = String(localized: "Connecting…")
-        case .connected: connection = String(localized: "Connected")
-        case .error(let message): connection = String(localized: "Error: \(message)")
-        }
-
-        let activity: String
-        switch appState.simState.navigationPlaybackState {
-        case .playing:
-            let pct = Int((appState.simState.navigationProgress * 100).rounded())
-            activity = String(localized: "Playing \(pct)%")
-        case .paused:
-            activity = String(localized: "Paused")
-        case .idle:
-            activity = appState.simState.isRecording
-                ? String(localized: "Recording")
-                : String(localized: "Idle")
-        }
-
-        // Lead with the connected device's name when there is one (epic 026) so a
-        // glance at the menu answers "which device"; nil while disconnected or
-        // connecting keeps a stale name out. Truncated so a long name doesn't
-        // blow out the narrow menu item.
-        if let name = appState.connectedDeviceName {
-            return "\(Self.truncated(name)) · \(connection) · \(activity)"
-        }
-        return "\(connection) · \(activity)"
-    }
-
-    // Cap long device names so the status summary stays compact in the menu bar.
-    private static func truncated(_ name: String, max: Int = 24) -> String {
-        name.count > max ? "\(name.prefix(max - 1))…" : name
     }
 
     // MARK: - Window reopen

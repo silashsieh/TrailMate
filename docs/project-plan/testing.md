@@ -1,6 +1,9 @@
 # Testing Strategy
 
-**Status:** Unit suites implemented; CI runs them on every push/PR. Integration and smoke tests remain TODO.
+**Status (2026-10-11):** The integrated unit suite passed (241 tests). The latest isolated UI run
+passed 16 tests and explicitly skipped the saved-route drag probe: XCUITest's synthetic gesture
+did not reach SwiftUI's drop destination on this macOS host. The real drag remains a mandatory
+manual check in F08. Signed-candidate manual and release checks remain pending.
 
 ## Running the tests
 
@@ -9,8 +12,8 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 ```
 
 - The test target is hosted in TrailMate.app (`TEST_HOST`), so `xcodebuild test` builds and
-  launches the app bundle. **Don't run it while a live TrailMate session is open** — the test
-  host is a second instance sharing the same bundle id and defaults. Build-only verification
+  launches the app bundle. **Don't run it while a live TrailMate session is open.** Test
+  launches use isolated defaults and runtime paths; build-only verification
   (`xcodebuild build-for-testing`) is safe alongside a live session.
 - Because the app bundle embeds `PythonResources/` (gitignored), a fresh checkout or worktree
   needs it present before any test build: run `./packaging/build.sh`, or in a worktree symlink
@@ -21,6 +24,13 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
   via accessibility, so the Mac must have a GUI session (and the terminal may need an
   Automation/Accessibility grant on first run). Unit-only:
   `-skip-testing:TrailMateUITests`; UI-only: `-only-testing:TrailMateUITests`.
+- Local app-hosted UI runs should build with a unique test-only `PRODUCT_BUNDLE_IDENTIFIER`
+  override and unique DerivedData, then use the same DerivedData for `test-without-building`.
+  On the first WP10 UI run, macOS wrote to the personal
+  `com.shihlien.TrailMate.plist` despite the injected defaults suite. AppKit window/status-item
+  state follows the bundle ID; `com.sh.TrailMate.WP10.Isolated` wrote to its own plist and
+  left the personal plist unchanged in later comparisons. The project and release bundle ID
+  remain unchanged. Hold the test-run lease and close the personal instance first.
 
 ## CI
 
@@ -50,9 +60,18 @@ xcodebuild test -project TrailMate.xcodeproj -scheme TrailMate -destination 'pla
 | `SimulationActorAttachTests` | Device-mirror-on-connect (epic 028): attaching a backend immediately pushes the current red dot, and re-attaching after an offline move mirrors the new position. Uses a recording backend at the actor seam — the UI mock backend swallows locations, so this is the only place the mirror is observable. |
 | `StrokeGeometryTests` | Hand-drawn stroke smoothing (Chaikin) + resampling. |
 | `CommandProtocolTests` | AI command-layer value types: verb parsing (case, whitespace, missing/invalid args), JSON response encoding (optionals omitted), greeting line. |
-| `CommandDispatchTests` | Multi-device routing (epic 012): `TELEPORT <A>` moves only A's integrator (A-never-moves-B), unknown vs not-connected UDIDs return the right codes, STATUS reports per-device state. Uses ≥2 sessions via a DEBUG `bindConnectedForTesting` seam (no tunnel/daemon). |
+| `CommandDispatchTests` | Every AI verb's positive/failure path, per-device STATUS, CONNECT idempotency and GUI focus, A-never-moves-B, and clean recording versus noisy backend coordinates. Fake discovery, backend, connection attempter, clock, and temporary runtime avoid live services. |
+| `CommandServerSocketTests` | Real Unix-socket lifecycle and framing with a fake dispatcher: owner-only directory, greeting, fragmented/multiple/oversized lines, client close, stale node, toggle, and stop/start epochs under a private temporary root. |
+| `AppRuntimePathsTests`, `MonotonicTimeSourceTests` | Hosted-process and explicit runtime/defaults isolation, live-path compatibility without writes, and controllable monotonic time. |
+| `AppStateSessionTests`, `DeviceSessionRouteTests` | Session add/remove/selection, joystick and tuning ownership, connected-name tracking, independent routes, offline build/play/stop/save, search success/failure, coordinate copy, and disconnect/re-attach mirroring. Uses fake routing/search/backends and an isolated clipboard writer. |
+| `DeviceDiscoveryServiceTests`, `TunnelBrokerMapTests` | USB/Wi-Fi/malformed/missing discovery rows; fake UDID maps, usbmux preference/fallback, endpoint changes, errors, and controllable timeout. No real lister or localhost tunneld. |
+| `DaemonPipeTests`, `DeviceSessionLossTests`, `DeviceSessionReconnectTests` | Fake pipe READY/reply/timeout/EPIPE/EOF/exit, loss isolation, explicit disconnect and sleep/wake, exact retry/cancel/exhaustion transitions on a manual clock. No real daemon, tunnel, or admin dialog. |
 | `CoordinateFormatTests` | Direct location entry (epic 027): decimal-degrees `lat, lon` parsing (whitespace/signs accepted, out-of-range and garbage rejected) and the paste-able clipboard formatting round-trip. |
 | `SavedItemsLibraryTests` | Saved-items library (epic 029): `LibraryOrder` drag-reorder/sort + category-assignment persistence, and `MapRegionMath` auto-pan framing for a selected saved location/route. Pure, nonisolated helpers. |
+| `SavedItemsPersistenceTests` | Temporary-root route files/order sidecar and isolated-defaults waypoint round-trips, rename/category/delete, and legacy JSON compatibility. |
+| `RecordingCaptureTests`, `RecordingsLibraryTests`, `RecordingLifecycleTests` | Per-session clean-point capture and monotonic timestamps, temporary-root GPX/index lifecycle, two-device isolation, selected-only visibility, explicit Stop persistence, and quit/removal discard. |
+| `SimulationLoopTests` | Manual-clock idle suppression/re-emission, active/playback UI cadence caps, Rejoin reset, and single timed route abort. |
+| `MenuBarStatusFormatterTests`, `ActivationPolicyDecisionTests` | Pure menu status and Dock/menu-bar reachability decisions across session, activity, and preference combinations. |
 | `TunnelBrokerReclaimTests` | Stale-tunneld reclaim loop (epic 031) via an injected probe/shutdown: skips when nothing's listening, reclaims then confirms the port frees, and reports failure when a tunneld won't die. No networking. |
 | `CoverageRouteBuilderTests` | Sweeping-mode serpentine geometry (epic 030): alternating lane order, a square centered on the selected point with side exactly `2 × radius`, containment plus a first point on the west edge, 70 m lane spacing against a CoreLocation reference, byte-identical output for identical inputs, the narrow-square single-lane case, invalid-input and point-cap failures, and `length ÷ speed` estimates. Distances are checked with `CLLocation.distance`, not the builder's own projection, so the suite is an independent oracle. Also covers `WanderMode(persisted:)`'s fallback to Random. Pure, nonisolated helper — no router, no map. |
 | `SweepAreaHandoffTests` | The other half of epic 030, in the same file: `AppState.sweepArea` reaches the selected session's `routeCoordinates`, and reset-start leaves the marker on the square's first edge point rather than the selected center (asserted as "within a tick of the edge point, ~a half-side away from the center"). An invalid sweep leaves the loaded route untouched and logs the failure. Device-free — the sweep drives the local red dot like any other route source. |
@@ -95,10 +114,19 @@ Coverage:
   parks the sheet back on Random / 70 m. The segmented mode picker exposes its segments as
   `radioButtons` (`sheet.radioButtons["Sweeping"]`); the sweep math itself is
   `CoverageRouteBuilderTests`, not here.
+- **Integrated v2.3.0 UI flows.** Isolated fixtures drive offline route Play/Stop/Save Route,
+  two-device selection and recording visibility, retry cancellation, updater toggle round-trips
+  and command presence, and menu/Dock reachability settings. The saved-route XCUITest is skipped:
+  repeated text and full-row synthetic drags did not produce the order sidecar. A direct drag of
+  the isolated fixture did reach the indexed drop handler and persist the reordered routes, but
+  the complete drag matrix and MenuBarExtra interaction remain in the manual plan.
 
-Every test leaves user preferences as it found them (UI tests run against the real
-`com.sh.TrailMate` defaults). Deliberately device-free and data-free otherwise, so the suite
-passes identically on a clean CI user and a dev Mac.
+Every UI test launches with its own `UserDefaults` suite and temporary runtime root, then removes
+those fixtures after the app terminates. Hosted unit tests use a separate process-level domain/root
+and explicit temporary roots for AppState fixtures. Sparkle's test controller does not construct
+the live updater, read its app-domain preferences, or contact the feed. The UI app still needs the
+test-only bundle ID override above to isolate AppKit's own preference writes. Tests must not run
+beside a personal TrailMate instance.
 
 **Test-only launch hooks (DEBUG builds only; `UITestSupport.swift`).**
 
@@ -110,7 +138,8 @@ passes identically on a clean CI user and a dev Mac.
   `connect()` attach a `MockSimulationBackend` — no tunnel, no admin prompt, no daemon;
   commands are accepted and location updates swallowed. This is the "record-only mock"
   backend the `SimulationBackend` protocol was shaped for, and it unlocks any
-  connected-gated UI (`testMockConnectionEnablesConnectedUI` exercises the connect flow).
+  connected-gated UI (`testMockConnectionShowsConnectedDeviceNameAndStatus` exercises the connect
+  flow).
 - `--uitest-open-wander` opens the Wander sheet at launch with a synthetic center, so the
   preset-persistence test (epic 018's contract — selection saved on every change, not just
   Start) can verify a full relaunch round-trip without driving the map long-press, which
@@ -120,54 +149,31 @@ passes identically on a clean CI user and a dev Mac.
   log collapsed by default and persists the choice, so "View Full Log" only renders when
   expanded; the hook makes it deterministically present without mutating the persisted
   `sidebarLogExpanded` preference.
+- `--uitest-two-devices`, `--uitest-offline-route`, `--uitest-reconnecting`, and
+  `--uitest-saved-route-drag` seed only the isolated test runtime. The recovery clock is parked
+  so cancellation needs no real five-second polling delay.
 
 Query gotcha for future tests: SwiftUI exposes sidebar headers/buttons as accessibility
 *labels* but Form/row `Text`s as *values* — match the latter with a `value ==` predicate.
 
-## Unit Tests (TODO)
+## Coverage status and release gates
 
-- **`DaemonProtocolTests`** — fake daemon process that records commands; verify `DaemonBridge`
-  sends correct command strings and parses responses. Needs a fake-daemon harness; build it the
-  next time the protocol changes.
-- **`RouteVMTests`** — search, From/To state transitions, route calculation result handling.
-- **`RecorderServiceTests`** — record → persist → reload → coords identical. Deferred: the
-  app-hosted test process shares the real `~/Library/Application Support/TrailMate/`, so this
-  needs injectable storage paths first.
+The acceptance-level matrix remains in [[033-refresh-test-coverage]]. Its deterministic cases now
+have dedicated unit or UI suites for multi-session ownership, AI dispatch and socket framing,
+connection/discovery failure, offline routing, saved-item persistence, recording isolation,
+simulation cadence, updater preferences, and menu/Dock decisions. The full integrated unit suite
+passed. The latest isolated UI run completed with 16 passes, one documented drag skip, and no
+failures; F08 remains a manual release gate. Earlier failed `.xcresult` bundles and the current
+result are recorded in [v2.3.0-release-readiness](v2.3.0-release-readiness.md).
 
-## Integration Tests (TODO — semi-automated, slower)
+Real USB/Wi-Fi discovery, tunneld authorization, device location delivery, live MapKit search and
+routing, sleep/wake, saved-item drag across every section, MenuBarExtra interaction, and the signed
+Sparkle update are environment-bound checks. They are tracked in the permanent
+[ManualSmokeTestPlan.md](../../TrailMateTests/ManualSmokeTestPlan.md), with an owner, expected
+result, status, and evidence field for each row. A debug app with ad-hoc signing is not the release
+artifact and cannot pass the signing or production-update rows.
 
-- Daemon round-trip with a real pymobiledevice3 in mock mode (no actual device).
-- XPC handshake with the privileged helper, once SMAppService is wired up (see [features.md's deferred items](../technical/features.md#deferred--dropped)).
+## Later integration candidates
 
-## Manual Smoke Tests (TODO — checklist to run before tagging a release)
-
-To live in `TrailMateTests/ManualSmokeTestPlan.md` once written.
-
-1. Cold launch with no device connected — UI shows "no device" state.
-1. Connect iPhone via USB — appears in sidebar within ~5 s.
-1. First-run sudo prompt — accept; tunnel comes up.
-1. Teleport to 5 different cities; verify on the iPhone each time.
-1. Route from home to office; play at 10×; arrives at correct end coordinate.
-1. Joystick: connect controller, push stick, verify smooth movement.
-1. Composite control: mid-route, push the stick perpendicular; off-route indicator appears; press Rejoin; marker snaps back.
-1. Recording: start, joystick around for 2 min, stop; today's recording appears in the sidebar; Replay reproduces the trajectory.
-1. Wi-Fi: pair via USB once, run `pymobiledevice3 lockdown wifi-connections on`, reboot device, confirm it appears under "Wi-Fi" in the picker.
-1. Pull USB mid-session — UI shows tunnel-down; reconnect cable; re-Connect recovers cleanly.
-1. Sleep the Mac mid-session — on wake, UI is in `.disconnected` state (DVT session cannot survive sleep).
-1. Quit the app — verify no orphaned processes (`ps aux | grep -E "tm_daemon|tm_tunnel|pymobiledevice3"`).
-
-Items the automated suites can't cover (UI-fragile or device-bound), so verify here:
-
-1. Menu-bar device name (epic 026): connect a device; the menu-bar item reads `<name> · Connected · <activity>` (MenuBarExtra content isn't UICTest-queryable).
-1. Place search → Go (epic 027): type a place name, pick a result; the red dot teleports there and the map pans to frame it (needs live MapKit local search).
-1. Saved-items library (epic 029): drag to reorder a saved location and a saved route; assign each to a category via the row context menu; relaunch and confirm both order and category stick. Selecting a saved item auto-pans the map to frame it. (Reorder/auto-pan *math* is unit-tested in `SavedItemsLibraryTests`; the drag/context-menu UI is checked here.)
-1. Map-control overlap (epic 024): with the joystick active mid-route, confirm the map controls and off-route indicator don't occlude each other (layout/occlusion, asserted visually).
-1. Sweeping coverage (epic 030): right-click the map → **Wander nearby…** → **Sweeping**, 500 m at 70 m spacing; confirm the sheet's square-side/lane caption and distance-time estimate, press Start, and watch the marker jump to the west edge of the southernmost lane and then mow the square lane by lane. Then scrub, loop, Record, **Save Route…**, **Export GPX** on the same route, and switch back to **Random** to confirm its duration presets, road-routed output and auto-play are untouched. (Geometry is unit-tested in `CoverageRouteBuilderTests`; what's checked here is the on-device teleport-then-sweep and the shared route surfaces.)
-1. Sparkle bootstrap/update (epics 038 and 047, completed 2026-09-03): the published v2.1.3 DMG was installed, **Check for Updates…** reached the signed feed, and the app downloaded, verified, installed, and relaunched into stable v2.2.0. The production run also validated its exported app, staged copy, exact app mounted from the finished DMG, every appcast DMG tag/filename version pair, notarization, and Pages deployment; a deliberately tampered update was rejected. Repeat this path for future releases and also confirm automatic-check/download preferences persist and the manual GitHub DMG remains usable if Pages is unavailable. Full signed DMG updates are supported while delta generation is disabled; v2.1.2 cannot self-update and must be replaced manually.
-
-## Implementation order for the remaining suites (suggested)
-
-1. `RecorderServiceTests` — once storage paths are injectable.
-2. `RouteVMTests` — pure state-machine coverage of search and From/To transitions.
-3. `DaemonProtocolTests` — needs a fake daemon harness; build it the next time the protocol changes.
-4. Smoke-test checklist — write it down and run it manually for the next release; automate piecewise later.
+- A daemon round-trip against a controlled pymobiledevice3 mock without a device.
+- An XPC handshake for a privileged SMAppService helper if that separate deferred feature ships.

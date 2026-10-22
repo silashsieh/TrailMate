@@ -30,19 +30,30 @@ final class DeviceDiscoveryService {
     private(set) var isScanning = false
     private(set) var lastError: String?
     var hasScanned = false
+    #if DEBUG
+    // Dispatch tests must exercise DEVICES' forced refresh without invoking the
+    // bundled lister, which can inspect the owner's connected devices.
+    var scanLinesForTesting: [String]?
+    #endif
 
     func scan() async {
         guard !isScanning else { return }
         #if DEBUG
+        if let scanLinesForTesting {
+            devices = scanLinesForTesting.compactMap(Self.parse)
+            lastError = nil
+            hasScanned = true
+            return
+        }
         if UITestSupport.mockConnection {
             devices = [DiscoveredDevice(udid: "UITEST-MOCK-UDID", name: "Mock iPhone",
                                         connectionType: .usb, host: nil, port: nil)]
             hasScanned = true
             return
         }
-        // Any other UI-test launch: no real lister, so no Bonjour/usbmux and
-        // thus no Local Network permission prompt to block automation.
-        if UITestSupport.isUITesting {
+        // Hosted unit tests also launch TrailMate.app. Keep every test process
+        // away from Bonjour/usbmux, including its app-owned manager.
+        if UITestSupport.isTesting {
             devices = []
             hasScanned = true
             return
@@ -63,7 +74,7 @@ final class DeviceDiscoveryService {
         }
     }
 
-    private static func parse(line: String) -> DiscoveredDevice? {
+    static func parse(line: String) -> DiscoveredDevice? {
         guard let data = line.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let udid = obj["udid"] as? String,

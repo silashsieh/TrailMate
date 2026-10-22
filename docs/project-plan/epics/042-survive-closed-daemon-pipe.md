@@ -57,17 +57,16 @@ alive** — menu bar, other sessions, and the command socket unaffected.
 
 ## Stories
 
-- [ ] Stop the fatal signal: ignore SIGPIPE process-wide (`signal(SIGPIPE, SIG_IGN)`) and/or
-      set `F_SETNOSIGPIPE` on the daemon pipe's fds — `FileHandle`/`Pipe` have no socket-level
-      `SO_NOSIGPIPE`, so it has to happen at the fd layer.
-- [ ] Make every daemon-pipe write EPIPE-aware: the three `DaemonBridge` write sites report the
+- [x] Stop the fatal signal: set `F_SETNOSIGPIPE` on each daemon stdin fd before the child starts.
+      `FileHandle`/`Pipe` have no socket-level `SO_NOSIGPIPE`, so it happens at the fd layer.
+- [x] Make every daemon-pipe write EPIPE-aware: the three `DaemonBridge` write sites report the
       failure instead of trapping, and route it into the existing disconnect teardown — matching
       how `CommandServer` already treats a dead client.
-- [ ] Surface it like any other drop: sidebar status, `TrailMateError` case, and a log line (the
+- [x] Surface it like any other drop: sidebar status, `DaemonError`/backend failure case, and a log line (the
       CLAUDE.md rule — never swallow `TUNNEL_DOWN` silently).
-- [ ] Unit test: a write to a pipe whose read end is closed yields a disconnect, not a
+- [x] Unit test: a write to a pipe whose read end is closed yields a disconnect, not a
       termination — the session ends in the error state and the process survives.
-- [ ] Multi-device check: one session's pipe closing leaves the other session connected and
+- [x] Multi-device check: one session's pipe closing leaves the other session connected and
       simulating.
 
 ## Open questions
@@ -83,6 +82,13 @@ alive** — menu bar, other sessions, and the command socket unaffected.
   pulled into the correctness release alongside [[043-auto-reconnect]] — a crash on a closed
   daemon pipe is the same disconnect path auto-retry has to recover from, so the two are
   worth building together.
+- **Per-fd protection, not process-wide signal ignoring (2026-09-25).** macOS accepts
+  `F_SETNOSIGPIPE` on the `Pipe` write fd. A single serial writer handles `SET`, `SETQ`, and
+  `QUIT` with explicit partial-write/EINTR/EPIPE handling. This avoids changing SIGPIPE behavior
+  for unrelated process I/O. After the first failure the writer deactivates itself, while a
+  lock-backed gate publishes exactly one loss event across EPIPE, EOF, daemon exit, and
+  `TUNNEL_DOWN`. The session detaches only its own backend and retains local simulation and
+  recording; automatic retry remains [[043-auto-reconnect]].
 
 ## Bugs / follow-ups found while building
 
@@ -94,4 +100,4 @@ alive** — menu bar, other sessions, and the command socket unaffected.
 - [ ] No `signal(SIGPIPE)` termination in the unified log for that scenario; the write failure
       is visible in the app's own log instead.
 - [ ] Other connected sessions, the menu-bar item, and the AI command socket all survive.
-- [ ] Regression test covers the closed-peer write.
+- [x] Regression test covers the closed-peer write and two-session isolation.

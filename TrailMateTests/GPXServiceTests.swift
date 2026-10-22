@@ -28,9 +28,9 @@ struct GPXServiceTests {
 
     @Test func roundTripTimestampedPreservesPointsAndTimes() {
         let points = [
-            RecorderService.Point(timestamp: startTime, latitude: 25.0330, longitude: 121.5654),
-            RecorderService.Point(timestamp: startTime.addingTimeInterval(10), latitude: 25.0335, longitude: 121.5650),
-            RecorderService.Point(timestamp: startTime.addingTimeInterval(25), latitude: 25.0340, longitude: 121.5645),
+            RecordingCapture.Point(timestamp: startTime, latitude: 25.0330, longitude: 121.5654),
+            RecordingCapture.Point(timestamp: startTime.addingTimeInterval(10), latitude: 25.0335, longitude: 121.5650),
+            RecordingCapture.Point(timestamp: startTime.addingTimeInterval(25), latitude: 25.0340, longitude: 121.5645),
         ]
         let xml = GPXService.generate(timestamped: points)
         let parsed = GPXService.parseTimestamped(data: Data(xml.utf8))

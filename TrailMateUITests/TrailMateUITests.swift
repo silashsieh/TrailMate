@@ -12,21 +12,37 @@ import XCTest
 // expose *values* — hence the value predicates.
 final class TrailMateUITests: XCTestCase {
     private var app: XCUIApplication!
+    private var isolatedDefaultsSuiteName: String!
+    private var isolatedRuntimeRoot: URL!
 
     @MainActor
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        let isolationID = UUID().uuidString
+        isolatedDefaultsSuiteName = "com.sh.TrailMate.UITests.\(isolationID)"
+        isolatedRuntimeRoot = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("TrailMate-UITests-\(isolationID)", isDirectory: true)
+        UserDefaults(suiteName: isolatedDefaultsSuiteName)?
+            .removePersistentDomain(forName: isolatedDefaultsSuiteName)
+        try? FileManager.default.removeItem(at: isolatedRuntimeRoot)
         // Base flag for every UI test: suppresses the real device lister so no
         // Local Network permission dialog appears on a clean CI user. Tests
         // append the specific --uitest-* hooks they need before launching.
         app.launchArguments = ["--uitest"]
+        app.launchEnvironment["TRAILMATE_TEST_DEFAULTS_SUITE"] = isolatedDefaultsSuiteName
+        app.launchEnvironment["TRAILMATE_TEST_RUNTIME_ROOT"] = isolatedRuntimeRoot.path
     }
 
     @MainActor
     override func tearDownWithError() throws {
         app.terminate()
         app = nil
+        UserDefaults(suiteName: isolatedDefaultsSuiteName)?
+            .removePersistentDomain(forName: isolatedDefaultsSuiteName)
+        try? FileManager.default.removeItem(at: isolatedRuntimeRoot)
+        isolatedDefaultsSuiteName = nil
+        isolatedRuntimeRoot = nil
     }
 
     private func staticText(withValue value: String, in element: XCUIElement) -> XCUIElement {
@@ -138,7 +154,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertEqual(switchValue(toggle), flipped)
 
-        // Leave the user's setting as we found it.
+        // Restore the per-test domain before this test ends.
         toggle.click()
         XCTAssertEqual(switchValue(toggle), original)
     }
@@ -165,7 +181,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(restored.waitForExistence(timeout: 5))
         XCTAssertEqual(String(describing: restored.value ?? ""), "English")
 
-        // Reset to System Default so the override doesn't leak to other tests.
+        // Reset to System Default inside this test's isolated domain.
         restored.click()
         app.menuItems["System Default"].click()
         XCTAssertEqual(String(describing: restored.value ?? ""), "System Default")
@@ -235,8 +251,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(restoredField.waitForExistence(timeout: 5))
         XCTAssertEqual(String(describing: restoredField.value ?? ""), "850")
 
-        // Park the selection on the factory-default preset rather than the
-        // test value (the original preset isn't accessibility-readable).
+        // Park the isolated domain on the factory-default preset.
         sheet.buttons["wander.radius.500"].click()
         sheet.buttons["Close"].click()
     }
@@ -304,7 +319,7 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(viewFullLog().waitForExistence(timeout: 5))
 
         // Collapse, relaunch: the log must come back collapsed — which also
-        // restores the factory default, leaving the preference as we found it.
+        // restores the factory default inside this test's isolated domain.
         logToggle().click()
         XCTAssertFalse(viewFullLog().waitForExistence(timeout: 2))
         app.terminate()
@@ -366,5 +381,151 @@ final class TrailMateUITests: XCTestCase {
         XCTAssertTrue(sheet.buttons["wander.duration.30"].waitForExistence(timeout: 5))
         XCTAssertFalse(sheet.textFields["wander.sweep.spacing"].exists)
         sheet.buttons["Close"].click()
+    }
+
+    // A canned polyline enters the same local actor as an imported or drawn
+    // route. No MapKit search, GPX file panel, device, or network is involved.
+    @MainActor
+    func testOfflineRoutePlayStopAndSaveThroughSidebar() throws {
+        app.launchArguments += ["--uitest-offline-route"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let saveRoute = window.buttons["Save Route…"]
+        XCTAssertTrue(saveRoute.waitForExistence(timeout: 10))
+        XCTAssertFalse(window.buttons["Disconnect"].exists)
+
+        window.buttons["Play"].click()
+        XCTAssertTrue(window.buttons["Pause"].waitForExistence(timeout: 5))
+        window.buttons["Stop"].click()
+        XCTAssertTrue(window.buttons["Play"].waitForExistence(timeout: 5))
+
+        saveRoute.click()
+        let alert = window.sheets.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(staticText(withValue: "Save Route", in: alert).exists)
+        let name = alert.textFields.firstMatch
+        XCTAssertTrue(name.exists)
+        name.click()
+        name.typeText("Offline UI route")
+        alert.buttons["Save"].click()
+        XCTAssertTrue(window.staticTexts["Saved Routes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(staticText(withValue: "Offline UI route", in: window)
+            .waitForExistence(timeout: 5))
+        let routeFiles = try FileManager.default.contentsOfDirectory(
+            at: isolatedRuntimeRoot.appendingPathComponent("routes"),
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(routeFiles.filter { $0.pathExtension == "json" && $0.lastPathComponent != "order.json" }.count, 1)
+    }
+
+    @MainActor
+    func testSelectedDeviceOwnsRouteAndRecordingControls() throws {
+        app.launchArguments += ["--uitest-two-devices"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        let alpha = window.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Alpha iPhone")).firstMatch
+        let beta = window.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Beta iPhone")).firstMatch
+        XCTAssertTrue(alpha.waitForExistence(timeout: 10))
+        XCTAssertTrue(beta.waitForExistence(timeout: 10))
+        XCTAssertTrue(alpha.label.contains("Connected"))
+        XCTAssertTrue(beta.label.contains("Connected"))
+
+        alpha.click()
+        XCTAssertTrue(window.buttons["Save Route…"].waitForExistence(timeout: 10))
+        let record = window.buttons["Record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 5))
+        record.click()
+        XCTAssertTrue(window.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop ·")).firstMatch
+            .waitForExistence(timeout: 5))
+
+        beta.click()
+        XCTAssertFalse(window.buttons["Save Route…"].exists)
+        XCTAssertTrue(window.buttons["Record"].waitForExistence(timeout: 5))
+        alpha.click()
+        XCTAssertTrue(window.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop ·")).firstMatch
+            .waitForExistence(timeout: 5))
+        // Explicit Stop persists only to this test's temporary recording root.
+        window.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop ·")).firstMatch.click()
+    }
+
+    @MainActor
+    func testCancelRetryReturnsToManualConnect() throws {
+        app.launchArguments += ["--uitest-reconnecting"]
+        app.launch()
+        let window = app.windows["TrailMate"]
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        XCTAssertTrue(window.staticTexts["connection.reconnectStatus"].waitForExistence(timeout: 5))
+        XCTAssertTrue(window.buttons["connection.cancelRetry"].waitForExistence(timeout: 5))
+        window.buttons["connection.cancelRetry"].click()
+        XCTAssertFalse(window.buttons["connection.cancelRetry"].waitForExistence(timeout: 2))
+        XCTAssertTrue(window.buttons["Connect"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testUpdaterPreferencesRoundTripAndCommandExists() throws {
+        app.launch()
+        let applicationMenu = app.menuBars.menuBarItems["TrailMate"]
+        XCTAssertTrue(applicationMenu.waitForExistence(timeout: 10))
+        applicationMenu.click()
+        let check = app.menuItems["Check for Updates…"]
+        XCTAssertTrue(check.waitForExistence(timeout: 5))
+        XCTAssertTrue(check.isEnabled)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+
+        var settings = openSettings()
+        var checks = settings.switches["settings.updates.automaticChecks"]
+        var downloads = settings.switches["settings.updates.automaticDownloads"]
+        XCTAssertTrue(checks.waitForExistence(timeout: 5))
+        let originalChecks = switchValue(checks)
+        let originalDownloads = switchValue(downloads)
+        if originalChecks == "0" { checks.click() }
+        downloads.click()
+        let changedDownloads = switchValue(downloads)
+        XCTAssertNotEqual(originalDownloads, changedDownloads)
+        checks.click()
+        XCTAssertFalse(downloads.isEnabled)
+
+        app.terminate()
+        app.launch()
+        settings = openSettings()
+        checks = settings.switches["settings.updates.automaticChecks"]
+        downloads = settings.switches["settings.updates.automaticDownloads"]
+        XCTAssertEqual(switchValue(checks), "0")
+        XCTAssertFalse(downloads.isEnabled)
+        checks.click()
+        XCTAssertEqual(switchValue(downloads), changedDownloads)
+    }
+
+    @MainActor
+    func testMenuBarDockPreferencesKeepAReopenPath() throws {
+        app.launch()
+        var settings = openSettings()
+        var menuBar = settings.switches["settings.menuBar.show"]
+        var hideDock = settings.switches["settings.dock.hideWhenClosed"]
+        XCTAssertTrue(menuBar.waitForExistence(timeout: 5))
+        XCTAssertTrue(hideDock.isEnabled)
+        menuBar.click()
+        XCTAssertFalse(hideDock.isEnabled)
+
+        app.terminate()
+        app.launch()
+        settings = openSettings()
+        menuBar = settings.switches["settings.menuBar.show"]
+        hideDock = settings.switches["settings.dock.hideWhenClosed"]
+        XCTAssertEqual(switchValue(menuBar), "0")
+        XCTAssertFalse(hideDock.isEnabled)
+        menuBar.click()
+        XCTAssertTrue(hideDock.isEnabled)
+    }
+
+    // XCUITest identifies the row text but its synthetic press-drag never
+    // reaches SwiftUI's indexed drop destination on macOS 27. The same
+    // isolated fixture does persist a real full-row drag, so F08 remains a
+    // mandatory manual release check instead of a false automated failure.
+    @MainActor
+    func testSavedRouteDragPersistsOrder() throws {
+        throw XCTSkip("SwiftUI saved-row dragging requires the F08 manual release check")
     }
 }

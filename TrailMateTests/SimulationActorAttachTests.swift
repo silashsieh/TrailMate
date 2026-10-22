@@ -36,8 +36,7 @@ struct SimulationActorAttachTests {
     @MainActor
     @Test func attachMirrorsCurrentRedDotToDevice() async throws {
         let bridge = SimulationStateBridge()
-        let recorder = RecorderService()
-        let sim = SimulationActor(bridge: bridge, recorder: recorder)
+        let sim = SimulationActor(bridge: bridge)
         // Zero noise so the emitted value equals the clean coordinate exactly
         // (see LocationNoiseTests.zeroSigmaIsIdentity).
         await sim.updateNoiseSigma(0)
@@ -65,7 +64,7 @@ struct SimulationActorAttachTests {
     @MainActor
     @Test func reattachAfterOfflineMoveMirrorsTheNewDot() async throws {
         let bridge = SimulationStateBridge()
-        let sim = SimulationActor(bridge: bridge, recorder: RecorderService())
+        let sim = SimulationActor(bridge: bridge)
         await sim.updateNoiseSigma(0)
 
         await sim.teleport(to: CLLocationCoordinate2D(latitude: 25.0, longitude: 121.0))
@@ -105,7 +104,7 @@ struct SimulationActorAttachTests {
             playbackSnapshotInterval: .milliseconds(500),
             activeSnapshotInterval: .seconds(5)
         )
-        let sim = SimulationActor(bridge: bridge, recorder: RecorderService(), timing: timing)
+        let sim = SimulationActor(bridge: bridge, timing: timing)
         let backend = RecordingBackend()
         await sim.updateNoiseSigma(0)
 

@@ -35,7 +35,7 @@ enum GPXService {
         return xml
     }
 
-    static func generate(timestamped points: [RecorderService.Point]) -> String {
+    static func generate(timestamped points: [RecordingCapture.Point]) -> String {
         let formatter = ISO8601DateFormatter()
         var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         xml += "<gpx version=\"1.1\" creator=\"TrailMate\">\n"

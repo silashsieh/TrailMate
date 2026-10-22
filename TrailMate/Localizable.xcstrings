@@ -125,6 +125,16 @@
         }
       }
     },
+    "After a tunnel drop or wake from sleep, TrailMate retries up to 10 times, waiting 5 seconds after each failure. Off: reconnect by hand with Connect.": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通道中斷或 Mac 從睡眠喚醒後，TrailMate 最多重試 10 次，每次失敗後等待 5 秒。關閉時請自行按「連線」重新連線。"
+          }
+        }
+      }
+    },
     "Append direct": {
       "localizations": {
         "zh-Hant": {
@@ -201,6 +211,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "取消"
+          }
+        }
+      }
+    },
+    "Cancel retry": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消重試"
+          }
+        }
+      }
+    },
+    "Cancelling…": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消中…"
           }
         }
       }
@@ -887,6 +917,32 @@
           "stringUnit": {
             "state": "translated",
             "value": "擬真"
+          }
+        }
+      }
+    },
+    "Reconnect automatically after an unexpected disconnect": {
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連線意外中斷後自動重新連線"
+          }
+        }
+      }
+    },
+    "Reconnecting… %lld/%lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Reconnecting… %1$lld/%2$lld"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新連線中… %1$lld/%2$lld"
           }
         }
       }

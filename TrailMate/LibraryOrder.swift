@@ -4,6 +4,46 @@ import Foundation
 // arrays of Identifiable items so the reorder/sort logic is unit-testable
 // without UserDefaults, disk, or a live List.
 enum LibraryOrder {
+    // Apply a drop expressed in stable identities rather than offsets captured
+    // from a transient filtered view. All moved and destination IDs must belong
+    // to the group, so a drop onto another section remains a no-op.
+    nonisolated static func moveWithinGroup<T: Identifiable>(
+        _ items: [T],
+        groupIDs: Set<T.ID>,
+        movingIDs: [T.ID],
+        before destinationID: T.ID?
+    ) -> [T] {
+        let slots = items.indices.filter { groupIDs.contains(items[$0].id) }
+        let group = slots.map { items[$0] }
+        let movingIDSet = Set(movingIDs)
+
+        guard !movingIDSet.isEmpty,
+              movingIDSet.isSubset(of: groupIDs),
+              destinationID.map({ groupIDs.contains($0) }) ?? true else {
+            return items
+        }
+
+        let moving = group.filter { movingIDSet.contains($0.id) }
+        var reordered = group.filter { !movingIDSet.contains($0.id) }
+
+        if let destinationID {
+            // Dropping immediately before the moving item itself is a no-op.
+            guard !movingIDSet.contains(destinationID),
+                  let destination = reordered.firstIndex(where: { $0.id == destinationID }) else {
+                return items
+            }
+            reordered.insert(contentsOf: moving, at: destination)
+        } else {
+            reordered.append(contentsOf: moving)
+        }
+
+        var result = items
+        for (slot, element) in zip(slots, reordered) {
+            result[slot] = element
+        }
+        return result
+    }
+
     // Reorder the subset of `items` whose ids are in `groupIDs` — a single
     // folder's rows — using SwiftUI `List.onMove` offset semantics, then write
     // the new relative order back into exactly the slots that subset occupied in

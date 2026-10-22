@@ -6,9 +6,37 @@ enum ConnectionStatus: Equatable {
     case disconnected
     case connecting
     case connected
+    // Automatic recovery window (epic 043): `attempt` is the numbered attempt
+    // being waited for or run, so "Reconnecting… 3/10" reads straight off it.
+    case reconnecting(attempt: Int, maxAttempts: Int)
+    // Cancel retry pressed while an attempt was in flight; settles once that
+    // attempt finishes on its own.
+    case cancellingRetry
     case error(String)
 
     var isConnected: Bool { self == .connected }
+
+    // True while automatic recovery owns the session's connection controls.
+    var isRecovering: Bool {
+        switch self {
+        case .reconnecting, .cancellingRetry: true
+        default: false
+        }
+    }
+
+    // Localized wording for the recovery states, shared by the sidebar row,
+    // the action surface, the map hint, and the menu bar so every surface
+    // agrees on the attempt number. Nil for every other state.
+    var recoveryText: String? {
+        switch self {
+        case .reconnecting(let attempt, let maxAttempts):
+            String(localized: "Reconnecting… \(attempt)/\(maxAttempts)")
+        case .cancellingRetry:
+            String(localized: "Cancelling…")
+        default:
+            nil
+        }
+    }
 }
 
 enum TransportMode: String, CaseIterable {
@@ -47,21 +75,6 @@ enum TransportMode: String, CaseIterable {
     }
 }
 
-struct SavedWaypoint: Codable, Identifiable {
-    var id = UUID()
-    var name: String
-    var latitude: Double
-    var longitude: Double
-    // User-defined folder this waypoint lives under (epic 029). nil = ungrouped,
-    // shown under the top-level "Saved Locations" header. decodeIfPresent makes
-    // it backward-compatible with waypoints saved before the field existed.
-    var category: String?
-
-    var coordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-}
-
 // A one-shot request for the map to pan/zoom so a selected library item is
 // framed (#53). MapArea observes `AppState.mapFocus` and applies `region`; a
 // fresh `id` per request means re-selecting the same item pans again. The
@@ -84,6 +97,12 @@ struct MapFocusRequest: Identifiable {
 @MainActor
 final class AppState {
     let defaults: UserDefaults
+    let runtimePaths: AppRuntimePaths
+    let monotonicTime: MonotonicTimeSource
+    // Defaults to the same live ContinuousClock-backed source. Tests can keep
+    // the simulation loops parked on a separate manual clock while advancing
+    // reconnect delays, without a large jump replaying thousands of sim ticks.
+    let simulationMonotonicTime: MonotonicTimeSource
 
     // The device sessions — one per connectable slot. Always ≥ 1: launch creates
     // a single unbound session (it holds the restored red dot + pre-connect route
@@ -168,16 +187,35 @@ final class AppState {
         }
     }
 
+    // Auto-reconnect (epic 043). On by default; off reproduces the manual
+    // reconnect behavior for users who prefer to press Connect themselves. Each
+    // session reads it at the moment a loss or wake would start recovery.
+    var autoReconnectEnabled: Bool {
+        didSet {
+            guard autoReconnectEnabled != oldValue else { return }
+            defaults.set(autoReconnectEnabled, forKey: Self.autoReconnectEnabledKey)
+        }
+    }
+    nonisolated static let autoReconnectEnabledKey = "autoReconnectEnabled"
+
     // MARK: App-global services & libraries
 
-    let discovery = DeviceDiscoveryService()
+    let discovery: DeviceDiscoveryService
     // App-global tunnel broker (epic 012): one privileged `tunneld` for all
     // devices, one auth prompt per session. Sessions resolve their RSD endpoint
     // through it on connect; torn down only at app quit.
-    let tunnelBroker = TunnelBroker()
-    let recorder = RecorderService()
-    let savedRoutes = SavedRoutesStore()
-    var savedWaypoints: [SavedWaypoint] = []
+    let tunnelBroker: TunnelBroker
+    // One tunnel/daemon attempt at a time, for every session (epic 043). The
+    // live one wraps the shared broker + a DaemonBridge; tests inject a fake so
+    // retry timing is provable with no tunnel, daemon, or admin prompt.
+    let connectionAttempter: any DeviceConnectionAttempter
+    let recordingsLibrary: RecordingsLibrary
+    let savedRoutes: SavedRoutesStore
+    let savedWaypointsStore: SavedWaypointsStore
+
+    var savedWaypoints: [SavedWaypoint] {
+        savedWaypointsStore.waypoints
+    }
 
     // Set when a saved location/route is selected; consumed by MapArea to pan
     // and frame the map on it (#53). See MapFocusRequest.
@@ -188,11 +226,13 @@ final class AppState {
     // the red dot rather than filling a route slot. App-global because it
     // targets the selected session's position, like teleport.
     let placeSearch = LocationSearch()
+    private let searchResultResolver: @MainActor (LocationSearch, MKLocalSearchCompletion) async -> CLLocationCoordinate2D?
+    private let coordinateWriter: @MainActor (String) -> Void
 
     // Routing kernel (D4). Swappable behind the protocol; MapKit today. Stateless
     // and shared across sessions (the MapKit throttle is per-process, not
     // per-route).
-    let router: any RoutingService = MapKitRoutingService()
+    let router: any RoutingService
 
     // Log
     var logMessages: [String] = []
@@ -203,6 +243,7 @@ final class AppState {
     var pendingWanderCenter: CLLocationCoordinate2D?
 
     private var didSweepStaleDaemons = false
+    private let shouldSweepStaleDaemons: Bool
 
     var effectiveBaseSpeedMPS: Double {
         let kmh = transportMode.fixedSpeedKmh ?? max(0.1, customSpeedKmh)
@@ -216,10 +257,50 @@ final class AppState {
         return transportMode.directionsTransportType
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = AppProcessConfiguration.current.defaults,
+        runtimePaths: AppRuntimePaths = AppProcessConfiguration.current.runtimePaths,
+        monotonicTime: MonotonicTimeSource = .continuous,
+        simulationMonotonicTime: MonotonicTimeSource? = nil,
+        connectionAttempter: (any DeviceConnectionAttempter)? = nil,
+        discovery: DeviceDiscoveryService = DeviceDiscoveryService(),
+        router: any RoutingService = MapKitRoutingService(),
+        searchResultResolver: @escaping @MainActor (LocationSearch, MKLocalSearchCompletion) async -> CLLocationCoordinate2D? = { search, completion in
+            await search.resolve(completion)
+        },
+        coordinateWriter: @escaping @MainActor (String) -> Void = { text in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    ) {
         self.defaults = defaults
+        self.runtimePaths = runtimePaths
+        #if DEBUG
+        self.monotonicTime = UITestSupport.reconnecting
+            ? UITestSupport.parkedRecoveryTime : monotonicTime
+        #else
+        self.monotonicTime = monotonicTime
+        #endif
+        self.simulationMonotonicTime = simulationMonotonicTime ?? monotonicTime
+        self.discovery = discovery
+        self.router = router
+        self.searchResultResolver = searchResultResolver
+        self.coordinateWriter = coordinateWriter
+        let tunnelBroker = TunnelBroker(controlDirectory: runtimePaths.tunnelControlDirectory)
+        self.tunnelBroker = tunnelBroker
+        self.connectionAttempter = connectionAttempter
+            ?? (LiveDeviceConnectionAttempter(tunnelBroker: tunnelBroker) as any DeviceConnectionAttempter)
+        self.shouldSweepStaleDaemons = connectionAttempter == nil
+        self.recordingsLibrary = RecordingsLibrary(baseURL: runtimePaths.recordingsDirectory)
+        self.savedRoutes = SavedRoutesStore(baseURL: runtimePaths.savedRoutesDirectory)
+        self.savedWaypointsStore = SavedWaypointsStore(defaults: defaults)
         self.restoreLastSimulatedLocation = SimulatedPositionPersistence.restoreOnLaunch(in: defaults)
         self.aiControlEnabled = defaults.bool(forKey: "aiControlEnabled")
+        // Absent key = on: the policy is the default, and a never-written
+        // UserDefaults.bool would silently read as off.
+        self.autoReconnectEnabled = defaults.object(forKey: Self.autoReconnectEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.autoReconnectEnabledKey)
 
         // Build the first (unbound) session before anything reads selectedSession
         // or the tuning didSets fan out. selectedSessionID isn't Optional, so it
@@ -227,7 +308,7 @@ final class AppState {
         let first = DeviceSession(manager: self)
         self.sessions = [first]
         self.selectedSessionID = first.id
-        self.commandServer = CommandServer(appState: self)
+        self.commandServer = CommandServer(appState: self, socketURL: runtimePaths.aiSocketURL)
 
         let storedCustom = defaults.double(forKey: "customSpeedKmh")
         self.customSpeedKmh = storedCustom > 0 ? storedCustom : 15.0
@@ -246,8 +327,10 @@ final class AppState {
         Task { await first.sim.updateNoiseSigma(initialSigma) }
 
         // System sleep tears down the DVT session unconditionally (Apple's
-        // design — see v2-features.md). Drop every connection cleanly so the
-        // UI doesn't claim any device is still connected after wake.
+        // design). Release every connection cleanly so the UI doesn't claim any
+        // device is still connected after wake; an armed session then recovers
+        // on wake under the same auto-reconnect policy as any other drop
+        // (epic 043).
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
@@ -260,9 +343,25 @@ final class AppState {
                 }
             }
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                for s in self.sessions {
+                    s.handleSystemWake()
+                }
+            }
+        }
 
-        loadWaypoints()
-        recorder.loadIndex()
+        do {
+            try savedWaypointsStore.load()
+        } catch {
+            addLog("Could not load saved locations: \(error.localizedDescription)")
+        }
+        recordingsLibrary.loadIndex()
         savedRoutes.load()
 
         // The aiControlEnabled didSet doesn't fire for the in-init default, so
@@ -292,6 +391,7 @@ final class AppState {
             pendingWanderCenter = CLLocationCoordinate2D(latitude: 25.0339, longitude: 121.5645)
             showWanderSheet = true
         }
+        UITestSupport.configureFixture(self)
         #endif
     }
 
@@ -432,6 +532,8 @@ final class AppState {
         await selectedSession.disconnect()
         syncActiveJoystick()
     }
+    // Cancel retry on the selected session's recovery window (epic 043).
+    func cancelRetry() { selectedSession.cancelRetry() }
 
     // Quit cleanup: stop the AI command socket (unlinks ai.sock) before the
     // device disconnects, so a leftover socket node isn't left behind at quit.
@@ -457,7 +559,7 @@ final class AppState {
     // the local dot and a connected device mirrors it (epic 028).
     func goToSearchResult(_ completion: MKLocalSearchCompletion) async {
         placeSearch.select(completion)
-        guard let coord = await placeSearch.resolve(completion) else {
+        guard let coord = await resolveSearchResult(completion, in: placeSearch) else {
             addLog("Couldn't resolve “\(completion.title)”.")
             return
         }
@@ -476,9 +578,15 @@ final class AppState {
     // Copy a coordinate to the clipboard as a paste-able "lat, lon" string (#52).
     func copyCoordinate(_ coordinate: CLLocationCoordinate2D) {
         let text = CoordinateFormat.string(from: coordinate)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        coordinateWriter(text)
         addLog("Copied coordinate: \(text)")
+    }
+
+    func resolveSearchResult(
+        _ completion: MKLocalSearchCompletion,
+        in search: LocationSearch
+    ) async -> CLLocationCoordinate2D? {
+        await searchResultResolver(search, completion)
     }
     func selectFrom(_ completion: MKLocalSearchCompletion) async { await selectedSession.selectFrom(completion) }
     func useCurrentLocationAsFrom() { selectedSession.useCurrentLocationAsFrom() }
@@ -516,7 +624,7 @@ final class AppState {
     func importGPX() { selectedSession.importGPX() }
     func exportGPX() { selectedSession.exportGPX() }
     func toggleRecording() { selectedSession.toggleRecording() }
-    func replayRecording(_ recording: RecorderService.Session) { selectedSession.replayRecording(recording) }
+    func replayRecording(_ recording: RecordingsLibrary.Session) { selectedSession.replayRecording(recording) }
 
     // MARK: - AI command dispatch (epic 019)
 
@@ -725,6 +833,7 @@ final class AppState {
         var fields: [String: JSONValue] = ["state": .string(connectionStateString(session.connectionStatus))]
         if let udid = session.connectedUDID ?? session.selectedDeviceUDID { fields["udid"] = .string(udid) }
         if case .error(let message) = session.connectionStatus { fields["error"] = .string(message) }
+        addRecoveryFields(&fields, for: session.connectionStatus)
         return .object(fields)
     }
 
@@ -733,7 +842,18 @@ final class AppState {
         case .disconnected: return "disconnected"
         case .connecting: return "connecting"
         case .connected: return "connected"
+        case .reconnecting: return "reconnecting"
+        case .cancellingRetry: return "cancelling"
         case .error: return "error"
+        }
+    }
+
+    // While auto-reconnect is running, an agent polling STATUS can see which
+    // numbered attempt is pending, mirroring the sidebar's "n/10".
+    private func addRecoveryFields(_ fields: inout [String: JSONValue], for status: ConnectionStatus) {
+        if case .reconnecting(let attempt, let maxAttempts) = status {
+            fields["attempt"] = .int(attempt)
+            fields["maxAttempts"] = .int(maxAttempts)
         }
     }
 
@@ -757,6 +877,7 @@ final class AppState {
         if let slot {
             fields["state"] = .string(connectionStateString(slot.connectionStatus))
             if case .error(let message) = slot.connectionStatus { fields["error"] = .string(message) }
+            addRecoveryFields(&fields, for: slot.connectionStatus)
         }
         if isConnected, let slot {
             let s = slot.simState
@@ -816,20 +937,28 @@ final class AppState {
     func saveCurrentLocation(name: String) {
         guard let coord = selectedSession.simState.simulatedCoordinate else { return }
         let waypoint = SavedWaypoint(name: name, latitude: coord.latitude, longitude: coord.longitude)
-        savedWaypoints.append(waypoint)
-        persistWaypoints()
-        addLog("Saved location: \(name)")
+        do {
+            try savedWaypointsStore.save(waypoint)
+            addLog("Saved location: \(name)")
+        } catch {
+            addLog("Save failed: \(error.localizedDescription)")
+        }
     }
 
     func deleteWaypoint(_ waypoint: SavedWaypoint) {
-        savedWaypoints.removeAll { $0.id == waypoint.id }
-        persistWaypoints()
+        do {
+            try savedWaypointsStore.delete(waypoint)
+        } catch {
+            addLog("Delete failed: \(error.localizedDescription)")
+        }
     }
 
     func renameWaypoint(_ waypoint: SavedWaypoint, to newName: String) {
-        guard let index = savedWaypoints.firstIndex(where: { $0.id == waypoint.id }) else { return }
-        savedWaypoints[index].name = newName
-        persistWaypoints()
+        do {
+            try savedWaypointsStore.rename(waypoint, to: newName)
+        } catch {
+            addLog("Rename failed: \(error.localizedDescription)")
+        }
     }
 
     // Selecting a saved location frames it on the map (#53) and, when connected,
@@ -849,26 +978,35 @@ final class AppState {
     }
 
     func setWaypointCategory(_ category: String?, for waypoint: SavedWaypoint) {
-        guard let index = savedWaypoints.firstIndex(where: { $0.id == waypoint.id }) else { return }
         let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines)
-        savedWaypoints[index].category = (trimmed?.isEmpty ?? true) ? nil : trimmed
-        persistWaypoints()
+        do {
+            try savedWaypointsStore.setCategory((trimmed?.isEmpty ?? true) ? nil : trimmed, for: waypoint)
+        } catch {
+            addLog("Category update failed: \(error.localizedDescription)")
+        }
     }
 
-    // Reorder within one folder. `.onMove` reports offsets relative to that
-    // folder's rows, so map them back onto the global array's matching slots,
-    // leaving every other folder untouched. Persisted as the array order.
-    func moveWaypoints(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
-        let groupIDs = Set(savedWaypoints.filter { $0.category == category }.map(\.id))
-        savedWaypoints = LibraryOrder.moveWithinGroup(
-            savedWaypoints, groupIDs: groupIDs, fromOffsets: source, toOffset: destination
-        )
-        persistWaypoints()
+    // Reorder differences carry stable item IDs, so periodic parent-view updates
+    // cannot invalidate section-relative offsets while a drag is in flight.
+    func moveWaypoints(
+        inCategory category: String?,
+        movingIDs: [SavedWaypoint.ID],
+        before destinationID: SavedWaypoint.ID?
+    ) {
+        do {
+            try savedWaypointsStore.move(
+                inCategory: category,
+                movingIDs: movingIDs,
+                before: destinationID
+            )
+        } catch {
+            addLog("Reorder failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Recording library
 
-    func exportRecording(_ recording: RecorderService.Session) {
+    func exportRecording(_ recording: RecordingsLibrary.Session) {
         guard let src = recording.fileURL else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "gpx") ?? .xml]
@@ -886,8 +1024,8 @@ final class AppState {
         }
     }
 
-    func deleteRecording(_ recording: RecorderService.Session) {
-        recorder.delete(recording)
+    func deleteRecording(_ recording: RecordingsLibrary.Session) {
+        recordingsLibrary.delete(recording)
     }
 
     // MARK: - Saved Routes (app-global library; reaches into the active session)
@@ -1002,8 +1140,12 @@ final class AppState {
         savedRoutes.setCategory((trimmed?.isEmpty ?? true) ? nil : trimmed, for: route)
     }
 
-    func moveRoutes(inCategory category: String?, fromOffsets source: IndexSet, toOffset destination: Int) {
-        savedRoutes.move(inCategory: category, fromOffsets: source, toOffset: destination)
+    func moveRoutes(
+        inCategory category: String?,
+        movingIDs: [SavedRoute.ID],
+        before destinationID: SavedRoute.ID?
+    ) {
+        savedRoutes.move(inCategory: category, movingIDs: movingIDs, before: destinationID)
     }
 
     func renameSavedRoute(_ route: SavedRoute, to newName: String) {
@@ -1017,7 +1159,7 @@ final class AppState {
         }
     }
 
-    func saveRecordingAsRoute(_ recording: RecorderService.Session, name: String) {
+    func saveRecordingAsRoute(_ recording: RecordingsLibrary.Session, name: String) {
         let coords = recording.points.map { SavedRoute.Coord(lat: $0.latitude, lon: $0.longitude) }
         let route = SavedRoute(
             id: UUID(),
@@ -1045,6 +1187,9 @@ final class AppState {
     // First connect per session sweeps any orphan tm_daemon.py left over from
     // a prior host-app crash (parent watcher catches most, but isn't instant).
     func sweepStaleDaemonsIfNeeded() {
+        // An injected attempt never starts a real daemon. Its tests must not
+        // inspect or terminate a daemon owned by the user's live app.
+        guard shouldSweepStaleDaemons else { return }
         guard !didSweepStaleDaemons else { return }
         didSweepStaleDaemons = true
         let task = Process()
@@ -1060,17 +1205,6 @@ final class AppState {
     }
 
     // MARK: - Private
-
-    private func loadWaypoints() {
-        guard let data = defaults.data(forKey: "savedWaypoints"),
-              let waypoints = try? JSONDecoder().decode([SavedWaypoint].self, from: data) else { return }
-        savedWaypoints = waypoints
-    }
-
-    private func persistWaypoints() {
-        guard let data = try? JSONEncoder().encode(savedWaypoints) else { return }
-        defaults.set(data, forKey: "savedWaypoints")
-    }
 
     // MARK: - Internal
 

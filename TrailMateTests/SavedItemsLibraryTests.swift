@@ -6,9 +6,9 @@ import Testing
 
 // Pure logic behind the saved-items library UX (epic 029): the reorder/grouping
 // transforms that back drag-to-reorder + folders, and the map-framing math
-// behind auto-pan-on-select. Disk/UserDefaults persistence isn't exercised here
-// — the app-hosted test process shares the real Application Support dir (see
-// testing.md), so these cover the order/region *logic* the persistence wraps.
+// behind auto-pan-on-select. Disk/UserDefaults persistence is exercised by the
+// owning v2.3 work packages using AppRuntimePaths and isolated defaults; these
+// cover the order/region *logic* that persistence wraps.
 
 private struct Item: Identifiable, Equatable {
     let id: Int

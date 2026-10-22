@@ -27,45 +27,45 @@ enum WanderPresetPersistence {
     static let defaultLaneSpacingMeters: Double = 70
 
     static var radiusIsCustom: Bool {
-        get { UserDefaults.standard.bool(forKey: radiusIsCustomKey) }
-        set { UserDefaults.standard.set(newValue, forKey: radiusIsCustomKey) }
+        get { AppProcessConfiguration.current.defaults.bool(forKey: radiusIsCustomKey) }
+        set { AppProcessConfiguration.current.defaults.set(newValue, forKey: radiusIsCustomKey) }
     }
 
     static var radiusMeters: Double {
-        get { UserDefaults.standard.object(forKey: radiusMetersKey) as? Double ?? defaultRadiusMeters }
-        set { UserDefaults.standard.set(newValue, forKey: radiusMetersKey) }
+        get { AppProcessConfiguration.current.defaults.object(forKey: radiusMetersKey) as? Double ?? defaultRadiusMeters }
+        set { AppProcessConfiguration.current.defaults.set(newValue, forKey: radiusMetersKey) }
     }
 
     static var customRadiusMeters: Double {
-        get { UserDefaults.standard.object(forKey: customRadiusMetersKey) as? Double ?? defaultCustomRadiusMeters }
-        set { UserDefaults.standard.set(newValue, forKey: customRadiusMetersKey) }
+        get { AppProcessConfiguration.current.defaults.object(forKey: customRadiusMetersKey) as? Double ?? defaultCustomRadiusMeters }
+        set { AppProcessConfiguration.current.defaults.set(newValue, forKey: customRadiusMetersKey) }
     }
 
     static var durationIsCustom: Bool {
-        get { UserDefaults.standard.bool(forKey: durationIsCustomKey) }
-        set { UserDefaults.standard.set(newValue, forKey: durationIsCustomKey) }
+        get { AppProcessConfiguration.current.defaults.bool(forKey: durationIsCustomKey) }
+        set { AppProcessConfiguration.current.defaults.set(newValue, forKey: durationIsCustomKey) }
     }
 
     static var durationSeconds: TimeInterval {
-        get { UserDefaults.standard.object(forKey: durationSecondsKey) as? Double ?? defaultDurationSeconds }
-        set { UserDefaults.standard.set(newValue, forKey: durationSecondsKey) }
+        get { AppProcessConfiguration.current.defaults.object(forKey: durationSecondsKey) as? Double ?? defaultDurationSeconds }
+        set { AppProcessConfiguration.current.defaults.set(newValue, forKey: durationSecondsKey) }
     }
 
     static var customDurationMinutes: Double {
-        get { UserDefaults.standard.object(forKey: customDurationMinutesKey) as? Double ?? defaultCustomDurationMinutes }
-        set { UserDefaults.standard.set(newValue, forKey: customDurationMinutesKey) }
+        get { AppProcessConfiguration.current.defaults.object(forKey: customDurationMinutesKey) as? Double ?? defaultCustomDurationMinutes }
+        set { AppProcessConfiguration.current.defaults.set(newValue, forKey: customDurationMinutesKey) }
     }
 
     // Mode and lane spacing persist on the same terms as radius and duration:
     // written on every change so quitting with the sheet open still reopens it
     // the way it was left.
     static var mode: WanderMode {
-        get { WanderMode(persisted: UserDefaults.standard.string(forKey: modeKey)) }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: modeKey) }
+        get { WanderMode(persisted: AppProcessConfiguration.current.defaults.string(forKey: modeKey)) }
+        set { AppProcessConfiguration.current.defaults.set(newValue.rawValue, forKey: modeKey) }
     }
 
     static var laneSpacingMeters: Double {
-        get { UserDefaults.standard.object(forKey: laneSpacingMetersKey) as? Double ?? defaultLaneSpacingMeters }
-        set { UserDefaults.standard.set(newValue, forKey: laneSpacingMetersKey) }
+        get { AppProcessConfiguration.current.defaults.object(forKey: laneSpacingMetersKey) as? Double ?? defaultLaneSpacingMeters }
+        set { AppProcessConfiguration.current.defaults.set(newValue, forKey: laneSpacingMetersKey) }
     }
 }

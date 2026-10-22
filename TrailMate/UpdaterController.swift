@@ -7,7 +7,8 @@ import Sparkle
 @MainActor
 @Observable
 final class UpdaterController {
-    @ObservationIgnored private let standardController: SPUStandardUpdaterController
+    @ObservationIgnored private let standardController: SPUStandardUpdaterController?
+    @ObservationIgnored private let testDefaults: UserDefaults?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
     private(set) var canCheckForUpdates: Bool
@@ -15,13 +16,29 @@ final class UpdaterController {
     private(set) var automaticallyDownloadsUpdates: Bool
 
     init(startingUpdater: Bool = UpdaterController.shouldStartUpdater) {
+        #if DEBUG
+        if UITestSupport.isTesting {
+            // Sparkle owns bundle preferences outside SwiftUI's defaultAppStorage.
+            // Keep UI and hosted tests in their explicit isolated domain, and
+            // never contact an update feed from a test process.
+            let defaults = AppProcessConfiguration.current.defaults
+            standardController = nil
+            testDefaults = defaults
+            canCheckForUpdates = true
+            automaticallyChecksForUpdates = defaults.object(forKey: "testAutomaticUpdateChecks") == nil
+                ? true : defaults.bool(forKey: "testAutomaticUpdateChecks")
+            automaticallyDownloadsUpdates = defaults.bool(forKey: "testAutomaticUpdateDownloads")
+            return
+        }
+        #endif
+        testDefaults = nil
         standardController = SPUStandardUpdaterController(
             startingUpdater: startingUpdater,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
 
-        let updater = standardController.updater
+        let updater = standardController!.updater
         canCheckForUpdates = updater.canCheckForUpdates
         automaticallyChecksForUpdates = updater.automaticallyChecksForUpdates
         automaticallyDownloadsUpdates = updater.automaticallyDownloadsUpdates
@@ -46,16 +63,24 @@ final class UpdaterController {
     }
 
     func checkForUpdates() {
-        standardController.checkForUpdates(nil)
+        standardController?.checkForUpdates(nil)
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
-        standardController.updater.automaticallyChecksForUpdates = enabled
+        if let testDefaults {
+            testDefaults.set(enabled, forKey: "testAutomaticUpdateChecks")
+        } else {
+            standardController?.updater.automaticallyChecksForUpdates = enabled
+        }
         automaticallyChecksForUpdates = enabled
     }
 
     func setAutomaticallyDownloadsUpdates(_ enabled: Bool) {
-        standardController.updater.automaticallyDownloadsUpdates = enabled
+        if let testDefaults {
+            testDefaults.set(enabled, forKey: "testAutomaticUpdateDownloads")
+        } else {
+            standardController?.updater.automaticallyDownloadsUpdates = enabled
+        }
         automaticallyDownloadsUpdates = enabled
     }
 

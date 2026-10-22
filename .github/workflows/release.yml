@@ -106,6 +106,8 @@ jobs:
         run: |
           release_flags=(--draft)
           release_title="v$VERSION"
+          notes_file="packaging/release-notes-v$VERSION.md"
+          test -f "$notes_file"
           if [[ "$BETA" == "true" ]]; then
             release_flags+=(--prerelease)
             release_title="$release_title Beta"
@@ -116,7 +118,7 @@ jobs:
             "build/appcast/appcast.xml" \
             --target "$GITHUB_SHA" \
             --title "$release_title" \
-            --generate-notes \
+            --notes-file "$notes_file" \
             "${release_flags[@]}"
 
           while IFS= read -r delta; do

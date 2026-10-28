@@ -67,8 +67,19 @@ struct SettingsView: View {
                     .help("Off: start with no simulated position until you teleport. The last position is remembered either way.")
             }
 
+            // Auto-reconnect policy (epic 043). Off reproduces the manual
+            // reconnect behavior exactly; the retry cadence itself is fixed.
+            Section("Connection") {
+                Toggle("Reconnect automatically after an unexpected disconnect", isOn: $appState.autoReconnectEnabled)
+                    .accessibilityIdentifier("settings.autoReconnect")
+                Text("After a tunnel drop or wake from sleep, TrailMate retries up to 10 times, waiting 5 seconds after each failure. Off: reconnect by hand with Connect.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Menu Bar") {
                 Toggle("Show menu bar item", isOn: $showMenuBarItem)
+                    .accessibilityIdentifier("settings.menuBar.show")
                     .help("A status item with quick actions, so TrailMate stays controllable when the window is closed.")
 
                 // Coupled to the menu bar toggle to dodge the unreachable-app
@@ -78,6 +89,7 @@ struct SettingsView: View {
                 // disabled), and AppDelegate.applyActivationPolicy enforces the
                 // same guard at runtime.
                 Toggle("Hide Dock icon when the window is closed", isOn: $hideDockWhenWindowClosed)
+                    .accessibilityIdentifier("settings.dock.hideWhenClosed")
                     .disabled(!showMenuBarItem)
                     .help("Run in the background as a menu bar app. Requires the menu bar item so the app stays reachable.")
 
@@ -116,6 +128,6 @@ struct SettingsView: View {
             AISettingsSection()
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 520)
+        .frame(width: 420, height: 600)
     }
 }

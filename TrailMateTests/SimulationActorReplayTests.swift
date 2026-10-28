@@ -14,8 +14,7 @@ struct SimulationActorReplayTests {
     @MainActor
     @Test func playFromIdleResetsIntegratorToRouteStart() async throws {
         let bridge = SimulationStateBridge()
-        let recorder = RecorderService()
-        let sim = SimulationActor(bridge: bridge, recorder: recorder)
+        let sim = SimulationActor(bridge: bridge)
 
         let start = CLLocationCoordinate2D(latitude: 25.0330, longitude: 121.5654)
         let end = CLLocationCoordinate2D(latitude: 25.0330 + 100.0 / 111_320.0, longitude: 121.5654)

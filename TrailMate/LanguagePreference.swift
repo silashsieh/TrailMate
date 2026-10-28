@@ -31,12 +31,12 @@ enum LanguagePreference {
 
     static var current: AppLanguage {
         get {
-            guard let raw = UserDefaults.standard.string(forKey: overrideKey),
+            guard let raw = AppProcessConfiguration.current.defaults.string(forKey: overrideKey),
                   let lang = AppLanguage(rawValue: raw) else { return .system }
             return lang
         }
         set {
-            let defaults = UserDefaults.standard
+            let defaults = AppProcessConfiguration.current.defaults
             defaults.set(newValue.rawValue, forKey: overrideKey)
             switch newValue {
             case .system:

@@ -129,7 +129,8 @@ The appcast points at GitHub Release assets, so Pages contains no executables.
 │    deviation check, throttled UI snapshot push.          │
 │  • Holds the active SimulationBackend; calls             │
 │    setLocationQuiet synchronously on the hot path.       │
-│  • Owns the App Nap activity token while attached.       │
+│  • Owns each session's live RecordingCapture and the     │
+│    App Nap activity token while attached.                 │
 │  ├── NavigationEngine (nonisolated)                      │
 │  ├── JoystickEngine (nonisolated)                        │
 │  ├── PositionIntegrator (nonisolated)                    │
@@ -180,7 +181,7 @@ Swift 6 strict concurrency, with three isolation domains:
 
 |Domain                |Contents                                                                                                                      |
 |----------------------|------------------------------------------------------------------------------------------------------------------------------|
-|MainActor             |`AppState` (the device manager), `DeviceSession` (per device) + its `SimulationStateBridge`, `RecorderService`, `TunnelBroker`, `DeviceDiscoveryService`, `CommandServer`, `SavedRoutesStore`, views|
+|MainActor             |`AppState` (the device manager), `DeviceSession` (per device) + its `SimulationStateBridge`, `RecordingsLibrary`, `TunnelBroker`, `DeviceDiscoveryService`, `CommandServer`, `SavedRoutesStore`, views|
 |`SimulationActor`     |Engines (nav/joystick/integrator/noise), aggregator + idle-jitter loops, deviation check, snapshot push, App Nap token. **One per session** — independent actors, no shared mutable state.|
 |`DaemonBridge` (actor)|Process lifecycle, stdin/stdout state, pending-line continuations. **One per connected session**, held private to it.          |
 
@@ -188,7 +189,13 @@ Multi-device (epic 012) replicates the actor/bridge/daemon per `DeviceSession` r
 
 The simulated position is a live *local* state, not a device side effect (epic 028). Each session's `SimulationActor` runs its loops for the session's whole lifetime — `startEngine()` at session creation, `stopEngine()` at removal/quit — so teleport, route playback, and joystick drive the red dot with or without a device. `attach()`/`detach()` only swap the device *mirror* in and out: attach injects the backend, immediately re-emits the current position (so the device snaps to the red dot on connect) and takes the App Nap token; detach drops the backend and token but leaves the loops running and the position intact. `emit()` writes the position to the bridge (the red dot) unconditionally and to `backend?` only when one is attached, so a disconnected session simulates locally and emits nothing to any device.
 
+Each actor also owns one `RecordingCapture`. It appends clean positions at the emit chokepoint before location noise is applied to the backend. An unexpected backend loss detaches the mirror and leaves the capture in that actor; explicit Stop returns a draft for `RecordingsLibrary` to persist under the injected runtime root. Session removal and app quit discard unfinished drafts. The selected session controls which recording state the shared UI displays.
+
+`DeviceSession` owns its connection epoch and recovery window. A successful explicit Connect arms promptless recovery; an unexpected daemon/tunnel loss affects only that session and starts a 5-second delay before the first of at most 10 attempts when the preference allows it. Every later failure gets another 5-second delay, with no delay after the tenth. Recovery resolves the current per-UDID endpoint on each attempt and never requests administrator access. Cancel retry and explicit Disconnect disarm it; sleep invalidates the old backend/endpoint and wake starts a fresh window for an armed session. Tests drive these transitions through a fake connection attempter and manual monotonic clock.
+
 `DaemonBridge` reads its daemon's stdout with an event-driven `readabilityHandler` (feeding an ordered `AsyncStream` drained by one Task into the actor), **not** `FileHandle.bytes.lines`. This is load-bearing for multi-device: `bytes.lines` does a blocking read that holds Foundation's shared file-handle async-read queue, so once one device connects and its daemon goes idle, that bridge's blocked reader starves every *other* bridge's reader — a second device's daemon connects and prints `READY` but the bridge never reads it, hanging on "Connecting…" forever. The readabilityHandler never blocks, so concurrent bridges read independently. (Connecting one device at a time always worked, which is what made this look like a stack/tunnel limit rather than a reader bug.)
+
+Daemon stdin writes go through a serialized, failure-aware path with SIGPIPE protection. EPIPE, EOF, process exit, and `TUNNEL_DOWN` converge on one idempotent loss event for the owning session, so a broken pipe cannot terminate TrailMate or detach another device. The fake-pipe tests exercise those cases without starting Python or contacting tunneld.
 
 The engines are marked `nonisolated final class` so the simulation actor can call them synchronously inside a tick — no per-tick `await` hop. The UI throttle lives in the actor's snapshot-push path: route playback snapshots stay capped at 2 Hz, and active non-playing motion is capped at 10 Hz so joystick steering does not rebuild MapKit faster than the loop cadence. The backend still receives every SETQ tick at 10 Hz because `setLocationQuiet` is `nonisolated` on `DaemonBridge` (cached pipe handle + serial queue). A `Thread.sleep(forTimeInterval:)` on MainActor will *not* delay SETQ delivery — that was the failure mode the actor split eliminated.
 

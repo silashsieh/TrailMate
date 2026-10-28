@@ -37,7 +37,28 @@ final class TunnelBroker {
     static let port = 49151
 
     private var controlFile: URL?
-    private var isRunning = false
+    private let mapResponse: () async throws -> Data
+    private let time: MonotonicTimeSource
+    private let endpointPollInterval: Duration
+    private let endpointTimeout: Duration
+    // Readable so a promptless reconnect can check for a live tunnel without
+    // launching one (epic 043); only ensureRunning()/stop() write it.
+    private(set) var isRunning = false
+    let controlDirectory: URL
+
+    init(
+        controlDirectory: URL = AppProcessConfiguration.current.runtimePaths.tunnelControlDirectory,
+        time: MonotonicTimeSource = .continuous,
+        endpointPollInterval: Duration = .milliseconds(600),
+        endpointTimeout: Duration = .seconds(15),
+        mapResponse: (() async throws -> Data)? = nil
+    ) {
+        self.controlDirectory = controlDirectory.standardizedFileURL
+        self.time = time
+        self.endpointPollInterval = endpointPollInterval
+        self.endpointTimeout = endpointTimeout
+        self.mapResponse = mapResponse ?? Self.fetchLiveTunnelMapData
+    }
 
     // Launch the single privileged tunneld (the one auth prompt). Idempotent —
     // returns immediately if already running. Resolves readiness by polling
@@ -56,11 +77,7 @@ final class TunnelBroker {
             shutdown: { await Self.requestTunneldShutdown(port: Self.port) }
         )
 
-        let appSupport = try FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true
-        )
-        let tunnelsDir = appSupport.appendingPathComponent("TrailMate/tunnels", isDirectory: true)
+        let tunnelsDir = controlDirectory
         try FileManager.default.createDirectory(at: tunnelsDir, withIntermediateDirectories: true)
         let ctrl = tunnelsDir.appendingPathComponent("tunneld-\(UUID().uuidString).info")
         controlFile = ctrl
@@ -101,8 +118,8 @@ final class TunnelBroker {
         let stableReadsRequired = 3
         var lastSeen: TunnelInfo?
         var stableCount = 0
-        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
-        while ContinuousClock.now < deadline {
+        let deadline = time.now + endpointTimeout
+        while time.now < deadline {
             let map = try await fetchTunnelMap()
             if let entries = map[udid], !entries.isEmpty {
                 let entry = entries.first { $0.interface.contains("usbmux") } ?? entries[0]
@@ -119,7 +136,7 @@ final class TunnelBroker {
             } else {
                 lastSeen = nil; stableCount = 0   // not present yet
             }
-            try? await Task.sleep(for: .milliseconds(600))
+            try? await time.sleep(for: endpointPollInterval)
         }
         // Never stabilized within the window: hand back the last reading if we
         // ever saw one (best effort; the connect retry will recover), otherwise
@@ -148,10 +165,7 @@ final class TunnelBroker {
     }
 
     private func fetchTunnelMap() async throws -> [String: [Entry]] {
-        let url = URL(string: "http://127.0.0.1:\(Self.port)/")!
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let data = try await mapResponse()
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TunnelError.parseFailed("tunneld response was not a JSON object")
         }
@@ -166,6 +180,14 @@ final class TunnelBroker {
             }
         }
         return result
+    }
+
+    private static func fetchLiveTunnelMapData() async throws -> Data {
+        let url = URL(string: "http://127.0.0.1:\(Self.port)/")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return data
     }
 
     // MARK: - Stale-tunneld reclaim (epic 031)
@@ -198,14 +220,15 @@ final class TunnelBroker {
         isAlive: () async -> Bool,
         shutdown: () async -> Void,
         pollInterval: Duration = .milliseconds(250),
-        timeout: Duration = .seconds(5)
+        timeout: Duration = .seconds(5),
+        time: MonotonicTimeSource = .continuous
     ) async -> Bool {
         guard await isAlive() else { return true }   // nothing there — fast path
         await shutdown()
-        let deadline = ContinuousClock.now.advanced(by: timeout)
-        while ContinuousClock.now < deadline {
+        let deadline = time.now + timeout
+        while time.now < deadline {
             if await isAlive() == false { return true }
-            try? await Task.sleep(for: pollInterval)
+            try? await time.sleep(for: pollInterval)
         }
         return false
     }

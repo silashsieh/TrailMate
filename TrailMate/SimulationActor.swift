@@ -47,8 +47,15 @@ nonisolated struct SimulationTiming: Sendable {
 // hop into separate isolation domains.
 actor SimulationActor {
     private let bridge: SimulationStateBridge
-    private let recorderRef: RecorderService
     private let timing: SimulationTiming
+    // One monotonic source paces both loops, the UI throttles, the deviation
+    // timer, and the recording capture, so a manual test clock advances all of
+    // them together. Live sessions inject the ContinuousClock-backed source.
+    private let monotonicTime: MonotonicTimeSource
+    // Sees every snapshot the actor pushes, synchronously on the actor before
+    // the MainActor hop. nil in production; tests count display pushes here.
+    private let snapshotObserver: (@Sendable (SimSnapshot) -> Void)?
+    private var recordingCapture: RecordingCapture
 
     private let nav = NavigationEngine()
     private let joy = JoystickEngine()
@@ -62,16 +69,11 @@ actor SimulationActor {
     private var controllerObservers: [NSObjectProtocol] = []
     private var activityToken: Any?
 
-    private var lastDisplayPush: ContinuousClock.Instant?
-    private var lastDeviationCheck: ContinuousClock.Instant?
-    private var deviationStartedAt: ContinuousClock.Instant?
+    private var lastDisplayPush: MonotonicTimeSource.Instant?
+    private var lastDeviationCheck: MonotonicTimeSource.Instant?
+    private var deviationStartedAt: MonotonicTimeSource.Instant?
 
     private var lastEmittedCoordinate: CLLocationCoordinate2D?
-
-    // Pending point count + recording flag — owned here so the snapshot push
-    // doesn't need to read RecorderService across actor boundaries.
-    private var isRecordingActive = false
-    private var pendingPointCount = 0
 
     private static let deviationAbortMeters: Double = 200
     private static let deviationAbortSeconds: TimeInterval = 10
@@ -80,10 +82,18 @@ actor SimulationActor {
     nonisolated let events: AsyncStream<SimulationEvent>
     nonisolated private let eventsContinuation: AsyncStream<SimulationEvent>.Continuation
 
-    init(bridge: SimulationStateBridge, recorder: RecorderService, timing: SimulationTiming = .production) {
+    init(
+        bridge: SimulationStateBridge,
+        monotonicTime: MonotonicTimeSource = .continuous,
+        wallNow: @escaping @Sendable () -> Date = { Date() },
+        timing: SimulationTiming = .production,
+        snapshotObserver: (@Sendable (SimSnapshot) -> Void)? = nil
+    ) {
         self.bridge = bridge
-        self.recorderRef = recorder
         self.timing = timing
+        self.monotonicTime = monotonicTime
+        self.snapshotObserver = snapshotObserver
+        self.recordingCapture = RecordingCapture(monotonicTime: monotonicTime, wallNow: wallNow)
         var continuation: AsyncStream<SimulationEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
         self.eventsContinuation = continuation
@@ -128,6 +138,7 @@ actor SimulationActor {
         lastDisplayPush = nil
         deviationStartedAt = nil
         isScrubbing = false
+        recordingCapture.discard()
         backend = nil
         if let token = activityToken {
             ProcessInfo.processInfo.endActivity(token as! NSObjectProtocol)
@@ -245,7 +256,7 @@ actor SimulationActor {
     // Transport actions (stop/load/teleport/clear) clear it so a lost release
     // event can't freeze playback.
     private var isScrubbing = false
-    private var lastScrubEmit: ContinuousClock.Instant?
+    private var lastScrubEmit: MonotonicTimeSource.Instant?
 
     func beginScrub() {
         isScrubbing = true
@@ -261,7 +272,7 @@ actor SimulationActor {
     func scrub(toProgress progress: Double) async {
         guard isScrubbing else { return }   // stale task landing after release
         guard let coord = applySeek(progress: progress) else { return }
-        let now = ContinuousClock.now
+        let now = monotonicTime.now
         if let last = lastScrubEmit, now - last < timing.scrubEmitInterval { return }
         lastScrubEmit = now
         emit(coord)
@@ -321,6 +332,12 @@ actor SimulationActor {
     var isJoystickActive: Bool { joy.isActive }
     var isPlaybackIdle: Bool { nav.playbackState == .idle }
 
+    #if DEBUG
+    var tuningForTesting: (baseSpeed: Double, noiseSigma: Double, loopMode: NavigationEngine.LoopMode, loopCount: Int) {
+        (nav.baseSpeedForTesting, noise.sigmaMeters, nav.loopMode, nav.loopCount)
+    }
+    #endif
+
     // The integrator's authoritative position. The bridge's simulatedCoordinate
     // lags until the next emit, so tests asserting on play()'s integrator
     // reset need the direct read.
@@ -354,22 +371,25 @@ actor SimulationActor {
     // MARK: - Recording
 
     func startRecording() async {
-        guard !isRecordingActive else { return }
-        isRecordingActive = true
-        pendingPointCount = 0
-        let recorder = recorderRef
-        await MainActor.run { recorder.start() }
+        recordingCapture.start()
         await pushSnapshotNow()
     }
 
-    func stopRecording() async throws -> URL? {
-        guard isRecordingActive else { return nil }
-        isRecordingActive = false
-        pendingPointCount = 0
-        let recorder = recorderRef
-        let url = try await MainActor.run { try recorder.stop() }
+    func stopRecording() async -> RecordingCapture.Draft? {
+        let draft = recordingCapture.stop()
         await pushSnapshotNow()
-        return url
+        return draft
+    }
+
+    func discardRecording() async {
+        recordingCapture.discard()
+        await pushSnapshotNow()
+    }
+
+    // Read-only projection used by lifecycle/reconnect code and tests. The
+    // capture remains the sole owner of the active flag, buffer, and count.
+    func recordingStatus() -> RecordingCapture.Status {
+        recordingCapture.status
     }
 
     // MARK: - Loops
@@ -377,13 +397,16 @@ actor SimulationActor {
     private func startAggregator() {
         aggregatorTask?.cancel()
         let timing = self.timing
-        aggregatorTask = Task { [weak self, timing] in
+        let clock = self.monotonicTime
+        aggregatorTask = Task { [weak self, timing, clock] in
             let dt = timing.aggregatorDeltaTime
             let interval = timing.aggregatorInterval
-            var nextTick = ContinuousClock.now
+            // Deadlines accumulate from the loop start rather than from each
+            // wake, so one late tick doesn't push every later tick back with it.
+            var nextTick = clock.now
             while !Task.isCancelled {
-                nextTick = nextTick.advanced(by: interval)
-                try? await Task.sleep(until: nextTick, clock: .continuous)
+                nextTick += interval
+                try? await clock.sleep(for: nextTick - clock.now)
                 await self?.aggregatorTick(dt: dt)
             }
         }
@@ -391,9 +414,10 @@ actor SimulationActor {
 
     private func startIdleJitter() {
         idleJitterTask?.cancel()
-        idleJitterTask = Task { [weak self] in
+        let clock = self.monotonicTime
+        idleJitterTask = Task { [weak self, clock] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await clock.sleep(for: .seconds(1))
                 await self?.idleJitterTick()
             }
         }
@@ -456,7 +480,7 @@ actor SimulationActor {
     }
 
     private func maybeCheckDeviation(pos: CLLocationCoordinate2D) async {
-        let now = ContinuousClock.now
+        let now = monotonicTime.now
         if let last = lastDeviationCheck, now - last < .milliseconds(200) {
             return
         }
@@ -493,11 +517,7 @@ actor SimulationActor {
         lastEmittedCoordinate = clean
         let noisy = noise.apply(to: clean)
         backend?.setLocationQuiet(latitude: noisy.latitude, longitude: noisy.longitude)
-        if isRecordingActive {
-            pendingPointCount &+= 1
-            let recorder = recorderRef
-            Task { @MainActor in recorder.append(clean) }
-        }
+        recordingCapture.append(clean)
     }
 
     private func makeSnapshot(routeDeviationMeters: Double) -> SimSnapshot {
@@ -511,8 +531,8 @@ actor SimulationActor {
             joystickIsActive: joy.isActive,
             joystickControllerName: joy.connectedControllerName,
             routeDeviationMeters: routeDeviationMeters,
-            recordingPointCount: pendingPointCount,
-            isRecording: isRecordingActive
+            recordingPointCount: recordingCapture.pointCount,
+            isRecording: recordingCapture.isActive
         )
     }
 
@@ -521,7 +541,7 @@ actor SimulationActor {
     // non-playing motion is capped at 10 Hz. The backend still gets every SETQ
     // tick because backend.setLocationQuiet is called from `emit`, not here.
     private func pushSnapshotThrottled(routeDeviationMeters: Double) async {
-        let now = ContinuousClock.now
+        let now = monotonicTime.now
         let interval = nav.playbackState == .playing
             ? timing.playbackSnapshotInterval
             : timing.activeSnapshotInterval
@@ -530,6 +550,7 @@ actor SimulationActor {
         lastDisplayPush = now
         bridge_routeDeviationMeters = routeDeviationMeters
         let snap = makeSnapshot(routeDeviationMeters: routeDeviationMeters)
+        snapshotObserver?(snap)
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }
@@ -538,8 +559,9 @@ actor SimulationActor {
     private func pushSnapshotNow(routeDeviationMeters: Double? = nil) async {
         let dev = routeDeviationMeters ?? bridge_routeDeviationMeters
         bridge_routeDeviationMeters = dev
-        lastDisplayPush = ContinuousClock.now
+        lastDisplayPush = monotonicTime.now
         let snap = makeSnapshot(routeDeviationMeters: dev)
+        snapshotObserver?(snap)
         let bridge = self.bridge
         Task { @MainActor in bridge.apply(snap) }
     }

@@ -26,6 +26,8 @@ struct ContentView: View {
 
 private struct SidebarView: View {
     @Environment(AppState.self) private var appState
+    @State private var showSaveRouteAlert = false
+    @State private var routeName = ""
     // The live log occupies space it rarely earns; start collapsed and remember
     // the user's choice across launches. (The full-log sheet stays the deep view.)
     @AppStorage("sidebarLogExpanded") private var logExpanded = false
@@ -61,6 +63,10 @@ private struct SidebarView: View {
                     Button("Disconnect") {
                         Task { await appState.disconnect() }
                     }
+                } else if appState.connectionStatus.isRecovering {
+                    // Auto-reconnect (epic 043): the same action surface, now
+                    // reading Cancel retry with the attempt shown beside it.
+                    ReconnectControls()
                 } else {
                     DevicePickerArea()
                     ConnectionButton()
@@ -74,7 +80,10 @@ private struct SidebarView: View {
             // Both sections drive the local red dot, with or without a device
             // attached (the device mirrors it once connected), so neither is
             // gated on connection.
-            RouteSection()
+            RouteSection {
+                routeName = ""
+                showSaveRouteAlert = true
+            }
             JoystickSection()
 
             if !appState.savedWaypoints.isEmpty || appState.simState.simulatedCoordinate != nil {
@@ -85,7 +94,7 @@ private struct SidebarView: View {
                 SavedRoutesSection()
             }
 
-            if !appState.recorder.recordings.isEmpty {
+            if !appState.recordingsLibrary.recordings.isEmpty {
                 RecordingsSection()
             }
 
@@ -111,6 +120,15 @@ private struct SidebarView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 280, ideal: 320)
+        .alert("Save Route", isPresented: $showSaveRouteAlert) {
+            TextField("Name", text: $routeName)
+            Button("Save") {
+                let name = routeName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                appState.saveCurrentRoute(name: name)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
 
@@ -118,6 +136,7 @@ private struct SidebarView: View {
 
 private struct RouteSection: View {
     @Environment(AppState.self) private var appState
+    let onSaveRoute: () -> Void
 
     var body: some View {
         @Bindable var appState = appState
@@ -205,29 +224,9 @@ private struct RouteSection: View {
                 LoopPicker()
                 PlaybackControls()
                 PlaybackProgress()
-                SaveCurrentRouteButton()
+                Button("Save Route…", action: onSaveRoute)
+                    .buttonStyle(.borderless)
             }
-        }
-    }
-}
-
-private struct SaveCurrentRouteButton: View {
-    @Environment(AppState.self) private var appState
-    @State private var showSaveAlert = false
-    @State private var name = ""
-
-    var body: some View {
-        Button("Save Route…") {
-            name = ""
-            showSaveAlert = true
-        }
-        .alert("Save Route", isPresented: $showSaveAlert) {
-            TextField("Name", text: $name)
-            Button("Save") {
-                guard !name.isEmpty else { return }
-                appState.saveCurrentRoute(name: name)
-            }
-            Button("Cancel", role: .cancel) {}
         }
     }
 }
@@ -627,18 +626,20 @@ private struct SavedLocationsSection: View {
 
     var body: some View {
         // Ungrouped waypoints sit under the main header, next to Save Current
-        // Location; each user-defined folder gets its own section below. Drag
-        // reorders within a section (.onMove); the row context menu moves an
-        // item between folders. (epic 029)
+        // Location; each user-defined folder gets its own section below. A
+        // stable-ID drop commits directly to the store; the row context menu
+        // remains the only way to move an item between folders. (epic 039)
         let ungrouped = appState.savedWaypoints.filter { $0.category == nil }
         let canSave = appState.simState.simulatedCoordinate != nil
         if !ungrouped.isEmpty || canSave {
             Section("Saved Locations") {
                 ForEach(ungrouped) { waypoint in
                     SavedLocationRow(waypoint: waypoint)
+                        .draggable(SavedItemDragPayload.waypoint(waypoint.id))
+                        .accessibilityIdentifier("saved-waypoint-\(waypoint.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveWaypoints(inCategory: nil, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    moveWaypoints(payloads, to: destination, in: ungrouped, category: nil)
                 }
 
                 if canSave {
@@ -662,12 +663,27 @@ private struct SavedLocationsSection: View {
             Section(category) {
                 ForEach(appState.savedWaypoints.filter { $0.category == category }) { waypoint in
                     SavedLocationRow(waypoint: waypoint)
+                        .draggable(SavedItemDragPayload.waypoint(waypoint.id))
+                        .accessibilityIdentifier("saved-waypoint-\(waypoint.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveWaypoints(inCategory: category, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    let waypoints = appState.savedWaypoints.filter { $0.category == category }
+                    moveWaypoints(payloads, to: destination, in: waypoints, category: category)
                 }
             }
         }
+    }
+
+    private func moveWaypoints(
+        _ payloads: [String],
+        to destination: Int,
+        in waypoints: [SavedWaypoint],
+        category: String?
+    ) {
+        let movingIDs = payloads.compactMap(SavedItemDragPayload.waypointID)
+        guard movingIDs.count == payloads.count else { return }
+        let destinationID = waypoints.indices.contains(destination) ? waypoints[destination].id : nil
+        appState.moveWaypoints(inCategory: category, movingIDs: movingIDs, before: destinationID)
     }
 }
 
@@ -802,9 +818,11 @@ private struct SavedRoutesSection: View {
             Section("Saved Routes") {
                 ForEach(ungrouped) { route in
                     SavedRouteRow(route: route)
+                        .draggable(SavedItemDragPayload.route(route.id))
+                        .accessibilityIdentifier("saved-route-\(route.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveRoutes(inCategory: nil, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    moveRoutes(payloads, to: destination, in: ungrouped, category: nil)
                 }
             }
         }
@@ -813,12 +831,27 @@ private struct SavedRoutesSection: View {
             Section(category) {
                 ForEach(appState.savedRoutes.routes.filter { $0.category == category }) { route in
                     SavedRouteRow(route: route)
+                        .draggable(SavedItemDragPayload.route(route.id))
+                        .accessibilityIdentifier("saved-route-\(route.id.uuidString)")
                 }
-                .onMove { source, destination in
-                    appState.moveRoutes(inCategory: category, fromOffsets: source, toOffset: destination)
+                .dropDestination(for: String.self) { payloads, destination in
+                    let routes = appState.savedRoutes.routes.filter { $0.category == category }
+                    moveRoutes(payloads, to: destination, in: routes, category: category)
                 }
             }
         }
+    }
+
+    private func moveRoutes(
+        _ payloads: [String],
+        to destination: Int,
+        in routes: [SavedRoute],
+        category: String?
+    ) {
+        let movingIDs = payloads.compactMap(SavedItemDragPayload.routeID)
+        guard movingIDs.count == payloads.count else { return }
+        let destinationID = routes.indices.contains(destination) ? routes[destination].id : nil
+        appState.moveRoutes(inCategory: category, movingIDs: movingIDs, before: destinationID)
     }
 }
 
@@ -909,7 +942,7 @@ private struct RecordingsSection: View {
 
     var body: some View {
         Section("Recordings") {
-            ForEach(appState.recorder.recordings) { session in
+            ForEach(appState.recordingsLibrary.recordings) { session in
                 RecordingRow(session: session)
             }
         }
@@ -917,7 +950,7 @@ private struct RecordingsSection: View {
 }
 
 private struct RecordingRow: View {
-    let session: RecorderService.Session
+    let session: RecordingsLibrary.Session
     @Environment(AppState.self) private var appState
     @State private var showSaveRoutePrompt = false
     @State private var routeName = ""
@@ -1486,6 +1519,37 @@ private struct ConnectionButton: View {
     }
 }
 
+// The action surface while auto-reconnect is running (epic 043). The attempt
+// count sits beside the control, so the user reaching to stop it sees which
+// attempt is running, and the button always names what pressing it will do:
+// Cancel retry while attempts are being scheduled, a disabled Cancelling…
+// while an already-running attempt is allowed to finish.
+private struct ReconnectControls: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        let status = appState.connectionStatus
+        let cancelling = status == .cancellingRetry
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(verbatim: status.recoveryText ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("connection.reconnectStatus")
+            }
+            Button {
+                appState.cancelRetry()
+            } label: {
+                Text(cancelling ? "Cancelling…" : "Cancel retry")
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(cancelling)
+            .accessibilityIdentifier("connection.cancelRetry")
+        }
+    }
+}
+
 // One row in the device switcher. Tap selects which device the control surface
 // and map planning target; a color swatch ties the row to that device's marker
 // and route on the map. Context menu disconnects this specific session or
@@ -1550,6 +1614,8 @@ private struct DeviceSwitcherRow: View {
                 : String(localized: "Disconnected")
         case .connecting: return String(localized: "Connecting…")
         case .connected: return String(localized: "Connected")
+        case .reconnecting, .cancellingRetry:
+            return session.connectionStatus.recoveryText ?? ""
         case .error(let message): return String(localized: "Error: \(message)")
         }
     }
@@ -2125,6 +2191,8 @@ private struct MapArea: View {
         switch appState.connectionStatus {
         case .connecting:
             return String(localized: "Connecting…")
+        case .reconnecting, .cancellingRetry:
+            return appState.connectionStatus.recoveryText ?? ""
         case .error:
             return String(localized: "Connection error — check sidebar")
         case .connected, .disconnected:
@@ -2158,7 +2226,7 @@ private enum MapCameraPersistence {
     private static let defaultSpan = MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
 
     static func loadRegion() -> MKCoordinateRegion {
-        let defaults = UserDefaults.standard
+        let defaults = AppProcessConfiguration.current.defaults
         guard defaults.object(forKey: centerLatKey) != nil else {
             return MKCoordinateRegion(center: defaultCenter, span: defaultSpan)
         }
@@ -2174,7 +2242,7 @@ private enum MapCameraPersistence {
     }
 
     static func save(region: MKCoordinateRegion) {
-        let defaults = UserDefaults.standard
+        let defaults = AppProcessConfiguration.current.defaults
         defaults.set(region.center.latitude, forKey: centerLatKey)
         defaults.set(region.center.longitude, forKey: centerLonKey)
         defaults.set(region.span.latitudeDelta, forKey: spanLatKey)

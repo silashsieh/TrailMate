@@ -4,12 +4,21 @@ import AppKit
 @main
 struct TrailMateApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var appState = AppState()
+    @State private var appState: AppState
     @State private var updaterController = UpdaterController()
 
     // Menu bar item visibility (epic 021). Default true; persisted so the menu
     // bar presence survives relaunch. Bound to MenuBarExtra's isInserted.
-    @AppStorage("showMenuBarItem") private var showMenuBarItem = true
+    @AppStorage("showMenuBarItem", store: AppProcessConfiguration.current.defaults)
+    private var showMenuBarItem = true
+
+    init() {
+        let configuration = AppProcessConfiguration.current
+        _appState = State(initialValue: AppState(
+            defaults: configuration.defaults,
+            runtimePaths: configuration.runtimePaths
+        ))
+    }
 
     var body: some Scene {
         // A single reopenable window (epic 021) rather than a WindowGroup that
@@ -18,6 +27,7 @@ struct TrailMateApp: App {
         Window("TrailMate", id: "main") {
             ContentView()
                 .environment(appState)
+                .defaultAppStorage(appState.defaults)
                 .modifier(MainWindowConfigurator(delegate: delegate, appState: appState))
         }
         .defaultSize(width: 1100, height: 700)
@@ -34,6 +44,7 @@ struct TrailMateApp: App {
         Settings {
             SettingsView(updaterController: updaterController)
                 .environment(appState)
+                .defaultAppStorage(appState.defaults)
         }
 
         // Menu bar presence (epic 021). .menu style = plain dropdown. The
@@ -44,6 +55,7 @@ struct TrailMateApp: App {
         MenuBarExtra("TrailMate", systemImage: "location.fill", isInserted: $showMenuBarItem) {
             MenuBarStatusView()
                 .environment(appState)
+                .defaultAppStorage(appState.defaults)
         }
         .menuBarExtraStyle(.menu)
     }
@@ -95,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // @AppStorage("showMenuBarItem") defaults to true and the Dock toggle
         // defaults to "hide when window closed" (Ollama-style accessory app);
         // mirror those here so UserDefaults reads agree before any write.
-        UserDefaults.standard.register(defaults: [
+        AppProcessConfiguration.current.defaults.register(defaults: [
             Self.showMenuBarItemKey: true,
             Self.hideDockWhenWindowClosedKey: true,
         ])
@@ -148,21 +160,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // unreachable: if the menu bar item is hidden we force .regular regardless
     // of the Dock preference, so there is always a Dock icon OR a menu bar item.
     func applyActivationPolicy(windowVisible: Bool) {
-        let menuBarShown = UserDefaults.standard.bool(forKey: Self.showMenuBarItemKey)
-        let hideDockWhenClosed = UserDefaults.standard.bool(forKey: Self.hideDockWhenWindowClosedKey)
+        let defaults = AppProcessConfiguration.current.defaults
+        let menuBarShown = defaults.bool(forKey: Self.showMenuBarItemKey)
+        let hideDockWhenClosed = defaults.bool(forKey: Self.hideDockWhenWindowClosedKey)
 
-        let policy: NSApplication.ActivationPolicy
-        if windowVisible {
-            policy = .regular
-        } else if !menuBarShown {
-            // No window and no menu bar item → forcing .accessory would hide
-            // the Dock icon too and strand the app. Keep the Dock icon.
-            policy = .regular
-        } else if hideDockWhenClosed {
-            policy = .accessory
-        } else {
-            policy = .regular
-        }
+        let decision = ActivationPolicyDecision.decide(
+            windowVisible: windowVisible,
+            menuBarShown: menuBarShown,
+            hideDockWhenClosed: hideDockWhenClosed
+        )
+        let policy: NSApplication.ActivationPolicy = decision == .regular ? .regular : .accessory
 
         if NSApp.activationPolicy() != policy {
             NSApp.setActivationPolicy(policy)

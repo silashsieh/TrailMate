@@ -21,14 +21,56 @@ protocol SimulationBackend: AnyObject, Sendable {
 }
 
 enum SimulationBackendEvent: Sendable {
+    // A backend publishes exactly one loss event for a live connection. The
+    // reason is diagnostic; recovery policy belongs to DeviceSession (and,
+    // for automatic retries, epic 043), not to the backend.
+    case connectionLost(SimulationBackendFailure)
+}
+
+nonisolated enum SimulationBackendFailure: Equatable, Sendable {
+    case brokenPipe
+    case endOfFile
     case unexpectedExit(status: Int32, reason: ExitReason)
     case tunnelDown(line: String)
+    case writeFailed(errno: Int32)
+
+    var statusMessage: String {
+        switch self {
+        case .brokenPipe, .endOfFile:
+            "Tunnel down"
+        case .unexpectedExit(let status, let reason):
+            switch (status, reason) {
+            case (0, _):       "Daemon exited"
+            case (_, .signal): "Daemon killed (signal)"
+            default:           "Daemon crashed (exit \(status))"
+            }
+        case .tunnelDown:
+            "Tunnel down"
+        case .writeFailed(let code):
+            "Daemon write failed (errno \(code))"
+        }
+    }
+
+    var logMessage: String {
+        switch self {
+        case .brokenPipe:
+            "Tunnel down: daemon input closed (EPIPE)"
+        case .endOfFile:
+            "Tunnel down: daemon output closed (EOF)"
+        case .unexpectedExit:
+            statusMessage
+        case .tunnelDown(let line):
+            "Tunnel down: \(line)"
+        case .writeFailed(let code):
+            "Daemon write failed (errno \(code))"
+        }
+    }
 }
 
 // Process.TerminationReason isn't Sendable under strict concurrency and is
 // Darwin-specific; ExitReason is our own boundary type that future non-Process
 // backends (a remote agent over SSH, say) can also populate.
-enum ExitReason: Sendable {
+nonisolated enum ExitReason: Equatable, Sendable {
     case normal
     case signal
 }
@@ -59,7 +101,7 @@ final class SimulationStateBridge {
     // position at quit is saved unconditionally by the AppDelegate.
     @ObservationIgnored private var lastPositionSave: ContinuousClock.Instant?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = AppProcessConfiguration.current.defaults) {
         self.defaults = defaults
     }
 

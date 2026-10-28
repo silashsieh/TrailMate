@@ -54,11 +54,12 @@ sync at release cuts; the epic files remain authoritative.
   [039 — Fix saved-items drag-reorder](epics/039-fix-saved-items-reorder.md),
   [040 — Isolate recording per session (fix shared-recorder mixed traces)](epics/040-per-session-recording.md),
   [042 — Survive a closed daemon pipe (SIGPIPE kills the whole app)](epics/042-survive-closed-daemon-pipe.md),
-  [043 — Auto-reconnect after an abnormal disconnect](epics/043-auto-reconnect.md).
+  [043 — Auto-reconnect after an abnormal disconnect](epics/043-auto-reconnect.md)
+  (build and release plan: [v2.3.0 design](v2.3.0-design.md)).
   (023 and 014 moved out to v2.4.0 on 2026-09-03; 042 and 043 moved in from the backlog the same
   day. 043's "reverse the click-Connect design" gate was answered: auto-reconnect is armed by an
-  explicit Connect and disarmed only by an explicit Disconnect, retrying 10 × 5 s before settling
-  into the disconnected state.)
+  explicit Connect and disarmed by Disconnect or Cancel retry, with ten attempts each beginning
+  after a five-second post-failure delay.)
 - **Published stable (v2.2.0 — 2026-09-03) — Area serpentine and auto-update:**
   [030 — Area serpentine coverage routing](epics/030-area-coverage-routing.md) is done;
   [038 — In-app auto-update (Sparkle)](epics/038-in-app-auto-update.md) is done,

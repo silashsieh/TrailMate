@@ -26,6 +26,8 @@ struct ContentView: View {
 
 private struct SidebarView: View {
     @Environment(AppState.self) private var appState
+    @State private var showSaveRouteAlert = false
+    @State private var routeName = ""
     // The live log occupies space it rarely earns; start collapsed and remember
     // the user's choice across launches. (The full-log sheet stays the deep view.)
     @AppStorage("sidebarLogExpanded") private var logExpanded = false
@@ -78,7 +80,10 @@ private struct SidebarView: View {
             // Both sections drive the local red dot, with or without a device
             // attached (the device mirrors it once connected), so neither is
             // gated on connection.
-            RouteSection()
+            RouteSection {
+                routeName = ""
+                showSaveRouteAlert = true
+            }
             JoystickSection()
 
             if !appState.savedWaypoints.isEmpty || appState.simState.simulatedCoordinate != nil {
@@ -115,6 +120,15 @@ private struct SidebarView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 280, ideal: 320)
+        .alert("Save Route", isPresented: $showSaveRouteAlert) {
+            TextField("Name", text: $routeName)
+            Button("Save") {
+                let name = routeName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                appState.saveCurrentRoute(name: name)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
 
@@ -122,6 +136,7 @@ private struct SidebarView: View {
 
 private struct RouteSection: View {
     @Environment(AppState.self) private var appState
+    let onSaveRoute: () -> Void
 
     var body: some View {
         @Bindable var appState = appState
@@ -209,29 +224,9 @@ private struct RouteSection: View {
                 LoopPicker()
                 PlaybackControls()
                 PlaybackProgress()
-                SaveCurrentRouteButton()
+                Button("Save Route…", action: onSaveRoute)
+                    .buttonStyle(.borderless)
             }
-        }
-    }
-}
-
-private struct SaveCurrentRouteButton: View {
-    @Environment(AppState.self) private var appState
-    @State private var showSaveAlert = false
-    @State private var name = ""
-
-    var body: some View {
-        Button("Save Route…") {
-            name = ""
-            showSaveAlert = true
-        }
-        .alert("Save Route", isPresented: $showSaveAlert) {
-            TextField("Name", text: $name)
-            Button("Save") {
-                guard !name.isEmpty else { return }
-                appState.saveCurrentRoute(name: name)
-            }
-            Button("Cancel", role: .cancel) {}
         }
     }
 }

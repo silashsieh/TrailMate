@@ -448,6 +448,24 @@ final class TrailMateUITests: XCTestCase {
             .waitForExistence(timeout: 5))
         // Explicit Stop persists only to this test's temporary recording root.
         window.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop ·")).firstMatch.click()
+
+        // Saving after session switches and recording must still present the
+        // route-name dialog and persist the selected session's route.
+        window.buttons["Save Route…"].click()
+        let saveSheet = window.sheets.firstMatch
+        XCTAssertTrue(saveSheet.waitForExistence(timeout: 5))
+        let name = saveSheet.textFields.firstMatch
+        XCTAssertTrue(name.exists)
+        name.click()
+        name.typeText("Alpha route")
+        saveSheet.buttons["Save"].click()
+        XCTAssertTrue(staticText(withValue: "Alpha route", in: window)
+            .waitForExistence(timeout: 5))
+        let routeFiles = try FileManager.default.contentsOfDirectory(
+            at: isolatedRuntimeRoot.appendingPathComponent("routes"),
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(routeFiles.filter { $0.pathExtension == "json" && $0.lastPathComponent != "order.json" }.count, 1)
     }
 
     @MainActor

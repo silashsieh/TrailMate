@@ -2,7 +2,7 @@
 type: epic
 id: 043
 title: Automatically retry the connection after an abnormal disconnect
-status: open
+status: in-progress
 milestone: v2.3.0
 issue: 72
 opened: 2026-08-18
@@ -217,6 +217,11 @@ Disconnect never reconnects, and a re-authorization is never forced silently.
   present after the WP5 runs). Not caused by this epic; WP10 may want a cleanup policy.
 - **Menu bar shows the attempt wording only.** No Cancel retry quick action was added there —
   the epic places Cancel on the sidebar's Connect/Disconnect control. Revisit if wanted.
+- **Original request resolved in v2.3.0 (2026-10-30 owner confirmation).** The owner confirmed
+  that #72's abnormal-disconnect auto-reconnect request works in the public release, and the
+  issue was closed as completed. The full signed-app retry timing, cancellation, sleep/wake,
+  authorization, and two-device checks below remain unverified; keep this epic in progress until their
+  evidence is recorded.
 
 ## Acceptance criteria
 

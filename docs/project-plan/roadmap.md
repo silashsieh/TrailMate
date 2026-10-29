@@ -59,9 +59,9 @@ sync at release cuts; the epic files remain authoritative.
   [release](https://github.com/silashsieh/TrailMate/releases/tag/v2.3.0) is public, but these
   epics remain open or in progress until the signed-app manual matrix and production Sparkle upgrade
   are verified. [Release readiness](v2.3.0-release-readiness.md) records the owner's decision to
-  publish with those checks outstanding. The owner confirmed #68's original saved-location bug
-  resolved in the release; #72, #75, and the v2.3.0 milestone remain open for post-release
-  acceptance.
+  publish with those checks outstanding. The owner confirmed the original reports in #68,
+  #72, and #75 resolved in the release; all three issues are closed. The v2.3.0 milestone
+  remains open for post-release acceptance.
   (023 and 014 moved out to v2.4.0 on 2026-09-03; 042 and 043 moved in from the backlog the same
   day. 043's "reverse the click-Connect design" gate was answered: auto-reconnect is armed by an
   explicit Connect and disarmed by Disconnect or Cancel retry, with ten attempts each beginning

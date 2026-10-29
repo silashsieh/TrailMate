@@ -119,6 +119,12 @@ category round-trips, and app relaunch.
 
 ## Bugs / follow-ups found while building
 
+- **Original report resolved in v2.3.0 (2026-10-30 owner confirmation).** The owner confirmed
+  that #68's saved-location reorder failure is fixed in the public release, so the issue was
+  closed as completed. This confirms the reported symptom, not the full location-and-route
+  category/relaunch matrix below. Keep this epic in progress until F08 is executed against the
+  signed app and its remaining acceptance criteria are recorded.
+
 ## Acceptance criteria
 
 - [ ] Saved locations and saved routes both reorder without flicker in the ungrouped section and in

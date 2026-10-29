@@ -1,9 +1,11 @@
 # Testing Strategy
 
-**Status (2026-10-11):** The integrated unit suite passed (241 tests). The latest isolated UI run
-passed 16 tests and explicitly skipped the saved-route drag probe: XCUITest's synthetic gesture
-did not reach SwiftUI's drop destination on this macOS host. The real drag remains a mandatory
-manual check in F08. Signed-candidate manual and release checks remain pending.
+**Status (2026-10-29):** v2.3.0/build 13 is published. The release-branch PR and main push passed
+build, unit, and UI CI; the signed DMG and deployed appcast were verified. The earlier local
+integrated unit run passed 241 tests, and its isolated UI run passed 16 tests with one explicit
+saved-route drag skip. The signed-app F01–F20 matrix, including the real F08 drag, and the
+production Sparkle upgrade remain unverified after the owner's decision to publish. See
+[release readiness](v2.3.0-release-readiness.md) for the exact runs and accepted gap.
 
 ## Running the tests
 
@@ -162,9 +164,11 @@ The acceptance-level matrix remains in [[033-refresh-test-coverage]]. Its determ
 have dedicated unit or UI suites for multi-session ownership, AI dispatch and socket framing,
 connection/discovery failure, offline routing, saved-item persistence, recording isolation,
 simulation cadence, updater preferences, and menu/Dock decisions. The full integrated unit suite
-passed. The latest isolated UI run completed with 16 passes, one documented drag skip, and no
-failures; F08 remains a manual release gate. Earlier failed `.xcresult` bundles and the current
-result are recorded in [v2.3.0-release-readiness](v2.3.0-release-readiness.md).
+passed. The isolated UI run completed with 16 passes, one documented drag skip, and no failures.
+After the Save Route dialog fix, release-branch PR and main CI both passed build, unit, and UI jobs.
+The real F08 drag remains unverified; publication did not turn a skipped test into a manual pass.
+Earlier failed `.xcresult` bundles and release results are recorded in
+[v2.3.0-release-readiness](v2.3.0-release-readiness.md).
 
 Real USB/Wi-Fi discovery, tunneld authorization, device location delivery, live MapKit search and
 routing, sleep/wake, saved-item drag across every section, MenuBarExtra interaction, and the signed

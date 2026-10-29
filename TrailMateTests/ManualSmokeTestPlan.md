@@ -2,6 +2,12 @@
 
 Run this checklist after the integrated unit and UI suites pass. It covers only behavior that needs a real device, macOS system UI, live MapKit, visual inspection, or release signing. Deterministic cases in [Epic 033](../docs/project-plan/epics/033-refresh-test-coverage.md) remain automated release gates; a pass here does not waive a failing test.
 
+**Release outcome (2026-10-29):** v2.3.0/build 13 was published with the owner's authorization
+before this formal signed-app matrix and the production Sparkle upgrade were completed. Blank
+status cells below remain unverified. Record later results with their actual date and artifact;
+the [release-readiness record](../docs/project-plan/v2.3.0-release-readiness.md) holds the
+published artifact and CI evidence.
+
 ## Run record and prerequisites
 
 | Field | Record before starting |

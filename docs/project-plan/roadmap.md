@@ -49,13 +49,18 @@ sync at release cuts; the epic files remain authoritative.
   v2.3.0 on 2026-09-03: [023 — `trailmate` CLI + stdio MCP shim](epics/023-cli-mcp-shim.md),
   [014 — README screenshots & GIF demo](epics/014-readme-screenshots.md) (the screenshots follow
   the new map surface).
-- **v2.3.0 — Correctness, connection robustness & test coverage:**
+- **Published stable (v2.3.0 — 2026-10-29) — Correctness, connection robustness & test coverage; post-release acceptance open:**
   [033 — Refresh test & UI coverage for features shipped since v2.0.0](epics/033-refresh-test-coverage.md),
   [039 — Fix saved-items drag-reorder](epics/039-fix-saved-items-reorder.md),
   [040 — Isolate recording per session (fix shared-recorder mixed traces)](epics/040-per-session-recording.md),
   [042 — Survive a closed daemon pipe (SIGPIPE kills the whole app)](epics/042-survive-closed-daemon-pipe.md),
   [043 — Auto-reconnect after an abnormal disconnect](epics/043-auto-reconnect.md)
-  (build and release plan: [v2.3.0 design](v2.3.0-design.md)).
+  (build and release plan: [v2.3.0 design](v2.3.0-design.md)). The
+  [release](https://github.com/silashsieh/TrailMate/releases/tag/v2.3.0) is public, but these
+  epics remain open or in progress until the signed-app manual matrix and production Sparkle upgrade
+  are verified. [Release readiness](v2.3.0-release-readiness.md) records the owner's decision to
+  publish with those checks outstanding. GitHub issues #68, #72, and #75 and the v2.3.0 milestone
+  likewise remain open for post-release acceptance.
   (023 and 014 moved out to v2.4.0 on 2026-09-03; 042 and 043 moved in from the backlog the same
   day. 043's "reverse the click-Connect design" gate was answered: auto-reconnect is armed by an
   explicit Connect and disarmed by Disconnect or Cancel retry, with ten attempts each beginning

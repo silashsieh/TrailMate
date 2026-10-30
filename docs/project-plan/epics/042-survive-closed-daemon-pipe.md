@@ -2,7 +2,7 @@
 type: epic
 id: 042
 title: Survive a closed daemon pipe — turn SIGPIPE into a recoverable disconnect
-status: open
+status: in-progress
 milestone: v2.3.0
 issue: 75
 opened: 2026-08-18
@@ -91,6 +91,11 @@ alive** — menu bar, other sessions, and the command socket unaffected.
   recording; automatic retry remains [[043-auto-reconnect]].
 
 ## Bugs / follow-ups found while building
+
+- **Original report resolved in v2.3.0 (2026-10-30 owner confirmation).** The owner confirmed
+  that #75's app-terminating SIGPIPE defect is fixed in the public release, and the issue was
+  closed as completed. The signed-app closed-pipe, two-device, menu-bar, and AI-socket checks
+  below remain unverified; keep this epic in progress until their evidence is recorded.
 
 ## Acceptance criteria
 
